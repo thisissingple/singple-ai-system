@@ -517,8 +517,8 @@ export class GoogleSheetsService {
       let syncResult: any = null;
       if (worksheet.supabaseTable) {
         console.log(`📊 Syncing worksheet "${worksheet.worksheetName}" to Supabase table: ${worksheet.supabaseTable}`);
-        const { syncWorksheetToSupabase } = await import('./sheet-sync-service');
-        syncResult = await syncWorksheetToSupabase(worksheet, headers, dataRows);
+        // Use internal method instead of importing from legacy service
+        syncResult = await this.syncWorksheetToSupabase(worksheet, headers, dataRows);
         console.log(`✅ Sync result: ${syncResult.insertedCount} inserted, ${syncResult.invalidCount} invalid`);
         if (syncResult.errors.length > 0) {
           console.error(`⚠️  Sync errors:`, syncResult.errors);
