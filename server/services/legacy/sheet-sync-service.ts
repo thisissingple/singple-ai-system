@@ -5,8 +5,8 @@
  * 流程：Extract → Transform → Load
  */
 
-import { transformRowData, validateRequiredFields, detectMissingMappings, getFieldMapping, type MissingFieldInfo } from '../../configs/sheet-field-mappings';
-import { getSupabaseClient, isSupabaseAvailable } from './supabase-client';
+import { transformRowData, validateRequiredFields, detectMissingMappings, getFieldMapping, type MissingFieldInfo } from '../../configs/sheet-field-mappings.ts';
+import { getSupabaseClient, isSupabaseAvailable } from '../supabase-client';
 import type { Worksheet } from '../../shared/schema';
 
 export interface InvalidRecord {
