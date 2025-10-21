@@ -1,0 +1,1435 @@
+/**
+ * Total Report Service
+ * 負責整合 Google Sheets 資料，產生數據總報表
+ */
+
+import { storage } from '../legacy/storage';
+import { subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, format, eachDayOfInterval, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
+import { findField, extractStandardFields } from './field-mapping';
+import { resolveField, parseDateField, parseNumberField, FIELD_ALIASES } from './field-mapping-v2';
+import { supabaseReportRepository, type SupabaseDataRow } from './supabase-report-repository';
+import { directSqlRepository } from './direct-sql-repository';
+import { calculateAllKPIs } from '../kpi-calculator';
+import { buildPermissionFilter } from '../permission-filter-service';
+import { createPool, queryDatabase } from '../pg-client';
+
+export type PeriodType = 'daily' | 'weekly' | 'monthly' | 'day' | 'week' | 'month' | 'custom';
+
+export interface TotalReportData {
+  mode: 'mock' | 'live';
+  period: PeriodType;
+  dateRange: {
+    start: string;
+    end: string;
+  };
+  warnings?: string[];
+  summaryMetrics: {
+    conversionRate: number;
+    avgConversionTime: number;
+    trialCompletionRate: number;
+    pendingStudents: number;
+    potentialRevenue: number;
+    totalTrials: number;
+    totalConversions: number;
+  };
+  trendData: Array<{
+    date: string;
+    trials: number;
+    conversions: number;
+    revenue: number;
+    contactRate?: number;
+  }>;
+  funnelData: Array<{
+    stage: string;
+    value: number;
+    fill: string;
+  }>;
+  categoryBreakdown: Array<{
+    name: string;
+    value: number;
+    percentage: number;
+  }>;
+  teacherInsights: Array<{
+    teacherId: string;
+    teacherName: string;
+    classCount: number;
+    conversionRate: number;
+    avgSatisfaction: number;
+    totalRevenue: number;
+    aiSummary: string;
+    studentCount: number;
+  }>;
+  studentInsights: Array<{
+    studentId: string;
+    studentName: string;
+    email: string;
+    classDate: string;
+    teacherName: string;
+    status: 'pending' | 'contacted' | 'converted' | 'lost';
+    intentScore: number;
+    recommendedAction: string;
+    lastContactDate?: string;
+    audioTranscriptUrl?: string;
+    aiNotes?: string;
+    dealAmount?: number;
+  }>;
+  aiSuggestions: {
+    daily: string[];
+    weekly: string[];
+    monthly: string[];
+    audioInsights?: string[];
+  };
+  rawData: Array<{
+    id: string;
+    data: Record<string, any>;
+    source: string;
+    lastUpdated: string;
+  }>;
+  dataSourceMeta?: {
+    trialClassAttendance?: { rows: number; lastSync: string | null };
+    trialClassPurchase?: { rows: number; lastSync: string | null };
+    eodsForClosers?: { rows: number; lastSync: string | null };
+  };
+  filtersApplied?: {
+    period: PeriodType;
+    startDate: string;
+    endDate: string;
+  };
+}
+
+export interface GenerateTotalReportRequest {
+  period: PeriodType;
+  baseDate?: string; // ISO date string
+  startDate?: string; // For custom period
+  endDate?: string; // For custom period
+  includedSources?: string[]; // Optional filter for data sources
+  userId?: string; // 用戶 ID（用於權限過濾）
+}
+
+export class TotalReportService {
+  /**
+   * 產生總報表
+   */
+  async generateReport(request: GenerateTotalReportRequest): Promise<TotalReportData | null> {
+    const baseDate = request.baseDate ? new Date(request.baseDate) : new Date();
+    const startDate = request.startDate ? new Date(request.startDate) : undefined;
+    const endDate = request.endDate ? new Date(request.endDate) : undefined;
+    const dateRange = this.getDateRange(request.period, baseDate, startDate, endDate);
+    const warnings: string[] = [];
+
+    try {
+      // 統一資料取得（Supabase 優先 → Storage fallback）
+      const { attendanceData, purchaseData, eodsData, dataSource } = await this.fetchRawData(dateRange, warnings, request.userId);
+
+      if (attendanceData.length === 0 && purchaseData.length === 0 && eodsData.length === 0) {
+        console.log('無資料來源，回傳 null');
+        return null;
+      }
+
+      // 為了相容性，保留 sheet 資訊（用於 dataSourceMeta）
+      let trialAttendanceSheet: any = null;
+      let trialPurchaseSheet: any = null;
+      let eodsSheet: any = null;
+
+      if (dataSource === 'storage') {
+        const spreadsheets = await storage.listSpreadsheets();
+        trialAttendanceSheet = spreadsheets.find(s =>
+          s.name.includes('體驗課上課記錄') || s.name.includes('上課打卡')
+        );
+        trialPurchaseSheet = spreadsheets.find(s =>
+          s.name.includes('體驗課購買記錄') || s.name.includes('體驗課學員名單')
+        );
+        eodsSheet = spreadsheets.find(s =>
+          s.name.includes('EODs for Closers') || s.name.includes('升高階學員')
+        );
+      }
+
+      // 計算各項指標（傳入 warnings）
+      const summaryMetrics = await this.calculateSummaryMetrics(
+        attendanceData,
+        purchaseData,
+        eodsData,
+        warnings
+      );
+
+      const teacherInsights = this.calculateTeacherInsights(
+        attendanceData,
+        purchaseData,
+        eodsData,
+        warnings
+      );
+
+      const studentInsights = this.calculateStudentInsights(
+        attendanceData,
+        purchaseData,
+        eodsData,
+        warnings
+      );
+
+      const funnelData = this.calculateFunnelData(purchaseData);
+
+      const categoryBreakdown = this.calculateCategoryBreakdown(purchaseData);
+
+      const trendData = this.calculateTrendData(
+        request.period,
+        dateRange,
+        attendanceData,
+        purchaseData
+      );
+
+      const aiSuggestions = this.generateAISuggestions(
+        summaryMetrics,
+        teacherInsights,
+        studentInsights,
+        request.period
+      );
+
+      // 整理 rawData
+      const rawData = [
+        ...attendanceData.map(d => ({
+          id: d.id,
+          data: d.data,
+          source: '體驗課上課記錄表',
+          lastUpdated: d.lastUpdated?.toISOString() || new Date().toISOString(),
+        })),
+        ...purchaseData.map(d => ({
+          id: d.id,
+          data: d.data,
+          source: '體驗課購買記錄表',
+          lastUpdated: d.lastUpdated?.toISOString() || new Date().toISOString(),
+        })),
+        ...eodsData.map(d => ({
+          id: d.id,
+          data: d.data,
+          source: 'EODs for Closers',
+          lastUpdated: d.lastUpdated?.toISOString() || new Date().toISOString(),
+        })),
+      ];
+
+      return {
+        mode: 'live',
+        period: request.period,
+        dateRange,
+        warnings: warnings.length > 0 ? warnings : undefined,
+        summaryMetrics,
+        trendData,
+        funnelData,
+        categoryBreakdown,
+        teacherInsights,
+        studentInsights,
+        aiSuggestions,
+        rawData,
+        dataSourceMeta: {
+          trialClassAttendance: {
+            rows: attendanceData.length,
+            lastSync: trialAttendanceSheet?.lastSyncAt?.toISOString() || null,
+          },
+          trialClassPurchase: {
+            rows: purchaseData.length,
+            lastSync: trialPurchaseSheet?.lastSyncAt?.toISOString() || null,
+          },
+          eodsForClosers: {
+            rows: eodsData.length,
+            lastSync: eodsSheet?.lastSyncAt?.toISOString() || null,
+          },
+        },
+        filtersApplied: {
+          period: request.period,
+          startDate: dateRange.start,
+          endDate: dateRange.end,
+        },
+      };
+    } catch (error) {
+      console.error('產生總報表失敗:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 統一資料取得入口（Supabase 優先 → Storage fallback）（公開 helper）
+   */
+  public async fetchRawData(dateRange: { start: string; end: string }, warnings: string[], userId?: string): Promise<{
+    attendanceData: any[];
+    purchaseData: any[];
+    eodsData: any[];
+    dataSource: 'supabase' | 'storage';
+  }> {
+    // 優先使用直接 SQL 查詢（繞過 PostgREST schema cache 問題）
+    if (directSqlRepository.isAvailable()) {
+      try {
+        console.log('📊 Fetching data from Supabase (Direct SQL)...');
+        const [supabaseAttendance, supabasePurchases, supabaseDeals] = await Promise.all([
+          directSqlRepository.getAttendance(dateRange),
+          directSqlRepository.getPurchases(dateRange),
+          directSqlRepository.getDeals(dateRange),
+        ]);
+
+        const totalRecords = supabaseAttendance.length + supabasePurchases.length + supabaseDeals.length;
+        console.log(`✓ Supabase data: ${supabaseAttendance.length} attendance, ${supabasePurchases.length} purchases, ${supabaseDeals.length} deals`);
+
+        if (totalRecords > 0) {
+          // 轉換為內部格式
+          let attendanceData = this.convertSupabaseToInternalFormat(supabaseAttendance);
+          let purchaseData = this.convertSupabaseToInternalFormat(supabasePurchases);
+          let eodsData = this.convertSupabaseToInternalFormat(supabaseDeals);
+
+          // 如果有 userId，進行權限過濾
+          if (userId) {
+            attendanceData = await this.filterDataByPermission(attendanceData, userId, 'trial_class_attendance');
+            purchaseData = await this.filterDataByPermission(purchaseData, userId, 'trial_class_purchases');
+            eodsData = await this.filterDataByPermission(eodsData, userId, 'telemarketing_calls');
+          }
+
+          warnings.push(`使用 Supabase 資料來源（過濾後：${attendanceData.length + purchaseData.length + eodsData.length} 筆記錄）`);
+          return {
+            attendanceData,
+            purchaseData,
+            eodsData,
+            dataSource: 'supabase',
+          };
+        } else {
+          console.warn('⚠️  Supabase returned no data, falling back to storage');
+          warnings.push('Supabase 查詢成功但無資料，fallback 至 local storage');
+        }
+      } catch (error) {
+        console.error('❌ Supabase query failed:', error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        warnings.push(`Supabase 查詢失敗（${errorMsg}），fallback 至 local storage`);
+      }
+    } else {
+      console.log('ℹ️  Supabase not available, using local storage');
+      warnings.push('Supabase 未設定（環境變數缺失），使用 local storage');
+    }
+
+    // Fallback to storage
+    console.log('📁 Fetching data from local storage...');
+    const spreadsheets = await storage.listSpreadsheets();
+
+    if (spreadsheets.length === 0) {
+      return {
+        attendanceData: [],
+        purchaseData: [],
+        eodsData: [],
+        dataSource: 'storage',
+      };
+    }
+
+    const trialAttendanceSheet = spreadsheets.find(s =>
+      s.name.includes('體驗課上課記錄') || s.name.includes('上課打卡')
+    );
+    const trialPurchaseSheet = spreadsheets.find(s =>
+      s.name.includes('體驗課購買記錄') || s.name.includes('體驗課學員名單')
+    );
+    const eodsSheet = spreadsheets.find(s =>
+      s.name.includes('EODs for Closers') || s.name.includes('升高階學員')
+    );
+
+    const [storageAttendance, storagePurchase, storageEods] = await Promise.all([
+      trialAttendanceSheet ? storage.getSheetData(trialAttendanceSheet.spreadsheetId) : Promise.resolve([]),
+      trialPurchaseSheet ? storage.getSheetData(trialPurchaseSheet.spreadsheetId) : Promise.resolve([]),
+      eodsSheet ? storage.getSheetData(eodsSheet.spreadsheetId) : Promise.resolve([]),
+    ]);
+
+    const attendanceData = this.filterDataByDateRange(storageAttendance, dateRange);
+    const purchaseData = this.filterDataByDateRange(storagePurchase, dateRange);
+    const eodsData = this.filterDataByDateRange(storageEods, dateRange);
+
+    console.log(`✓ Storage data: ${attendanceData.length} attendance, ${purchaseData.length} purchases, ${eodsData.length} deals`);
+
+    return {
+      attendanceData,
+      purchaseData,
+      eodsData,
+      dataSource: 'storage',
+    };
+  }
+
+  /**
+   * 計算日期範圍（公開 helper）
+   */
+  public getDateRange(period: PeriodType, baseDate: Date, startDate?: Date, endDate?: Date): { start: string; end: string } {
+    switch (period) {
+      case 'all':
+        // Return a very wide date range to include all data
+        return {
+          start: '1970-01-01',  // Unix epoch start
+          end: '2099-12-31',    // Far future date
+        };
+      case 'daily':
+      case 'day':
+        return {
+          start: format(baseDate, 'yyyy-MM-dd'),
+          end: format(baseDate, 'yyyy-MM-dd'),
+        };
+      case 'weekly':
+      case 'week':
+        return {
+          start: format(startOfWeek(baseDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+          end: format(endOfWeek(baseDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+        };
+      case 'monthly':
+      case 'month':
+        return {
+          start: format(startOfMonth(baseDate), 'yyyy-MM-dd'),
+          end: format(endOfMonth(baseDate), 'yyyy-MM-dd'),
+        };
+      case 'custom':
+        if (!startDate || !endDate) {
+          throw new Error('Custom period requires startDate and endDate');
+        }
+        return {
+          start: format(startDate, 'yyyy-MM-dd'),
+          end: format(endDate, 'yyyy-MM-dd'),
+        };
+      default:
+        // Default to current month if period is unrecognized
+        return {
+          start: format(startOfMonth(baseDate), 'yyyy-MM-dd'),
+          end: format(endOfMonth(baseDate), 'yyyy-MM-dd'),
+        };
+    }
+  }
+
+  /**
+   * 依日期範圍篩選資料
+   */
+  private filterDataByDateRange(data: any[], dateRange: { start: string; end: string }): any[] {
+    return data.filter(row => {
+      const dateFields = ['date', 'classDate', 'purchaseDate', 'createdAt', '日期', '上課日期', '購買日期'];
+      let rowDate: string | null = null;
+
+      for (const field of dateFields) {
+        if (row.data[field]) {
+          rowDate = this.normalizeDate(row.data[field]);
+          break;
+        }
+      }
+
+      if (!rowDate) return false;
+
+      return rowDate >= dateRange.start && rowDate <= dateRange.end;
+    });
+  }
+
+  /**
+   * 正規化日期格式
+   */
+  private normalizeDate(dateValue: any): string | null {
+    if (!dateValue) return null;
+
+    try {
+      const date = new Date(dateValue);
+      if (isNaN(date.getTime())) return null;
+      return format(date, 'yyyy-MM-dd');
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 計算總結指標（使用統一的 KPI Calculator）
+   */
+  private async calculateSummaryMetrics(
+    attendanceData: any[],
+    purchaseData: any[],
+    eodsData: any[],
+    warnings: string[]
+  ): Promise<TotalReportData['summaryMetrics']> {
+    // 使用新的 KPI Calculator（整合 Formula Engine）
+    const result = await calculateAllKPIs({
+      attendance: attendanceData,
+      purchases: purchaseData,
+      deals: eodsData,
+    });
+
+    // 合併 warnings
+    warnings.push(...result.warnings);
+
+    // 計算總學生數（購買記錄中的獨立 email 數量）
+    const uniqueStudents = new Set<string>();
+    purchaseData.forEach(row => {
+      const email = (
+        resolveField(row.data, 'studentEmail') ||
+        row.data?.學員信箱 ||
+        row.data?.email ||
+        ''
+      ).toLowerCase();
+      if (email) {
+        uniqueStudents.add(email);
+      }
+    });
+
+    return {
+      ...result.summaryMetrics,
+      totalStudents: uniqueStudents.size,
+    };
+  }
+
+  /**
+   * 計算教師數據（全新商業指標）
+   */
+  private calculateTeacherInsights(
+    attendanceData: any[],
+    purchaseData: any[],
+    eodsData: any[],
+    warnings: string[]
+  ): TotalReportData['teacherInsights'] {
+    const teacherMap = new Map<string, {
+      classCount: number;
+      students: Set<string>;
+      classDates: Date[];
+      convertedStudents: Set<string>;  // 已轉高學生
+      lostStudents: Set<string>;        // 未轉高學生
+      pendingStudents: Set<string>;     // 待跟進學生（體驗中+未開始）
+      highLevelDeals: Array<{ amount: number; date: Date; studentEmail: string }>;
+      conversionDays: number[];         // 轉換天數陣列
+    }>();
+
+    // Step 0: 建立學生 email → 教師名稱的對應表（從 attendance 建立）
+    const studentTeacherMap = new Map<string, string>();
+    let missingTeacherCount = 0;
+
+    // Step 1: 統計教師授課記錄，同時建立學生→教師對應
+    attendanceData.forEach(row => {
+      const teacher = resolveField(row.data, 'teacher');
+      const studentEmail = resolveField(row.data, 'studentEmail');
+      const classDateRaw = resolveField(row.data, 'classDate');
+      const classDate = parseDateField(classDateRaw);
+
+      if (!teacher) {
+        missingTeacherCount++;
+        return;
+      }
+
+      if (!teacherMap.has(teacher)) {
+        teacherMap.set(teacher, {
+          classCount: 0,
+          students: new Set(),
+          classDates: [],
+          convertedStudents: new Set(),
+          lostStudents: new Set(),
+          pendingStudents: new Set(),
+          highLevelDeals: [],
+          conversionDays: [],
+        });
+      }
+
+      const stats = teacherMap.get(teacher)!;
+      stats.classCount++;
+
+      if (studentEmail) {
+        const email = studentEmail.toLowerCase();
+        stats.students.add(email);
+        // 建立學生→教師對應（如果同一學生有多位教師，以最後一位為準）
+        studentTeacherMap.set(email, teacher);
+      }
+
+      if (classDate) stats.classDates.push(classDate);
+    });
+
+    if (missingTeacherCount > 0) {
+      warnings.push(`${missingTeacherCount} 筆上課記錄缺少教師姓名`);
+    }
+
+    // Step 2: 從購買記錄統計學生狀態（使用 studentTeacherMap 找到教師）
+    purchaseData.forEach(row => {
+      const studentEmail = resolveField(row.data, 'studentEmail');
+      const status = resolveField(row.data, 'status') || resolveField(row.data, 'currentStatus') || '';
+
+      if (!studentEmail) return;
+
+      const email = studentEmail.toLowerCase();
+      const teacher = studentTeacherMap.get(email);
+
+      if (!teacher || !teacherMap.has(teacher)) return;
+
+      const stats = teacherMap.get(teacher)!;
+
+      if (status === '已轉高') {
+        stats.convertedStudents.add(email);
+      } else if (status === '未轉高') {
+        stats.lostStudents.add(email);
+      } else if (status === '體驗中' || status === '未開始') {
+        stats.pendingStudents.add(email);
+      }
+    });
+
+    // Step 3: 從 EODs 統計高階方案實收金額（使用 studentTeacherMap 找到教師）
+    eodsData.forEach((row, idx) => {
+      const studentEmail = resolveField(row.data, 'studentEmail');
+      // 直接從 data 取值，因為 resolveField 可能無法處理中文欄位
+      const plan = (
+        row.data?.成交方案 ||
+        row.data?.deal_package ||
+        resolveField(row.data, 'dealPackage') ||
+        resolveField(row.data, 'courseType') ||
+        ''
+      );
+      const amountStr = (
+        row.data?.實收金額 ||
+        row.data?.actual_amount ||
+        resolveField(row.data, 'actualAmount') ||
+        resolveField(row.data, 'dealAmount') ||
+        '0'
+      );
+      const dealDateRaw = row.data?.成交日期 || resolveField(row.data, 'dealDate');
+      const dealDate = parseDateField(dealDateRaw);
+
+      if (!studentEmail) return;
+
+      const email = studentEmail.toLowerCase();
+      const teacher = studentTeacherMap.get(email);
+
+      if (!teacher || !teacherMap.has(teacher)) return;
+
+      // 只計算高階方案
+      if (!plan.includes('高階一對一') && !plan.includes('高音')) return;
+
+      const amount = parseFloat(amountStr.toString().replace(/[^0-9.]/g, '')) || 0;
+
+      if (amount > 0) {
+        const stats = teacherMap.get(teacher)!;
+        stats.highLevelDeals.push({
+          amount,
+          date: dealDate || new Date(),
+          studentEmail: email,
+        });
+      }
+    });
+
+    // Step 4: 計算轉換天數（從 attendance 到 EODs）
+    attendanceData.forEach(attRow => {
+      const teacher = resolveField(attRow.data, 'teacher');
+      const studentEmail = resolveField(attRow.data, 'studentEmail');
+      const attDateRaw = resolveField(attRow.data, 'classDate');
+      const attDate = parseDateField(attDateRaw);
+
+      if (!teacher || !studentEmail || !attDate || !teacherMap.has(teacher)) return;
+
+      const stats = teacherMap.get(teacher)!;
+      const email = studentEmail.toLowerCase();
+
+      // 找到該學生的成交記錄
+      const deal = stats.highLevelDeals.find(d => d.studentEmail === email);
+      if (deal && deal.date) {
+        const days = Math.floor((deal.date.getTime() - attDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (days >= 0 && days < 365) {  // 合理範圍內
+          stats.conversionDays.push(days);
+        }
+      }
+    });
+
+    // Step 5: 轉換為陣列並計算所有指標
+    const insights: TotalReportData['teacherInsights'] = [];
+    let index = 0;
+
+    teacherMap.forEach((stats, teacherName) => {
+      const studentCount = stats.students.size;
+      const convertedCount = stats.convertedStudents.size;
+      const lostCount = stats.lostStudents.size;
+      const pendingCount = stats.pendingStudents.size;
+      const completedCount = convertedCount + lostCount;
+
+      // 轉換率 = 已轉高 ÷ (已轉高 + 未轉高)
+      const conversionRate = completedCount > 0
+        ? Math.round((convertedCount / completedCount) * 10000) / 100
+        : 0;
+
+      // 實收金額 = 所有高階方案的總和
+      const totalRevenue = stats.highLevelDeals.reduce((sum, deal) => sum + deal.amount, 0);
+
+      // 平均客單價 = 實收金額 ÷ 成交學生數
+      const avgDealAmount = convertedCount > 0
+        ? Math.round(totalRevenue / convertedCount)
+        : 0;
+
+      // ROI效率 = 實收金額 ÷ 授課數
+      const revenuePerClass = stats.classCount > 0
+        ? Math.round(totalRevenue / stats.classCount)
+        : 0;
+
+      // 流失率 = 未轉高 ÷ (已轉高 + 未轉高)
+      const lostRate = completedCount > 0
+        ? Math.round((lostCount / completedCount) * 10000) / 100
+        : 0;
+
+      // 平均轉換天數
+      const avgConversionDays = stats.conversionDays.length > 0
+        ? Math.round(stats.conversionDays.reduce((sum, d) => sum + d, 0) / stats.conversionDays.length)
+        : 0;
+
+      // 最近一次上課日
+      const lastClassDate = stats.classDates.length > 0
+        ? format(new Date(Math.max(...stats.classDates.map(d => d.getTime()))), 'yyyy-MM-dd')
+        : null;
+
+      // 績效評分（0-100）：轉換率 40% + ROI效率 30% + 完課率 20% + 活躍度 10%
+      const conversionScore = Math.min(conversionRate / 50 * 40, 40);  // 50% 轉換率 = 滿分
+      const roiScore = Math.min(revenuePerClass / 30000 * 30, 30);      // 3萬/堂 = 滿分
+      const completionScore = Math.min((completedCount / studentCount) * 20, 20); // 100% 完課 = 滿分
+      const activityScore = lastClassDate ? 10 : 0;  // 有最近上課 = 滿分
+
+      const performanceScore = Math.round(conversionScore + roiScore + completionScore + activityScore);
+
+      // AI 建議
+      let aiSummary = `${teacherName} `;
+      if (performanceScore >= 80) aiSummary += '表現優異 ⭐⭐⭐';
+      else if (performanceScore >= 60) aiSummary += '表現良好 ⭐⭐';
+      else if (performanceScore >= 40) aiSummary += '表現尚可 ⭐';
+      else aiSummary += '需要關注';
+
+      if (pendingCount > 5) {
+        aiSummary += `，有 ${pendingCount} 位待跟進學生`;
+      }
+
+      insights.push({
+        teacherId: `teacher-${index++}`,
+        teacherName,
+        classCount: stats.classCount,
+        studentCount,
+        conversionRate,
+        totalRevenue,
+        avgDealAmount,
+        revenuePerClass,
+        pendingStudents: pendingCount,
+        lostStudents: lostCount,
+        lostRate,
+        avgConversionDays,
+        lastClassDate,
+        performanceScore,
+        aiSummary,
+      });
+    });
+
+    // 預設按轉換率排序
+    return insights.sort((a, b) => b.conversionRate - a.conversionRate);
+  }
+
+  /**
+   * 計算學生數據
+   */
+  private calculateStudentInsights(
+    attendanceData: any[],
+    purchaseData: any[],
+    eodsData: any[],
+    warnings: string[]
+  ): TotalReportData['studentInsights'] {
+    const insights: TotalReportData['studentInsights'] = [];
+    const studentMap = new Map<string, any>();
+    const studentsWithoutPurchase: string[] = []; // Track students in attendance but not in purchase
+
+    // Step 1: Build from purchase records (most complete info)
+    purchaseData.forEach((row, index) => {
+      const email = (
+        resolveField(row.data, 'studentEmail') ||
+        row.data?.學員信箱 ||
+        row.data?.email ||
+        ''
+      ).toLowerCase();
+
+      if (!email) return;
+
+      const name = resolveField(row.data, 'studentName') || row.data?.學員姓名 || '';
+      // 優先從頂層欄位讀取（direct-sql-repository 已提取）
+      const totalTrialClasses = row.trial_class_count || parseNumberField(row.data?.體驗堂數) || 0;
+      const remainingTrialClasses = row.remaining_classes || parseNumberField(row.data?.['剩餘堂數（自動計算）']) || 0;
+      const attendedClasses = row.attended_classes || (totalTrialClasses - remainingTrialClasses);
+      const currentStatus = row.status || row.data?.['目前狀態（自動計算）'] || '';
+      const packageName = row.plan || row.data?.成交方案 || row.data?.plan || '';
+      const purchaseDateRaw = row.purchase_date || row.data?.購買日期 || row.data?.purchaseDate || '';
+      const purchaseDate = parseDateField(purchaseDateRaw);
+
+      studentMap.set(email, {
+        studentId: `student-${index}`,
+        studentName: name,
+        email,
+        totalTrialClasses,
+        remainingTrialClasses,
+        attendedClasses,
+        currentStatus,
+        packageName,
+        purchaseDate: purchaseDate ? format(purchaseDate, 'yyyy-MM-dd') : undefined,
+        classDates: [] as Date[],
+        teacherName: '',
+        intentScore: 50,
+        hasPurchaseRecord: true,
+      });
+    });
+
+    // Step 2: Process attendance data (create students if not in purchase records)
+    let attendanceIndex = purchaseData.length;
+    attendanceData.forEach((row) => {
+      const email = (resolveField(row.data, 'studentEmail') || '').toLowerCase();
+      if (!email) return;
+
+      const name = resolveField(row.data, 'studentName') || '';
+      const teacher = resolveField(row.data, 'teacher') || '';
+      const classDateRaw = resolveField(row.data, 'classDate');
+      const classDate = parseDateField(classDateRaw);
+      const intentScoreRaw = parseNumberField(resolveField(row.data, 'intentScore'));
+
+      // Create student if not exists (from attendance only, no purchase record)
+      if (!studentMap.has(email)) {
+        studentsWithoutPurchase.push(`${name} (${email})`);
+        studentMap.set(email, {
+          studentId: `student-${attendanceIndex++}`,
+          studentName: name,
+          email,
+          totalTrialClasses: 0,
+          remainingTrialClasses: 0,
+          attendedClasses: 0,
+          currentStatus: '',
+          packageName: '',
+          purchaseDate: undefined,
+          classDates: [] as Date[],
+          teacherName: teacher,
+          intentScore: intentScoreRaw !== null && intentScoreRaw >= 0 && intentScoreRaw <= 100 ? intentScoreRaw : 50,
+          hasPurchaseRecord: false,
+        });
+      }
+
+      const student = studentMap.get(email)!;
+
+      // Collect class dates and track teacher with date
+      if (classDate) {
+        student.classDates.push(classDate);
+
+        // 記錄每次上課的教師和日期（用於找出最近一次的教師）
+        if (!student.teacherHistory) {
+          student.teacherHistory = [];
+        }
+        if (teacher) {
+          student.teacherHistory.push({ teacher, date: classDate });
+        }
+      }
+
+      // Update intent score if available
+      if (intentScoreRaw !== null && intentScoreRaw >= 0 && intentScoreRaw <= 100) {
+        student.intentScore = intentScoreRaw;
+      }
+    });
+
+    // Add warning if students found in attendance but not in purchase
+    if (studentsWithoutPurchase.length > 0) {
+      warnings.push(
+        `⚠️ 發現 ${studentsWithoutPurchase.length} 位學生有上課記錄但缺少購買記錄，請盡快處理：\n` +
+        studentsWithoutPurchase.slice(0, 10).join('\n') +
+        (studentsWithoutPurchase.length > 10 ? `\n...以及其他 ${studentsWithoutPurchase.length - 10} 位學生` : '')
+      );
+    }
+
+    // Step 3: Integrate EOD data (deal amounts)
+    // 累加每位學員「體驗課購買日期之後」的所有高階方案金額
+    studentMap.forEach((student) => {
+      let totalDealAmount = 0;
+      const purchaseDate = student.purchaseDate
+        ? parseDateField(student.purchaseDate)
+        : null;
+
+      eodsData.forEach((row) => {
+        const email = (resolveField(row.data, 'studentEmail') || '').toLowerCase();
+        if (email !== student.email) return;
+
+        // 取得成交日期和方案
+        const dealDateRaw = resolveField(row.data, 'dealDate') || row.data?.成交日期 || row.data?.deal_date;
+        const dealDate = parseDateField(dealDateRaw);
+        const plan = (
+          row.plan ||
+          row.data?.plan ||
+          row.data?.成交方案 ||
+          row.data?.方案名稱 ||
+          resolveField(row.data, 'plan') ||
+          ''
+        );
+
+        // 只計算：1) 體驗課購買日期之後的 2) 高階方案
+        const isAfterPurchase = !purchaseDate || !dealDate || dealDate >= purchaseDate;
+        const isHighLevelPlan = plan.includes('高階一對一') || plan.includes('高音');
+
+        if (isAfterPurchase && isHighLevelPlan) {
+          const amount = parseNumberField(resolveField(row.data, 'dealAmount'));
+          if (amount) {
+            totalDealAmount += amount;
+          }
+        }
+      });
+
+      if (totalDealAmount > 0) {
+        student.dealAmount = totalDealAmount;
+      }
+    });
+
+    // Step 4: Assemble final insights with calculated fields
+    studentMap.forEach((student) => {
+      // Calculate first and last class dates
+      student.classDates.sort((a: Date, b: Date) => a.getTime() - b.getTime());
+      const firstClassDate = student.classDates.length > 0
+        ? format(student.classDates[0], 'yyyy-MM-dd')
+        : student.purchaseDate || format(new Date(), 'yyyy-MM-dd');
+      const lastClassDate = student.classDates.length > 0
+        ? format(student.classDates[student.classDates.length - 1], 'yyyy-MM-dd')
+        : undefined;
+
+      // 從 teacherHistory 中找出最近一次上課的教師
+      if (student.teacherHistory && student.teacherHistory.length > 0) {
+        // 按日期排序，最近的在最後
+        student.teacherHistory.sort((a: any, b: any) => a.date.getTime() - b.date.getTime());
+        const latestTeacher = student.teacherHistory[student.teacherHistory.length - 1];
+        student.teacherName = latestTeacher.teacher;
+      }
+
+      // Map status: 未開始→pending, 體驗中→contacted, 未轉高→lost, 已轉高→converted
+      let mappedStatus: 'pending' | 'contacted' | 'converted' | 'lost' = 'pending';
+      if (student.currentStatus === '已轉高') {
+        mappedStatus = 'converted';
+      } else if (student.currentStatus === '未轉高') {
+        mappedStatus = 'lost';
+      } else if (student.currentStatus === '體驗中') {
+        mappedStatus = 'contacted';
+      } else if (student.currentStatus === '未開始') {
+        mappedStatus = 'pending';
+      }
+
+      // Adjust intent score based on status if not set from attendance
+      if (student.intentScore === 50) {
+        student.intentScore = mappedStatus === 'converted' ? 85
+          : mappedStatus === 'contacted' ? 70
+          : mappedStatus === 'lost' ? 30
+          : 50;
+      }
+
+      insights.push({
+        studentId: student.studentId,
+        studentName: student.studentName,
+        email: student.email,
+        classDate: firstClassDate,
+        teacherName: student.teacherName || '未知教師',
+        status: mappedStatus,
+        intentScore: student.intentScore,
+        recommendedAction: this.getRecommendedAction(mappedStatus, student.intentScore),
+        dealAmount: student.dealAmount,
+        totalTrialClasses: student.totalTrialClasses,
+        remainingTrialClasses: student.remainingTrialClasses,
+        attendedClasses: student.attendedClasses,
+        lastClassDate,
+        currentStatus: student.currentStatus,
+        packageName: student.packageName,
+        purchaseDate: student.purchaseDate,
+      });
+    });
+
+    if (insights.length < purchaseData.length) {
+      warnings.push(`${purchaseData.length - insights.length} 筆購買記錄缺少學員信箱`);
+    }
+
+    return insights;
+  }
+
+  /**
+   * 取得建議行動
+   */
+  private getRecommendedAction(status: string, intentScore: number): string {
+    if (status === 'converted') return '已成交，進行後續服務';
+    if (status === 'contacted') return '追蹤購買進度';
+    if (intentScore > 80) return '立即聯繫，高意願學員';
+    if (intentScore > 60) return '24小時內聯繫';
+    return '觀察意願，適時跟進';
+  }
+
+  /**
+   * 計算漏斗數據（基於學生狀態）
+   */
+  private calculateFunnelData(purchaseData: any[]): TotalReportData['funnelData'] {
+    // 統計各狀態的學生數
+    const statusCounts = {
+      未開始: 0,
+      體驗中: 0,
+      已轉高: 0,
+      未轉高: 0,
+    };
+
+    purchaseData.forEach(row => {
+      const status = resolveField(row.data, 'status') ||
+                     resolveField(row.data, 'currentStatus') ||
+                     '';
+
+      if (status === '未開始') statusCounts.未開始++;
+      else if (status === '體驗中') statusCounts.體驗中++;
+      else if (status === '已轉高') statusCounts.已轉高++;
+      else if (status === '未轉高') statusCounts.未轉高++;
+    });
+
+    return [
+      {
+        stage: '未開始',
+        value: statusCounts.未開始,
+        fill: 'hsl(var(--chart-1))'
+      },
+      {
+        stage: '體驗中',
+        value: statusCounts.體驗中,
+        fill: 'hsl(var(--chart-2))'
+      },
+      {
+        stage: '已轉高',
+        value: statusCounts.已轉高,
+        fill: 'hsl(var(--chart-3))',
+        lostStudents: statusCounts.未轉高  // 添加流失學生數
+      },
+    ];
+  }
+
+  /**
+   * 計算課程類別分佈
+   */
+  private calculateCategoryBreakdown(purchaseData: any[]): TotalReportData['categoryBreakdown'] {
+    const categoryMap = new Map<string, number>();
+    const total = purchaseData.length;
+
+    purchaseData.forEach(row => {
+      const category = row.data.courseType || row.data.plan || row.data['課程類型'] || '未分類';
+      categoryMap.set(category, (categoryMap.get(category) || 0) + 1);
+    });
+
+    const breakdown: TotalReportData['categoryBreakdown'] = [];
+    categoryMap.forEach((count, name) => {
+      breakdown.push({
+        name,
+        value: count,
+        percentage: Math.round((count / total) * 10000) / 100,
+      });
+    });
+
+    return breakdown.sort((a, b) => b.value - a.value);
+  }
+
+  /**
+   * 計算趨勢數據
+   */
+  private calculateTrendData(
+    period: PeriodType,
+    dateRange: { start: string; end: string },
+    attendanceData: any[],
+    purchaseData: any[]
+  ): TotalReportData['trendData'] {
+    const startDate = new Date(dateRange.start);
+    const endDate = new Date(dateRange.end);
+    const trendData: TotalReportData['trendData'] = [];
+
+    // 根據期間類型產生不同粒度的數據點
+    if (period === 'daily') {
+      // Daily: 按小時統計（簡化版：返回當日總計）
+      const dayData: Record<string, { trials: number; conversions: number; revenue: number }> = {};
+
+      attendanceData.forEach(row => {
+        const dateValue = parseDateField(resolveField(row.data, 'classDate'));
+        if (dateValue) {
+          const dateKey = format(dateValue, 'yyyy-MM-dd');
+          if (!dayData[dateKey]) {
+            dayData[dateKey] = { trials: 0, conversions: 0, revenue: 0 };
+          }
+          dayData[dateKey].trials++;
+        }
+      });
+
+      purchaseData.forEach(row => {
+        const dateValue = parseDateField(resolveField(row.data, 'purchaseDate')) ||
+                          parseDateField(resolveField(row.data, 'classDate'));
+        const revenueValue = parseNumberField(resolveField(row.data, 'dealAmount')) || 45000;
+
+        if (dateValue) {
+          const dateKey = format(dateValue, 'yyyy-MM-dd');
+          if (!dayData[dateKey]) {
+            dayData[dateKey] = { trials: 0, conversions: 0, revenue: 0 };
+          }
+          dayData[dateKey].conversions++;
+          dayData[dateKey].revenue += revenueValue;
+        }
+      });
+
+      Object.keys(dayData).sort().forEach(dateKey => {
+        const data = dayData[dateKey];
+        trendData.push({
+          date: dateKey,
+          trials: data.trials,
+          conversions: data.conversions,
+          revenue: data.revenue,
+          contactRate: data.trials > 0 ? (data.conversions / data.trials) * 100 : 0,
+        });
+      });
+    } else if (period === 'weekly') {
+      // Weekly: 按天統計
+      const days = eachDayOfInterval({ start: startDate, end: endDate });
+
+      days.forEach(day => {
+        const dayKey = format(day, 'yyyy-MM-dd');
+
+        const dayTrials = attendanceData.filter(row => {
+          const dateValue = parseDateField(resolveField(row.data, 'classDate'));
+          return dateValue && format(dateValue, 'yyyy-MM-dd') === dayKey;
+        }).length;
+
+        const dayPurchases = purchaseData.filter(row => {
+          const dateValue = parseDateField(resolveField(row.data, 'purchaseDate')) ||
+                            parseDateField(resolveField(row.data, 'classDate'));
+          return dateValue && format(dateValue, 'yyyy-MM-dd') === dayKey;
+        });
+
+        const dayRevenue = dayPurchases.reduce((sum, row) => {
+          const amount = parseNumberField(resolveField(row.data, 'dealAmount')) || 45000;
+          return sum + amount;
+        }, 0);
+
+        trendData.push({
+          date: dayKey,
+          trials: dayTrials,
+          conversions: dayPurchases.length,
+          revenue: dayRevenue,
+          contactRate: dayTrials > 0 ? (dayPurchases.length / dayTrials) * 100 : 0,
+        });
+      });
+    } else if (period === 'monthly') {
+      // Monthly: 按天統計
+      const days = eachDayOfInterval({ start: startDate, end: endDate });
+
+      days.forEach(day => {
+        const dayKey = format(day, 'yyyy-MM-dd');
+
+        const dayTrials = attendanceData.filter(row => {
+          const dateValue = parseDateField(resolveField(row.data, 'classDate'));
+          return dateValue && format(dateValue, 'yyyy-MM-dd') === dayKey;
+        }).length;
+
+        const dayPurchases = purchaseData.filter(row => {
+          const dateValue = parseDateField(resolveField(row.data, 'purchaseDate')) ||
+                            parseDateField(resolveField(row.data, 'classDate'));
+          return dateValue && format(dateValue, 'yyyy-MM-dd') === dayKey;
+        });
+
+        const dayRevenue = dayPurchases.reduce((sum, row) => {
+          const amount = parseNumberField(resolveField(row.data, 'dealAmount')) || 45000;
+          return sum + amount;
+        }, 0);
+
+        trendData.push({
+          date: dayKey,
+          trials: dayTrials,
+          conversions: dayPurchases.length,
+          revenue: dayRevenue,
+          contactRate: dayTrials > 0 ? (dayPurchases.length / dayTrials) * 100 : 0,
+        });
+      });
+    }
+
+    // 如果沒有任何數據，返回期間起始日的空數據點
+    if (trendData.length === 0) {
+      return [{
+        date: dateRange.start,
+        trials: 0,
+        conversions: 0,
+        revenue: 0,
+        contactRate: 0,
+      }];
+    }
+
+    return trendData;
+  }
+
+  /**
+   * 產生 AI 建議（根據 KPI 動態生成）
+   */
+  private generateAISuggestions(
+    metrics: TotalReportData['summaryMetrics'],
+    teachers: TotalReportData['teacherInsights'],
+    students: TotalReportData['studentInsights'],
+    period: PeriodType
+  ): TotalReportData['aiSuggestions'] {
+    const daily: string[] = [];
+    const weekly: string[] = [];
+    const monthly: string[] = [];
+
+    // ========================================
+    // Daily 建議（立即行動）
+    // ========================================
+    const highIntentStudents = students.filter(s => s.intentScore > 80 && s.status === 'pending');
+    const mediumIntentStudents = students.filter(s => s.intentScore > 60 && s.intentScore <= 80 && s.status === 'pending');
+    const contactedStudents = students.filter(s => s.status === 'contacted');
+
+    if (highIntentStudents.length > 0) {
+      daily.push(`🔥 緊急：${highIntentStudents.length} 位高意願學員待聯繫（意願分數 > 80）`);
+    }
+    if (mediumIntentStudents.length > 0) {
+      daily.push(`⚠️ 重要：${mediumIntentStudents.length} 位中意願學員建議 24 小時內聯繫`);
+    }
+    if (contactedStudents.length > 5) {
+      daily.push(`📞 追蹤：${contactedStudents.length} 位學員已聯繫，待確認成交狀態`);
+    }
+    if (metrics.totalTrials > 0 && metrics.totalConversions === 0) {
+      daily.push(`⚡ 注意：今日有 ${metrics.totalTrials} 位體驗課學員，但尚無成交記錄`);
+    }
+
+    // ========================================
+    // Weekly 建議（策略調整）
+    // ========================================
+    if (metrics.conversionRate < 15) {
+      weekly.push(`📉 轉換率 ${metrics.conversionRate.toFixed(1)}% 低於目標（15%），建議檢視聯繫話術與流程`);
+    } else if (metrics.conversionRate > 25) {
+      weekly.push(`📈 轉換率 ${metrics.conversionRate.toFixed(1)}% 表現優異，維持當前策略`);
+    }
+
+    if (metrics.avgConversionTime > 10) {
+      weekly.push(`⏰ 平均轉換時間 ${metrics.avgConversionTime} 天偏長，建議加強即時跟進`);
+    } else if (metrics.avgConversionTime < 5) {
+      weekly.push(`⚡ 平均轉換時間 ${metrics.avgConversionTime} 天，成交速度優秀`);
+    }
+
+    if (teachers.length > 0) {
+      const topTeacher = teachers[0];
+      const bottomTeacher = teachers[teachers.length - 1];
+      weekly.push(`🏆 ${topTeacher.teacherName} 表現最佳，轉換率 ${topTeacher.conversionRate.toFixed(1)}%（${topTeacher.classCount} 堂課）`);
+      if (teachers.length > 1 && bottomTeacher.conversionRate < 10) {
+        weekly.push(`📚 ${bottomTeacher.teacherName} 轉換率 ${bottomTeacher.conversionRate.toFixed(1)}%，建議安排培訓或觀摩`);
+      }
+    }
+
+    if (metrics.trialCompletionRate < 50) {
+      weekly.push(`⚠️ 體驗課完成率僅 ${metrics.trialCompletionRate.toFixed(1)}%，建議檢視課程吸引力`);
+    }
+
+    // ========================================
+    // Monthly 建議（長期規劃）
+    // ========================================
+    if (metrics.pendingStudents > 10) {
+      monthly.push(`💰 本月累積 ${metrics.pendingStudents} 位待追蹤學員，潛在收益 NT$ ${metrics.potentialRevenue.toLocaleString()}`);
+    }
+
+    if (metrics.totalTrials < 20) {
+      monthly.push(`📊 本月體驗課人數 ${metrics.totalTrials} 位偏低，建議加強招生活動`);
+    } else if (metrics.totalTrials > 50) {
+      monthly.push(`🎯 本月體驗課人數 ${metrics.totalTrials} 位，招生成效良好`);
+    }
+
+    if (metrics.totalConversions > 0) {
+      const avgRevenue = metrics.potentialRevenue / Math.max(1, metrics.pendingStudents);
+      monthly.push(`💵 平均客單價約 NT$ ${avgRevenue.toLocaleString()}，已成交 ${metrics.totalConversions} 位`);
+    }
+
+    // 整體評估
+    if (metrics.conversionRate > 20 && metrics.avgConversionTime < 7) {
+      monthly.push(`🎉 整體表現優秀！轉換率與速度都達標，建議擴大招生規模`);
+    } else if (metrics.conversionRate < 10 || metrics.avgConversionTime > 14) {
+      monthly.push(`🔍 建議深入分析流失原因：轉換率或轉換時間需要改善`);
+    }
+
+    return { daily, weekly, monthly };
+  }
+
+  /**
+   * Convert Supabase data to internal format
+   */
+  private convertSupabaseToInternalFormat(supabaseData: SupabaseDataRow[]): any[] {
+    return supabaseData.map(row => {
+      // Parse dealAmount from raw_data if not in normalized fields
+      let dealAmount = row.deal_amount;
+      if (!dealAmount && row.raw_data) {
+        const rawAmount = resolveField(row.raw_data, 'dealAmount');
+        dealAmount = parseNumberField(rawAmount) || undefined;
+      }
+
+      return {
+        id: row.id,
+        data: {
+          // Use normalized fields from Supabase
+          studentName: row.student_name,
+          studentEmail: row.student_email,
+          teacher: row.teacher_name || row.teacher_name,
+          teacherName: row.teacher_name,
+          classDate: row.class_date,
+          purchaseDate: row.purchase_date,
+          dealDate: row.deal_date,
+          courseType: row.course_type,
+          dealAmount: dealAmount,  // Use parsed amount
+          status: row.status,
+          intentScore: row.intent_score,
+          satisfaction: row.satisfaction,
+          attended: row.attended,
+          plan: row.plan,
+          // Include original raw_data for any additional fields
+          ...row.raw_data,
+        },
+        lastUpdated: new Date(row.synced_at),
+      };
+    });
+  }
+
+  /**
+   * 根據用戶權限過濾資料
+   */
+  private async filterDataByPermission(data: any[], userId: string, tableName: string): Promise<any[]> {
+    try {
+      // 開發模式跳過權限過濾
+      if (process.env.SKIP_AUTH === 'true') {
+        console.log(`[Permission Filter] SKIP_AUTH enabled - no filtering`);
+        return data;
+      }
+
+      // 取得使用者資訊（包含業務身份）
+      const userResult = await queryDatabase('SELECT id, role FROM users WHERE id = $1', [userId]);
+
+      if (userResult.rows.length === 0) {
+        console.warn(`User not found: ${userId}`);
+        return [];
+      }
+
+      const user = userResult.rows[0];
+      const userRole = user.role;
+
+      // 如果是 admin，看所有資料
+      if (userRole === 'admin' || userRole === 'super_admin') {
+        console.log(`[Permission Filter] Admin user ${userId} - no filtering`);
+        return data;
+      }
+
+      // 取得業務身份
+      const identitiesResult = await queryDatabase(`
+        SELECT identity_type, identity_code
+        FROM business_identities
+        WHERE user_id = $1 AND is_active = true
+      `, [userId]);
+
+      const identities: { [key: string]: string[] } = {};
+      identitiesResult.rows.forEach((row: any) => {
+        const type = row.identity_type;
+        if (!identities[type]) {
+          identities[type] = [];
+        }
+        identities[type].push(row.identity_code);
+      });
+
+      console.log(`[Permission Filter] User ${userId} role=${userRole}, identities:`, identities);
+
+      // 根據資料表類型進行過濾（需要 await，因為 matchTrialClassAttendance 是 async）
+      const filteredData: any[] = [];
+      for (const item of data) {
+        const itemData = item.data || item;
+        let matches = false;
+
+        switch (tableName) {
+          case 'trial_class_attendance':
+            matches = await this.matchTrialClassAttendance(itemData, userRole, identities, userId);
+            break;
+
+          case 'trial_class_purchases':
+            matches = this.matchTrialClassPurchases(itemData, userRole, identities, userId);
+            break;
+
+          case 'telemarketing_calls':
+            matches = this.matchTelemarketingCalls(itemData, userRole, identities, userId);
+            break;
+
+          default:
+            // 預設：只看自己創建的
+            matches = itemData.created_by === userId;
+        }
+
+        if (matches) {
+          filteredData.push(item);
+        }
+      }
+
+      console.log(`[Permission Filter] ${tableName}: ${data.length} -> ${filteredData.length} records`);
+      return filteredData;
+
+    } catch (error) {
+      console.error('Error filtering data by permission:', error);
+      // 發生錯誤時，為了安全起見，回傳空陣列
+      return [];
+    }
+  }
+
+  /**
+   * 檢查體驗課出席記錄是否符合權限
+   */
+  private async matchTrialClassAttendance(item: any, role: string, identities: any, userId: string): Promise<boolean> {
+    // Manager 看所有
+    if (role === 'manager') {
+      return true;
+    }
+
+    // Teacher 看自己的課
+    if (role === 'teacher' && identities.teacher) {
+      const teacherCode = item.teacher_code || item.teacherCode || item.raw_data?.teacher_code;
+
+      // 如果有 teacher_code，比對 teacher_code
+      if (teacherCode && identities.teacher.includes(teacherCode)) {
+        return true;
+      }
+
+      // 如果沒有 teacher_code，比對 teacher_name
+      const teacherName = item.teacher_name || item.teacherName || item.raw_data?.teacher_name || item.raw_data?.授課老師;
+      if (teacherName) {
+        // 取得該 teacher_name 對應的使用者
+        const userResult = await queryDatabase('SELECT id, first_name FROM users WHERE id = $1', [userId]);
+        if (userResult.rows.length > 0) {
+          const userName = userResult.rows[0].first_name;
+          if (teacherName.includes(userName)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    // Consultant 看自己的學生
+    if (role === 'consultant' && identities.consultant) {
+      const consultantCode = item.consultant_code || item.consultantCode || item.raw_data?.consultant_code;
+      return identities.consultant.includes(consultantCode);
+    }
+
+    return false;
+  }
+
+  /**
+   * 檢查購買記錄是否符合權限
+   */
+  private matchTrialClassPurchases(item: any, role: string, identities: any, userId: string): boolean {
+    // Manager 看所有
+    if (role === 'manager') {
+      return true;
+    }
+
+    // 這裡需要關聯到出席記錄來找到 teacher/consultant
+    // 簡化版本：目前購買記錄沒有直接的 teacher_code，先開放給所有人
+    // TODO: 需要 JOIN trial_class_attendance 來精確過濾
+    if (role === 'teacher' || role === 'consultant') {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * 檢查電訪記錄是否符合權限
+   */
+  private matchTelemarketingCalls(item: any, role: string, identities: any, userId: string): boolean {
+    // Manager 看所有
+    if (role === 'manager') {
+      return true;
+    }
+
+    // Consultant 看自己的電訪
+    if (role === 'consultant' && identities.consultant) {
+      const consultantCode = item.closer_code || item.closerCode;
+      return identities.consultant.includes(consultantCode);
+    }
+
+    // Setter 看自己的電訪
+    if (role === 'setter' && identities.setter) {
+      const setterCode = item.setter_code || item.setterCode;
+      return identities.setter.includes(setterCode);
+    }
+
+    return false;
+  }
+}
+
+export const totalReportService = new TotalReportService();

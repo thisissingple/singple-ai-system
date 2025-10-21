@@ -1,0 +1,40 @@
+[
+  {
+    "id": "87c2711ede1638fe4c0046b30922ae2730742e67",
+    "spreadsheetId": "1FZffolNcXjkZ-14vA3NVRdN7czm8E6JjdkGidn38LgM",
+    "worksheetName": "體驗課上課記錄表",
+    "gid": "110563615",
+    "range": "A1:G1000",
+    "isEnabled": true,
+    "headers": [
+      "姓名",
+      "email",
+      "上課日期",
+      "授課老師",
+      "是否已確認",
+      "未聯繫原因",
+      "體驗課文字檔"
+    ],
+    "rowCount": 50,
+    "lastSyncAt": "2025-10-04T05:35:14.096Z",
+    "createdAt": "2025-10-04T05:35:14.096Z"
+  },
+  {
+    "id": "012e0410dc3b00dcae9b2aafd64c4c9688e62183",
+    "spreadsheetId": "1FZffolNcXjkZ-14vA3NVRdN7czm8E6JjdkGidn38LgM",
+    "worksheetName": "體驗課購買記錄表",
+    "gid": "468254899",
+    "range": "A1:E1000",
+    "isEnabled": false,
+    "headers": [
+      "姓名",
+      "email",
+      "購買日期",
+      "課程類型",
+      "價格"
+    ],
+    "rowCount": 25,
+    "lastSyncAt": "2025-10-04T05:35:14.104Z",
+    "createdAt": "2025-10-04T05:35:14.104Z"
+  }
+]

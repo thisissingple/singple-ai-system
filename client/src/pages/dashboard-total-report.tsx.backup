@@ -1,0 +1,479 @@
+/**
+ * Total Report Dashboard Page
+ * Main page integrating all total report components
+ * Provides comprehensive overview of trial class performance and conversion metrics
+ */
+
+import { useState, useEffect, useMemo } from 'react';
+import { format } from 'date-fns';
+import { useQuery } from '@tanstack/react-query';
+import { useToast } from '@/hooks/use-toast';
+import { ControlPanel } from '@/components/total-report/control-panel';
+import { KPIOverview } from '@/components/total-report/kpi-overview';
+import { ConversionFunnelChart } from '@/components/total-report/conversion-funnel-chart';
+import { CourseCategoryChart } from '@/components/total-report/course-category-chart';
+import { TeacherInsights } from '@/components/total-report/teacher-insights';
+import { StudentInsights } from '@/components/total-report/student-insights';
+import { AISuggestions } from '@/components/total-report/ai-suggestions';
+import { RawDataTable } from '@/components/total-report/raw-data-table';
+import { MetricSettingsDialog } from '@/components/total-report/metric-settings-dialog';
+import { FieldMappingDialog } from '@/components/total-report/field-mapping-dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Info, AlertTriangle, Settings2 } from 'lucide-react';
+import type { PeriodType, TotalReportData, MultiSortConfig } from '@/types/total-report';
+import {
+  generateTotalReportData,
+  refreshMockData,
+} from '@/lib/mock-total-report-data';
+import {
+  searchReportData,
+  sortWithPriority,
+  exportToCSV,
+  exportToJSON,
+  prepareTeacherExportData,
+  prepareStudentExportData,
+  prepareRawDataExport,
+} from '@/lib/total-report-utils';
+
+export default function DashboardTotalReport() {
+  const { toast } = useToast();
+
+  // State management
+  const [period, setPeriod] = useState<PeriodType>('daily');
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortConfigs, setSortConfigs] = useState<MultiSortConfig[]>([]);
+  const [activeTab, setActiveTab] = useState<'teacher' | 'student'>('teacher');
+  const [isIntrospecting, setIsIntrospecting] = useState(false);
+  const [metricDialogOpen, setMetricDialogOpen] = useState(false);
+  const [fieldMappingDialogOpen, setFieldMappingDialogOpen] = useState(false);
+
+  // Fetch report from API
+  const {
+    data: apiResponse,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['total-report', period, format(selectedDate, 'yyyy-MM-dd')],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        period,
+        baseDate: format(selectedDate, 'yyyy-MM-dd'),
+      });
+
+      const response = await fetch(`/api/reports/total-report?${params.toString()}`, {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const json = await response.json();
+
+      if (!json.success) {
+        throw new Error(json.error || 'Failed to fetch report');
+      }
+
+      return json.data;
+    },
+    staleTime: 1000 * 60 * 5, // 5 minutes
+    retry: 1,
+  });
+
+  // Fetch latest introspection result
+  const {
+    data: introspectionData,
+    refetch: refetchIntrospection,
+  } = useQuery({
+    queryKey: ['introspection-latest'],
+    queryFn: async () => {
+      const response = await fetch('/api/tools/introspect-sheets/latest', {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const json = await response.json();
+      return json.success && json.data ? json.data : null;
+    },
+    staleTime: 1000 * 60 * 10, // 10 minutes
+    retry: 0,
+  });
+
+  // Fallback to mock data if API fails
+  const reportData = useMemo<TotalReportData | null>(() => {
+    if (apiResponse) {
+      return apiResponse as TotalReportData;
+    }
+    if (isError) {
+      // Use mock data as fallback
+      console.warn('API failed, using mock data:', error);
+      return generateTotalReportData(period, selectedDate);
+    }
+    return null;
+  }, [apiResponse, isError, period, selectedDate, error]);
+
+  const handleRefresh = async () => {
+    const { data } = await refetch();
+    toast({
+      title: '資料已更新',
+      description: data ? '即時資料已重新載入' : '使用模擬資料',
+    });
+  };
+
+  const handleSeedData = async () => {
+    try {
+      const response = await fetch('/api/dev/seed-total-report', {
+        method: 'POST',
+        credentials: 'include',
+      });
+
+      const json = await response.json();
+
+      if (json.success) {
+        const data = json.data;
+
+        // Enhanced toast with Supabase info
+        if (data.supabase && data.supabaseRowsInserted !== undefined) {
+          toast({
+            title: 'Supabase 同步成功',
+            description: `已寫入 ${data.supabaseRowsInserted} 筆資料到 Supabase（${data.supabaseTables?.trial_class_attendance || 0} 上課 + ${data.supabaseTables?.trial_class_purchase || 0} 購買 + ${data.supabaseTables?.eods_for_closers || 0} 成交）`,
+          });
+        } else {
+          toast({
+            title: '測試資料已建立（僅本地）',
+            description: data.warnings?.[0] || `建立 ${data.spreadsheetsCreated} 個資料表，共 ${data.dataRowsInserted} 筆資料`,
+          });
+        }
+
+        // Refetch report data and introspection
+        await refetch();
+        await refetchIntrospection();
+      } else {
+        toast({
+          title: '建立失敗',
+          description: json.error || '無法建立測試資料',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: '建立失敗',
+        description: '網路錯誤或權限不足',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handlePeriodChange = (newPeriod: PeriodType) => {
+    setPeriod(newPeriod);
+    setSortConfigs([]); // Clear sorts when changing period
+    setSearchTerm(''); // Clear search
+  };
+
+  const handleDateChange = (date: Date | undefined) => {
+    if (date) {
+      setSelectedDate(date);
+    }
+  };
+
+  const handleIntrospectFields = async () => {
+    setIsIntrospecting(true);
+    try {
+      const response = await fetch('/api/tools/introspect-sheets', {
+        method: 'POST',
+        credentials: 'include',
+      });
+
+      const json = await response.json();
+
+      if (json.success) {
+        toast({
+          title: '欄位盤點完成',
+          description: `已分析 ${json.data.totalSheets} 個資料表，共 ${json.data.sheets.reduce((sum: number, s: any) => sum + s.fields.length, 0)} 個欄位`,
+        });
+
+        // Refresh introspection data
+        await refetchIntrospection();
+      } else {
+        toast({
+          title: '盤點失敗',
+          description: json.error || '無法執行欄位盤點',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: '盤點失敗',
+        description: '網路錯誤或權限不足',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsIntrospecting(false);
+    }
+  };
+
+  const handleOpenMetricSettings = () => {
+    setMetricDialogOpen(true);
+  };
+
+  const handleMetricSettingsSaved = async () => {
+    // Refetch report after metric settings change
+    await refetch();
+    toast({
+      title: '指標設定已更新',
+      description: '報表將使用新的計算公式',
+    });
+  };
+
+  // Apply search and sort
+  const { filteredTeachers, filteredStudents } = useMemo(() => {
+    if (!reportData) {
+      return { filteredTeachers: [], filteredStudents: [] };
+    }
+
+    const searched = searchReportData(reportData, searchTerm);
+
+    const sortedTeachers =
+      sortConfigs.length > 0
+        ? sortWithPriority(searched.teachers, sortConfigs)
+        : searched.teachers;
+
+    const sortedStudents =
+      sortConfigs.length > 0
+        ? sortWithPriority(searched.students, sortConfigs)
+        : searched.students;
+
+    return {
+      filteredTeachers: sortedTeachers,
+      filteredStudents: sortedStudents,
+    };
+  }, [reportData, searchTerm, sortConfigs]);
+
+  // Export handlers
+  const handleExportCSV = () => {
+    if (!reportData) return;
+
+    const teacherData = prepareTeacherExportData(filteredTeachers);
+    const studentData = prepareStudentExportData(filteredStudents);
+
+    const timestamp = format(new Date(), 'yyyyMMdd-HHmmss');
+    exportToCSV(teacherData, `教師數據_${period}_${timestamp}`);
+    exportToCSV(studentData, `學生數據_${period}_${timestamp}`);
+
+    toast({
+      title: '匯出成功',
+      description: 'CSV 檔案已下載',
+    });
+  };
+
+  const handleExportJSON = () => {
+    if (!reportData) return;
+
+    const exportData = {
+      period: reportData.period,
+      dateRange: reportData.dateRange,
+      summaryMetrics: reportData.summaryMetrics,
+      teachers: filteredTeachers,
+      students: filteredStudents,
+      exportedAt: new Date().toISOString(),
+    };
+
+    const timestamp = format(new Date(), 'yyyyMMdd-HHmmss');
+    exportToJSON([exportData], `總報表_${period}_${timestamp}`);
+
+    toast({
+      title: '匯出成功',
+      description: 'JSON 檔案已下載',
+    });
+  };
+
+  if (isLoading || !reportData) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4" />
+          <p className="text-muted-foreground">載入中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="max-w-[1800px] mx-auto p-6 space-y-6">
+        {/* Page Header */}
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold mb-2">數據總報表</h1>
+          <p className="text-muted-foreground">
+            整合教師與學生視角的全方位數據分析，提供 AI 智能建議
+          </p>
+          <div className="mt-2 text-sm text-muted-foreground">
+            報表期間：{reportData.dateRange.start} ~ {reportData.dateRange.end}
+          </div>
+
+          {/* Data mode indicator & Dev tools */}
+          <div className="mt-4 space-y-4">
+            {reportData.mode === 'mock' && (
+              <>
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>
+                    目前使用模擬資料。請設定 Google Sheets 資料來源以啟用即時資料。
+                  </AlertDescription>
+                </Alert>
+                {process.env.NODE_ENV !== 'production' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSeedData}
+                  >
+                    建立測試資料
+                  </Button>
+                )}
+              </>
+            )}
+            {reportData.mode === 'live' && reportData.dataSourceMeta && (
+              <Alert className="bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800">
+                <Info className="h-4 w-4 text-green-600 dark:text-green-400" />
+                <AlertDescription className="text-green-800 dark:text-green-200">
+                  即時資料模式 · 體驗課上課記錄 {reportData.dataSourceMeta.trialClassAttendance?.rows || 0} 筆 ·
+                  體驗課購買記錄 {reportData.dataSourceMeta.trialClassPurchase?.rows || 0} 筆 ·
+                  升高階學員 {reportData.dataSourceMeta.eodsForClosers?.rows || 0} 筆
+                </AlertDescription>
+              </Alert>
+            )}
+            {reportData.warnings && reportData.warnings.length > 0 && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>資料品質警告</AlertTitle>
+                <AlertDescription>
+                  <ul className="list-disc list-inside space-y-1 mt-2">
+                    {reportData.warnings.map((warning, index) => (
+                      <li key={index}>{warning}</li>
+                    ))}
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+        </div>
+
+        {/* Control Panel */}
+        <div className="flex items-start gap-4">
+          <div className="flex-1">
+            <ControlPanel
+              period={period}
+              onPeriodChange={handlePeriodChange}
+              selectedDate={selectedDate}
+              onDateChange={handleDateChange}
+              searchTerm={searchTerm}
+              onSearchChange={setSearchTerm}
+              sortConfigs={sortConfigs}
+              onSortChange={setSortConfigs}
+              onExportCSV={handleExportCSV}
+              onExportJSON={handleExportJSON}
+              onRefresh={handleRefresh}
+              isRefreshing={isLoading}
+              onIntrospectFields={handleIntrospectFields}
+              onOpenMetricSettings={handleOpenMetricSettings}
+              isIntrospecting={isIntrospecting}
+              dataSource={reportData?.mode === 'live' ? 'supabase' : 'storage'}
+              lastIntrospection={introspectionData ? {
+                timestamp: introspectionData.generatedAt,
+                tableCount: introspectionData.totalSheets
+              } : null}
+            />
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => setFieldMappingDialogOpen(true)}
+            className="flex items-center gap-2"
+          >
+            <Settings2 className="h-4 w-4" />
+            欄位對應管理
+          </Button>
+        </div>
+
+        {/* KPI Overview */}
+        <section>
+          <h2 className="text-xl font-semibold mb-4">整體概況</h2>
+          <KPIOverview metrics={reportData.summaryMetrics} />
+        </section>
+
+        {/* Conversion Analysis */}
+        <section>
+          <h2 className="text-xl font-semibold mb-4">轉換分析</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <ConversionFunnelChart funnelData={reportData.funnelData} />
+            <CourseCategoryChart categoryBreakdown={reportData.categoryBreakdown} />
+          </div>
+        </section>
+
+        {/* Teacher & Student Insights Tabs */}
+        <section>
+          <h2 className="text-xl font-semibold mb-4">詳細數據分析</h2>
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'teacher' | 'student')}>
+            <TabsList>
+              <TabsTrigger value="teacher">教師視角</TabsTrigger>
+              <TabsTrigger value="student">學生視角</TabsTrigger>
+            </TabsList>
+            <TabsContent value="teacher" className="mt-4">
+              <TeacherInsights teachers={filteredTeachers} />
+            </TabsContent>
+            <TabsContent value="student" className="mt-4">
+              <StudentInsights students={filteredStudents} />
+            </TabsContent>
+          </Tabs>
+        </section>
+
+        {/* AI Suggestions */}
+        <section>
+          <h2 className="text-xl font-semibold mb-4">AI 智能建議</h2>
+          <AISuggestions suggestions={reportData.aiSuggestions} period={period} />
+        </section>
+
+        {/* Raw Data Table */}
+        <section>
+          <RawDataTable rawData={reportData.rawData} />
+        </section>
+
+        {/* Footer Info */}
+        <div className="pt-6 border-t text-center text-xs text-muted-foreground">
+          <p>
+            {reportData.mode === 'mock'
+              ? '此頁面目前使用模擬資料。請設定 Google Sheets 以啟用即時資料。'
+              : reportData.mode === 'live'
+              ? '即時資料模式 · 資料來源：Supabase'
+              : '即時資料模式 · 資料來源：Local Storage'}
+          </p>
+          <p className="mt-1">
+            最後更新：{new Date().toLocaleString('zh-TW')} ·
+            資料筆數：教師 {filteredTeachers.length} 位 · 學生 {filteredStudents.length} 位 ·
+            {reportData.mode === 'live' ? '模式：即時資料' : '模式：模擬資料'}
+          </p>
+        </div>
+
+        {/* Metric Settings Dialog */}
+        <MetricSettingsDialog
+          open={metricDialogOpen}
+          onOpenChange={setMetricDialogOpen}
+          onSave={handleMetricSettingsSaved}
+        />
+
+        {/* Field Mapping Dialog */}
+        <FieldMappingDialog
+          open={fieldMappingDialogOpen}
+          onOpenChange={setFieldMappingDialogOpen}
+        />
+      </div>
+    </div>
+  );
+}

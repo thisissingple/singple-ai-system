@@ -1,0 +1,222 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiRequest } from '@/lib/queryClient';
+import { type Spreadsheet, type SheetData, type Worksheet } from '@shared/schema';
+
+interface SheetDataResponse {
+  data: SheetData[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+  spreadsheet: Spreadsheet;
+}
+
+export function useSpreadsheets() {
+  return useQuery<Spreadsheet[]>({
+    queryKey: ['/api/spreadsheets'],
+  });
+}
+
+export function useSheetData(spreadsheetId: string, page = 1, limit = 50, search = '') {
+  const searchParams = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString(),
+    ...(search && { search }),
+  });
+
+  return useQuery<SheetDataResponse>({
+    queryKey: ['/api/spreadsheets', spreadsheetId, 'data', page, limit, search],
+    queryFn: async () => {
+      const response = await fetch(`/api/spreadsheets/${spreadsheetId}/data?${searchParams}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch sheet data');
+      }
+      return response.json();
+    },
+    enabled: !!spreadsheetId,
+  });
+}
+
+export function useCreateSpreadsheet() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: { name: string; spreadsheetId: string; range?: string }) => {
+      const response = await apiRequest('POST', '/api/spreadsheets', data);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets'] });
+    },
+  });
+}
+
+export function useDeleteSpreadsheet() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await apiRequest('DELETE', `/api/spreadsheets/${id}`);
+      return response;
+    },
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', id, 'data'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', id, 'worksheets'] });
+    },
+  });
+}
+
+export function useSyncSpreadsheet() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await apiRequest('POST', `/api/spreadsheets/${id}/sync`);
+      return response.json();
+    },
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', id, 'data'] });
+    },
+  });
+}
+
+// Worksheet management hooks
+export function useWorksheets(spreadsheetId: string) {
+  return useQuery<Worksheet[]>({
+    queryKey: ['/api/spreadsheets', spreadsheetId, 'worksheets'],
+    queryFn: async () => {
+      const response = await fetch(`/api/spreadsheets/${spreadsheetId}/worksheets`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch worksheets');
+      }
+      return response.json();
+    },
+    enabled: !!spreadsheetId,
+  });
+}
+
+export function useCreateWorksheet() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ spreadsheetId, worksheetData }: { 
+      spreadsheetId: string; 
+      worksheetData: { worksheetName: string; gid: string; range?: string } 
+    }) => {
+      const response = await apiRequest('POST', `/api/spreadsheets/${spreadsheetId}/worksheets`, worksheetData);
+      return response.json();
+    },
+    onSuccess: (_, { spreadsheetId }) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', spreadsheetId, 'worksheets'] });
+    },
+  });
+}
+
+export function useToggleWorksheetSync() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ worksheetId, isEnabled }: { worksheetId: string; isEnabled: boolean }) => {
+      const response = await apiRequest('PUT', `/api/worksheets/${worksheetId}/toggle`, { isEnabled });
+      return response.json();
+    },
+    onSuccess: (data: Worksheet) => {
+      // Find the internal spreadsheet ID for cache invalidation
+      const spreadsheets = queryClient.getQueryData(['/api/spreadsheets']) as Spreadsheet[] || [];
+      const spreadsheet = spreadsheets.find(s => s.spreadsheetId === data.spreadsheetId);
+      const internalId = spreadsheet?.id;
+      
+      // Invalidate related queries using internal ID
+      if (internalId) {
+        queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', internalId, 'worksheets'] });
+        queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', internalId, 'data'] });
+      }
+      
+      // Also invalidate by Google Sheets ID for safety
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', data.spreadsheetId, 'worksheets'] });
+    },
+  });
+}
+
+export function useDeleteWorksheet() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ worksheetId, spreadsheetId }: { worksheetId: string; spreadsheetId: string }) => {
+      const response = await apiRequest('DELETE', `/api/worksheets/${worksheetId}`);
+      return { response, spreadsheetId };
+    },
+    onSuccess: ({ spreadsheetId }) => {
+      // Invalidate specific worksheet queries
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', spreadsheetId, 'worksheets'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets'] });
+    },
+  });
+}
+
+// Worksheet sync hooks
+export function useSyncWorksheet() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (worksheetId: string) => {
+      const response = await apiRequest('POST', `/api/worksheets/${worksheetId}/sync`);
+      return response.json();
+    },
+    onSuccess: (data: Worksheet, worksheetId: string) => {
+      // Find the internal spreadsheet ID for cache invalidation
+      const spreadsheets = queryClient.getQueryData(['/api/spreadsheets']) as Spreadsheet[] || [];
+      const spreadsheet = spreadsheets.find(s => s.spreadsheetId === data.spreadsheetId);
+      const internalId = spreadsheet?.id;
+      
+      // Invalidate related queries using internal ID
+      if (internalId) {
+        queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', internalId, 'worksheets'] });
+        queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', internalId, 'data'] });
+      }
+      
+      // Also invalidate by Google Sheets ID for safety
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', data.spreadsheetId, 'worksheets'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', data.spreadsheetId, 'data'] });
+      
+      // Invalidate the specific worksheet data for tab views
+      queryClient.invalidateQueries({ queryKey: ['/api/worksheets', worksheetId, 'data'] });
+    },
+  });
+}
+
+export function useSyncEnabledWorksheets() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (spreadsheetId: string) => {
+      const response = await apiRequest('POST', `/api/spreadsheets/${spreadsheetId}/sync-worksheets`);
+      return response.json();
+    },
+    onSuccess: (data: Spreadsheet) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', data.id, 'worksheets'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets', data.id, 'data'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/spreadsheets'] });
+    },
+  });
+}
+
+// Hook for getting data from a specific worksheet
+export function useWorksheetData(worksheetId: string) {
+  return useQuery<SheetData[]>({
+    queryKey: ['/api/worksheets', worksheetId, 'data'],
+    queryFn: async () => {
+      if (!worksheetId) return [];
+      const response = await fetch(`/api/worksheets/${worksheetId}/data`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch worksheet data');
+      }
+      return response.json();
+    },
+    enabled: !!worksheetId,
+  });
+}

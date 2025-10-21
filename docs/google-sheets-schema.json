@@ -1,0 +1,127 @@
+{
+  "generatedAt": "2025-10-02T14:40:28.930Z",
+  "totalSheets": 2,
+  "sheets": [
+    {
+      "sheetName": "表1",
+      "spreadsheetId": "1FZffolNcXjkZ-14vA3NVRdN7czm8E6JjdkGidn38LgM",
+      "totalRows": 49,
+      "fields": [
+        {
+          "name": "姓名",
+          "type": "string",
+          "occurrences": 49,
+          "samples": [
+            "施佩均",
+            "施佩均",
+            "方曉萍"
+          ],
+          "nullCount": 0
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "occurrences": 49,
+          "samples": [
+            "auky910@gmail.com",
+            "auky910@gmail.com",
+            "shiaoping.fang@gmail.com"
+          ],
+          "nullCount": 0
+        },
+        {
+          "name": "上課日期",
+          "type": "string",
+          "occurrences": 49,
+          "samples": [
+            "2024/6/16",
+            "2024/12/9",
+            "2025/2/10"
+          ],
+          "nullCount": 0
+        },
+        {
+          "name": "授課老師",
+          "type": "string",
+          "occurrences": 49,
+          "samples": [
+            "Vicky",
+            "Vicky",
+            "Vicky"
+          ],
+          "nullCount": 0
+        },
+        {
+          "name": "是否已評價",
+          "type": "string",
+          "occurrences": 0,
+          "samples": [],
+          "nullCount": 49
+        },
+        {
+          "name": "未轉單原因",
+          "type": "string",
+          "occurrences": 2,
+          "samples": [
+            "想上完十二堂就好。 ",
+            "想上完十二堂就好。 "
+          ],
+          "nullCount": 47
+        },
+        {
+          "name": "體驗課文字檔",
+          "type": "string",
+          "occurrences": 4,
+          "samples": [
+            "無",
+            "無",
+            "8/22已申請和潤"
+          ],
+          "nullCount": 45
+        }
+      ],
+      "lastAnalyzed": "2025-10-02T14:40:26.316Z"
+    },
+    {
+      "sheetName": "表2",
+      "spreadsheetId": "1xPMeomC2w3P79jj7gs8RxHpdbRFBxWBcrRy_g3OkBXI",
+      "totalRows": 23,
+      "fields": [
+        {
+          "name": "Column_0",
+          "type": "string",
+          "occurrences": 19,
+          "samples": [
+            "姓名",
+            "A",
+            "B"
+          ],
+          "nullCount": 4
+        },
+        {
+          "name": "日期",
+          "type": "string",
+          "occurrences": 8,
+          "samples": [
+            "10:00-12:00\n13:00-14:00\n16:00-18:00",
+            "休",
+            "休"
+          ],
+          "nullCount": 15
+        },
+        {
+          "name": "不可同時休假",
+          "type": "string",
+          "occurrences": 8,
+          "samples": [
+            "10:00-12:00\n13:00-14:00\n16:00-18:00",
+            "10:00-12:00\n16:00-18:00\n19:00-22:00",
+            "10:00-12:00\n13:00-14:00\n16:00-18:00"
+          ],
+          "nullCount": 15
+        }
+      ],
+      "lastAnalyzed": "2025-10-02T14:40:28.930Z"
+    }
+  ]
+}

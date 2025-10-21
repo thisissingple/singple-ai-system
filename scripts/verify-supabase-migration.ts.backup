@@ -1,0 +1,175 @@
+/**
+ * Supabase Migration Verification Script
+ * 驗證所有資料已從 Neon 遷移到 Supabase
+ */
+
+import { getSupabaseClient, isSupabaseAvailable, testSupabaseConnection } from '../server/services/supabase-client';
+import { storage } from '../server/storage';
+
+async function verify() {
+  console.log('🔍 開始驗證 Supabase 遷移狀態...\n');
+
+  const results = {
+    passed: [] as string[],
+    failed: [] as string[],
+    warnings: [] as string[],
+  };
+
+  // 1. 檢查 Supabase Client 初始化
+  console.log('1️⃣  檢查 Supabase Client...');
+  if (isSupabaseAvailable()) {
+    results.passed.push('✅ Supabase client 已成功初始化');
+  } else {
+    results.failed.push('❌ Supabase client 初始化失敗');
+    console.log('\n❌ 錯誤：請檢查 .env 檔案中的 SUPABASE_URL 和 SUPABASE_SERVICE_ROLE_KEY');
+    return;
+  }
+
+  // 2. 測試 Supabase 連線
+  console.log('2️⃣  測試 Supabase 連線...');
+  const connectionTest = await testSupabaseConnection();
+  if (connectionTest.success) {
+    results.passed.push('✅ Supabase 連線測試成功');
+  } else {
+    results.failed.push(`❌ Supabase 連線失敗: ${connectionTest.error}`);
+  }
+
+  // 3. 檢查必要的 tables 是否存在
+  console.log('3️⃣  檢查資料表結構...');
+  const client = getSupabaseClient();
+  if (!client) {
+    results.failed.push('❌ 無法取得 Supabase client');
+    return;
+  }
+
+  const requiredTables = [
+    'users',
+    'sessions',
+    'roles',
+    'spreadsheets',
+    'worksheets',
+    'sheet_data',
+    'google_oauth_tokens',
+    'sync_history',
+    'trial_class_attendance',
+    'trial_class_purchase',
+    'eods_for_closers',
+  ];
+
+  for (const table of requiredTables) {
+    try {
+      const { error } = await client.from(table).select('id').limit(1);
+      if (error) {
+        results.failed.push(`❌ 資料表 ${table} 不存在或無法訪問`);
+      } else {
+        results.passed.push(`✅ 資料表 ${table} 存在`);
+      }
+    } catch (e) {
+      results.failed.push(`❌ 資料表 ${table} 檢查失敗: ${e}`);
+    }
+  }
+
+  // 4. 測試 Storage 介面
+  console.log('4️⃣  測試 Storage 介面...');
+  try {
+    // Test listSpreadsheets
+    const spreadsheets = await storage.listSpreadsheets();
+    results.passed.push(`✅ Storage.listSpreadsheets() 成功 (${spreadsheets.length} 個 spreadsheets)`);
+
+    // Test getUser (should work even if no users exist)
+    try {
+      const user = await storage.getUser('test-id');
+      results.passed.push('✅ Storage.getUser() 可正常呼叫');
+    } catch (e: any) {
+      if (e.message.includes('not available')) {
+        results.failed.push('❌ Storage 尚未連接到 Supabase');
+      } else {
+        results.passed.push('✅ Storage.getUser() 可正常呼叫');
+      }
+    }
+
+  } catch (e) {
+    results.failed.push(`❌ Storage 介面測試失敗: ${e}`);
+  }
+
+  // 5. 檢查 Neon 依賴是否已移除
+  console.log('5️⃣  檢查 Neon 依賴...');
+  if (process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('supabase')) {
+    results.warnings.push('⚠️  發現 DATABASE_URL 環境變數仍指向非 Supabase 資料庫');
+    results.warnings.push('   建議：將 DATABASE_URL 移除或更新為 SUPABASE_DB_URL');
+  } else {
+    results.passed.push('✅ 未發現 Neon 相關環境變數');
+  }
+
+  // 6. 檢查資料筆數
+  console.log('6️⃣  檢查資料筆數...');
+  try {
+    const { count: attendanceCount } = await client
+      .from('trial_class_attendance')
+      .select('*', { count: 'exact', head: true });
+
+    const { count: purchaseCount } = await client
+      .from('trial_class_purchase')
+      .select('*', { count: 'exact', head: true });
+
+    const { count: dealsCount } = await client
+      .from('eods_for_closers')
+      .select('*', { count: 'exact', head: true });
+
+    results.passed.push(`✅ trial_class_attendance: ${attendanceCount || 0} 筆`);
+    results.passed.push(`✅ trial_class_purchase: ${purchaseCount || 0} 筆`);
+    results.passed.push(`✅ eods_for_closers: ${dealsCount || 0} 筆`);
+
+    if ((attendanceCount || 0) === 0 && (purchaseCount || 0) === 0 && (dealsCount || 0) === 0) {
+      results.warnings.push('⚠️  所有資料表都是空的，可能尚未同步 Google Sheets 資料');
+    }
+
+  } catch (e) {
+    results.warnings.push(`⚠️  無法讀取資料筆數: ${e}`);
+  }
+
+  // 輸出結果
+  console.log('\n' + '='.repeat(60));
+  console.log('📊 驗證結果統計');
+  console.log('='.repeat(60));
+  console.log(`✅ 通過: ${results.passed.length} 項`);
+  console.log(`❌ 失敗: ${results.failed.length} 項`);
+  console.log(`⚠️  警告: ${results.warnings.length} 項`);
+  console.log('='.repeat(60) + '\n');
+
+  if (results.failed.length > 0) {
+    console.log('❌ 失敗項目：');
+    results.failed.forEach(f => console.log(`   ${f}`));
+    console.log('');
+  }
+
+  if (results.warnings.length > 0) {
+    console.log('⚠️  警告項目：');
+    results.warnings.forEach(w => console.log(`   ${w}`));
+    console.log('');
+  }
+
+  if (results.passed.length > 0) {
+    console.log('✅ 通過項目：');
+    results.passed.forEach(p => console.log(`   ${p}`));
+    console.log('');
+  }
+
+  // 最終判定
+  if (results.failed.length === 0) {
+    console.log('🎉 遷移驗證成功！所有測試都通過了。\n');
+    console.log('📝 下一步：');
+    console.log('   1. 移除 .env 中的 DATABASE_URL (Neon)');
+    console.log('   2. 執行 Google Sheets 同步以填充資料');
+    console.log('   3. 測試應用程式所有功能是否正常');
+    process.exit(0);
+  } else {
+    console.log('❌ 遷移驗證失敗，請修正上述錯誤後重試。\n');
+    process.exit(1);
+  }
+}
+
+verify().catch(error => {
+  console.error('驗證過程發生錯誤:', error);
+  process.exit(1);
+});

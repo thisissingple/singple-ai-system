@@ -1,0 +1,10 @@
+{
+  "$schema": "./custom-field-mappings.schema.json",
+  "version": "1.0.0",
+  "lastUpdated": "2025-10-05T00:00:00Z",
+  "mappings": {
+    "trial_class_attendance": [],
+    "trial_class_purchase": [],
+    "eods_for_closers": []
+  }
+}

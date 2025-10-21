@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Custom Field Mappings",
+  "description": "可寫入的自定義欄位映射配置，用於前端動態管理 mapping",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "配置檔版本"
+    },
+    "lastUpdated": {
+      "type": "string",
+      "format": "date-time",
+      "description": "最後更新時間"
+    },
+    "mappings": {
+      "type": "object",
+      "properties": {
+        "trial_class_attendance": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/fieldMapping" }
+        },
+        "trial_class_purchase": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/fieldMapping" }
+        },
+        "eods_for_closers": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/fieldMapping" }
+        }
+      },
+      "required": ["trial_class_attendance", "trial_class_purchase", "eods_for_closers"]
+    }
+  },
+  "required": ["version", "lastUpdated", "mappings"],
+  "definitions": {
+    "fieldMapping": {
+      "type": "object",
+      "properties": {
+        "googleSheetColumn": {
+          "type": "string",
+          "description": "Google Sheets 欄位名稱"
+        },
+        "supabaseColumn": {
+          "type": "string",
+          "description": "Supabase 欄位名稱"
+        },
+        "dataType": {
+          "type": "string",
+          "enum": ["text", "number", "boolean", "date", "timestamp", "decimal", "integer"],
+          "description": "資料型別"
+        },
+        "required": {
+          "type": "boolean",
+          "description": "是否為必填欄位"
+        },
+        "label": {
+          "type": "string",
+          "description": "中文欄位說明"
+        },
+        "description": {
+          "type": "string",
+          "description": "詳細說明"
+        },
+        "transformFunction": {
+          "type": "string",
+          "enum": ["toDate", "toTimestamp", "toInteger", "toDecimal", "toBoolean", "cleanText"],
+          "description": "轉換函數名稱"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "建立時間"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "建立者"
+        }
+      },
+      "required": ["googleSheetColumn", "supabaseColumn", "dataType"]
+    }
+  }
+}

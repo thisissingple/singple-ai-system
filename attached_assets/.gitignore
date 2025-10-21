@@ -1,0 +1,9 @@
+# 忽略所有截圖和資產檔案，避免 git repo 膨脹
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.pdf
+
+# 保留 .gitignore 本身
+!.gitignore

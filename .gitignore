@@ -1,0 +1,48 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+*.tar.gz
+
+# OS files
+.DS_Store
+
+# Server public assets
+server/public
+
+# Vite temp files
+vite.config.ts.*
+
+# IDE & Editor
+.vscode/
+.idea/
+
+# Environment & Config
+.cache/
+.claude/
+.config/
+.local/
+.upm/
+
+# Attached assets (screenshots)
+attached_assets/*.png
+attached_assets/*.jpg
+attached_assets/*.jpeg
+attached_assets/*.gif
+attached_assets/*.pdf
+!attached_assets/.gitignore
+!attached_assets/README.md
+
+# Logs
+*.log
+logs/
+
+# Environment variables (keep .env.example)
+.env
+!.env.example
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
