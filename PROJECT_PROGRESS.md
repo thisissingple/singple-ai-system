@@ -2626,21 +2626,31 @@ SELECT * FROM users WHERE roles = ARRAY['teacher'];
 - [PG_ARCHITECTURE_DECISION.md](PG_ARCHITECTURE_DECISION.md) - PostgreSQL 架構決策
 - [INTEGRATION_ROADMAP.md](INTEGRATION_ROADMAP.md) - 系統整合規劃
 - [QUICK_START.md](QUICK_START.md) - 快速開始指南
+- [TELEMARKETING_SYSTEM_COMPLETE.md](TELEMARKETING_SYSTEM_COMPLETE.md) - 電訪系統開發報告
+- [TELEMARKETING_ACCEPTANCE_TEST.md](TELEMARKETING_ACCEPTANCE_TEST.md) - 電訪系統驗收測試
+- [HOW_TO_VERIFY.md](HOW_TO_VERIFY.md) - 系統驗收指南
+- [.github-credentials](.github-credentials) - GitHub 憑證資訊（⚠️ 敏感資訊，不會提交到 git）
 
 ---
 
 ## 🔗 系統環境配置
 
 ### 當前運行環境
-- **部署平台**：Replit（生產環境）
+- **部署平台**：Zeabur（生產環境）
 - **伺服器埠口**：`5000`
-- **環境變數來源**：Replit Secrets
+- **環境變數來源**：Zeabur Environment Variables
 - **啟動指令**：`npm run dev`
 
 ### 資料庫
 - **類型**：PostgreSQL (Supabase)
 - **連線方式**：`pg` 模組直接連線
 - **多重角色**：支援（`roles` 陣列欄位）
+
+### GitHub 憑證（已設定）
+- **Repository**：thisissingple/singple-ai-system
+- **Access Token**：已儲存在 `.github-credentials`（2025-11-20 過期）
+- **Git Push**：已設定自動認證（`git config credential.helper store`）
+- **推送指令**：直接使用 `git push origin main`
 
 ---
 
