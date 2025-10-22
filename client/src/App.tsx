@@ -36,6 +36,8 @@ import TeachingQualityDetail from "@/pages/teaching-quality/teaching-quality-det
 import LoginPage from "@/pages/auth/login";
 import ChangePasswordPage from "@/pages/auth/change-password";
 import PublicTrialClassForm from "@/pages/forms/public-trial-class-form";
+import AdLeadsList from "@/pages/telemarketing/ad-leads-list";
+import AdPerformanceReport from "@/pages/telemarketing/ad-performance-report";
 
 function Router() {
   return (
@@ -88,6 +90,14 @@ function Router() {
       </Route>
       <Route path="/forms">
         <ProtectedRoute><FormsPage /></ProtectedRoute>
+      </Route>
+
+      {/* 電訪系統路由 */}
+      <Route path="/telemarketing/ad-leads">
+        <ProtectedRoute><AdLeadsList /></ProtectedRoute>
+      </Route>
+      <Route path="/telemarketing/ad-performance">
+        <ProtectedRoute><AdPerformanceReport /></ProtectedRoute>
       </Route>
 
       {/* 教學品質路由 */}
