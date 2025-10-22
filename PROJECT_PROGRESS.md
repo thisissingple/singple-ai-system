@@ -1,11 +1,11 @@
 # 📊 專案進度追蹤文檔
 
-> **最後更新**: 2025-10-22（晚上 10:00 PM）
+> **最後更新**: 2025-10-22（晚上 11:00 PM）
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家）
-> **專案狀態**: ✅ Phase 24-26 完成 - 電訪系統 (學生跟進 + 通話記錄)
-> **當前階段**: 電訪系統 Phase 1 & 2 已完成，等待部署驗收
-> **今日進度**: 完成電訪系統核心功能 + Facebook 廣告追蹤系統
-> **整體進度**: 92% ██████████████████░░
+> **專案狀態**: 🚧 Phase 27 開發中 - Facebook API 整合（OAuth 登入）
+> **當前階段**: 實作 Facebook Lead Ads 自動抓取功能
+> **今日進度**: 電訪系統完成 + Webhook 方案 + 開始 API 整合方案
+> **整體進度**: 93% ██████████████████░░
 
 ---
 
@@ -193,24 +193,37 @@
 │     ├─ TELEMARKETING_ACCEPTANCE_TEST.md (85+ 測試項)
 │     └─ HOW_TO_VERIFY.md (驗收指南)
 │
-├─ 📱 Facebook 廣告追蹤 (100%) ✅
-│  ├─ Phase 24: Lead Ads 整合 ✅
-│  │  ├─ ✅ 3 階段轉換漏斗
-│  │  │  ├─ Stage 1: Facebook Lead (fb_lead_ads)
-│  │  │  ├─ Stage 2: Trial Class (trial_class_purchases)
-│  │  │  └─ Stage 3: Conversion (conversions)
-│  │  ├─ ✅ 前端頁面
-│  │  │  ├─ ad-leads-list.tsx (名單列表)
-│  │  │  └─ ad-performance-report.tsx (成效報表)
-│  │  ├─ ✅ API 端點
-│  │  │  ├─ GET /api/facebook-leads
-│  │  │  ├─ POST /api/facebook-leads/webhook
-│  │  │  └─ GET /api/facebook-leads/performance
-│  │  └─ ✅ 資料庫遷移
-│  │     └─ Migration 035: fb_lead_ads 表
+├─ 📱 Facebook 廣告追蹤 (40%) 🚧 ← 開發中！
+│  ├─ Phase 24: Webhook 方案 ✅
+│  │  ├─ ✅ 資料庫結構
+│  │  │  └─ Migration 035: ad_leads 表（3階段轉換）
+│  │  ├─ ✅ Webhook 端點
+│  │  │  ├─ POST /api/webhooks/facebook-leads
+│  │  │  ├─ GET /api/webhooks/facebook-leads (驗證)
+│  │  │  └─ GET /api/leads/ad-leads
+│  │  ├─ ✅ 文檔
+│  │  │  ├─ FACEBOOK_WEBHOOK_SETUP.md
+│  │  │  └─ tests/test-facebook-webhook.ts
+│  │  └─ ⏳ 前端頁面（待開發）
+│  │     ├─ ad-leads-list.tsx
+│  │     └─ ad-performance-report.tsx
 │  │
-│  └─ ✅ 導航與權限
-│     └─ 側邊欄「廣告追蹤」選單
+│  └─ Phase 27: API 整合方案 🚧 ← 當前階段！
+│     ├─ ✅ 技術方案設計
+│     │  └─ FACEBOOK_API_INTEGRATION_PLAN.md
+│     ├─ ✅ 資料庫結構
+│     │  └─ Migration 036: facebook_settings 表
+│     ├─ 🚧 Facebook OAuth 登入
+│     │  ├─ ⏳ 後端 API（4個端點）
+│     │  ├─ ⏳ 前端設定頁面
+│     │  └─ ⏳ Token 管理
+│     ├─ ⏳ 自動抓取名單
+│     │  ├─ 定期執行（node-cron）
+│     │  ├─ Facebook Graph API 呼叫
+│     │  └─ 錯誤處理與重試
+│     └─ ⏳ 前端整合
+│        ├─ 同步狀態顯示
+│        └─ 手動同步按鈕
 │
 └─ 🚀 未來規劃 (0%)
    ├─ ⏳ Phase 28: UI/UX 優化
