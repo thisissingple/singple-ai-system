@@ -38,6 +38,8 @@ import ChangePasswordPage from "@/pages/auth/change-password";
 import PublicTrialClassForm from "@/pages/forms/public-trial-class-form";
 import AdLeadsList from "@/pages/telemarketing/ad-leads-list";
 import AdPerformanceReport from "@/pages/telemarketing/ad-performance-report";
+import CallRecordsList from "@/pages/telemarketing/call-records-list";
+import StudentFollowUp from "@/pages/telemarketing/student-follow-up";
 
 function Router() {
   return (
@@ -93,8 +95,14 @@ function Router() {
       </Route>
 
       {/* 電訪系統路由 */}
+      <Route path="/telemarketing/student-follow-up">
+        <ProtectedRoute><StudentFollowUp /></ProtectedRoute>
+      </Route>
       <Route path="/telemarketing/ad-leads">
         <ProtectedRoute><AdLeadsList /></ProtectedRoute>
+      </Route>
+      <Route path="/telemarketing/call-records">
+        <ProtectedRoute><CallRecordsList /></ProtectedRoute>
       </Route>
       <Route path="/telemarketing/ad-performance">
         <ProtectedRoute><AdPerformanceReport /></ProtectedRoute>

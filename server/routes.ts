@@ -5144,6 +5144,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ========================================
+  // 電訪記錄管理 API
+  // ========================================
+
+  // GET - 查詢所有電訪記錄
+  app.get('/api/telemarketing/calls', isAuthenticated, async (req, res) => {
+    try {
+      if (!isSupabaseAvailable()) {
+        return res.status(503).json({ error: 'Supabase 未連線' });
+      }
+
+      const supabase = getSupabaseClient();
+
+      const { data: calls, error } = await supabase
+        .from('telemarketing_calls')
+        .select('*')
+        .order('call_date', { ascending: false })
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('查詢電訪記錄失敗:', error);
+        throw error;
+      }
+
+      res.json(calls || []);
+    } catch (error: any) {
+      console.error('電訪記錄 API 錯誤:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GET - 電訪記錄統計資料
+  app.get('/api/telemarketing/calls/stats', isAuthenticated, async (req, res) => {
+    try {
+      if (!isSupabaseAvailable()) {
+        return res.status(503).json({ error: 'Supabase 未連線' });
+      }
+
+      const supabase = getSupabaseClient();
+      const today = new Date().toISOString().split('T')[0];
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      // 總記錄數
+      const { count: total } = await supabase
+        .from('telemarketing_calls')
+        .select('*', { count: 'exact', head: true });
+
+      // 今日記錄
+      const { count: todayCount } = await supabase
+        .from('telemarketing_calls')
+        .select('*', { count: 'exact', head: true })
+        .gte('call_date', today);
+
+      // 本週記錄
+      const { count: weekCount } = await supabase
+        .from('telemarketing_calls')
+        .select('*', { count: 'exact', head: true })
+        .gte('call_date', weekAgo);
+
+      // 已接通數
+      const { count: connected } = await supabase
+        .from('telemarketing_calls')
+        .select('*', { count: 'exact', head: true })
+        .eq('call_result', '已接通');
+
+      // 有意願數
+      const { count: interested } = await supabase
+        .from('telemarketing_calls')
+        .select('*', { count: 'exact', head: true })
+        .eq('interest_level', '高');
+
+      // 已轉諮詢數
+      const { count: forwarded } = await supabase
+        .from('telemarketing_calls')
+        .select('*', { count: 'exact', head: true })
+        .eq('forwarded_to_consultant', true);
+
+      res.json({
+        total: total || 0,
+        today: todayCount || 0,
+        this_week: weekCount || 0,
+        connected: connected || 0,
+        interested: interested || 0,
+        forwarded: forwarded || 0,
+      });
+    } catch (error: any) {
+      console.error('電訪統計 API 錯誤:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ========================================
   // 廣告名單系統 API (Facebook Lead Ads)
   // ========================================
 

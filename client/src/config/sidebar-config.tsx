@@ -106,6 +106,12 @@ export const sidebarConfig: SidebarSection[] = [
     title: '電訪系統',
     items: [
       {
+        label: '學生跟進',
+        href: '/telemarketing/student-follow-up',
+        icon: UserCog,
+        requiredRoles: ['admin', 'manager', 'setter'],
+      },
+      {
         label: '廣告名單',
         href: '/telemarketing/ad-leads',
         icon: Phone,
