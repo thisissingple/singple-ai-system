@@ -7,6 +7,11 @@ import type { Express, RequestHandler } from "express";
 import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { storage } from "./services/legacy/storage";
+import dotenv from "dotenv";
+
+// Load .env file BEFORE checking environment variables
+// This is critical for local development where .env is not auto-loaded
+dotenv.config({ override: false }); // Don't override if already set
 
 // Skip Replit auth requirements if SKIP_AUTH is enabled
 if (!process.env.REPLIT_DOMAINS && process.env.SKIP_AUTH !== 'true') {
@@ -107,6 +112,12 @@ export async function setupAuth(app: Express) {
   app.use(getSession());
   app.use(passport.initialize());
   app.use(passport.session());
+
+  // Skip OIDC setup if authentication is disabled
+  if (process.env.SKIP_AUTH === 'true') {
+    console.log("⚠️  Authentication disabled (SKIP_AUTH=true) - Development mode only!");
+    return;
+  }
 
   const config = await getOidcConfig();
 
