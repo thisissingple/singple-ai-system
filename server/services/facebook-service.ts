@@ -15,14 +15,17 @@ const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET || '';
 const FACEBOOK_CALLBACK_URL = process.env.FACEBOOK_CALLBACK_URL || 'http://localhost:5000/api/facebook/callback';
 
 /**
- * 產生 Facebook OAuth 登入 URL
+ * 產生 Facebook OAuth 登入 URL（Meta Business Integration 方式）
+ * 使用彈出視窗 + business_management scope
  */
 export function generateFacebookAuthUrl(state: string): string {
   const params = new URLSearchParams({
     client_id: FACEBOOK_APP_ID,
     redirect_uri: FACEBOOK_CALLBACK_URL,
     state: state,  // 防止 CSRF 攻擊
-    scope: 'pages_show_list,pages_manage_ads,leads_retrieval,pages_read_engagement',
+    scope: 'business_management,pages_show_list,pages_manage_ads,leads_retrieval,pages_read_engagement',
+    auth_type: 'rerequest',  // 強制重新授權
+    display: 'popup',  // 彈出視窗模式
   });
 
   return `https://www.facebook.com/${FACEBOOK_API_VERSION}/dialog/oauth?${params.toString()}`;

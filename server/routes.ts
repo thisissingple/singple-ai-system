@@ -7368,8 +7368,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         delete req.session.facebookOAuthState;
       }
 
-      // 重導向回設定頁面
-      res.redirect('/settings/facebook?success=true');
+      // 彈出視窗模式：返回 HTML 自動關閉視窗
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Facebook 授權成功</title>
+        </head>
+        <body>
+          <script>
+            // 通知父視窗授權成功
+            if (window.opener) {
+              window.opener.postMessage({ type: 'facebook-auth-success' }, '*');
+            }
+            // 自動關閉視窗
+            window.close();
+            // 如果無法關閉（某些瀏覽器限制），顯示訊息
+            setTimeout(() => {
+              document.body.innerHTML = '<div style="text-align:center;padding:50px;font-family:sans-serif;"><h2>✅ 授權成功</h2><p>請關閉此視窗回到系統</p></div>';
+            }, 1000);
+          </script>
+        </body>
+        </html>
+      `);
     } catch (error: any) {
       console.error('Facebook OAuth callback 失敗:', error);
       res.redirect(`/settings/facebook?error=${encodeURIComponent(error.message)}`);

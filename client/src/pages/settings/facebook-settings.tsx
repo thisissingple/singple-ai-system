@@ -65,7 +65,7 @@ export default function FacebookSettings() {
     }
   });
 
-  // 登入 Facebook
+  // 登入 Facebook（使用彈出視窗）
   const loginMutation = useMutation({
     mutationFn: async () => {
       const response = await fetch('/api/facebook/auth-url');
@@ -74,8 +74,26 @@ export default function FacebookSettings() {
       return data;
     },
     onSuccess: (data) => {
-      // 開啟 Facebook 登入視窗
-      window.location.href = data.authUrl;
+      // 彈出視窗（Meta Business Integration 方式）
+      const width = 600;
+      const height = 700;
+      const left = (window.innerWidth - width) / 2;
+      const top = (window.innerHeight - height) / 2;
+
+      const popup = window.open(
+        data.authUrl,
+        'facebook-login',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+      );
+
+      // 監聽彈出視窗關閉（授權完成）
+      const checkPopup = setInterval(() => {
+        if (popup && popup.closed) {
+          clearInterval(checkPopup);
+          // 重新載入設定以檢查是否連接成功
+          queryClient.invalidateQueries({ queryKey: ['/api/facebook/settings'] });
+        }
+      }, 500);
     },
     onError: (error: Error) => {
       setErrorMessage(error.message);
@@ -132,6 +150,19 @@ export default function FacebookSettings() {
     onError: (error: Error) => {
       setErrorMessage(error.message);
     },
+  });
+
+  // 監聽彈出視窗的授權完成訊息
+  useState(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data.type === 'facebook-auth-success') {
+        setSuccessMessage('Facebook 連接成功！');
+        queryClient.invalidateQueries({ queryKey: ['/api/facebook/settings'] });
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
   });
 
   // 處理 URL 參數（登入回來後的狀態）
