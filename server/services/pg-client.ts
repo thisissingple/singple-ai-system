@@ -44,7 +44,7 @@ export function createPool(mode: 'transaction' | 'session' = 'transaction') {
     throw new Error('資料庫 URL 未配置 (SUPABASE_DB_URL)');
   }
 
-  return new Pool({
+  const pool = new Pool({
     connectionString: dbUrl,
     ssl: { rejectUnauthorized: false },
     // 連線池設定
@@ -53,6 +53,23 @@ export function createPool(mode: 'transaction' | 'session' = 'transaction') {
     connectionTimeoutMillis: 10000, // 連線逾時（10秒）
     query_timeout: 30000, // 查詢逾時（30秒）
   });
+
+  // 🛡️ 防止 pooler 斷線導致 Node.js 崩潰
+  // Supabase Transaction Pooler 會強制終止長時間查詢，造成 unhandled error event
+  pool.on('error', (err, client) => {
+    console.error('❌ Unexpected database connection error:', err.message);
+    console.error('   Error code:', err.code);
+    console.error('   This error has been caught and will not crash the server.');
+
+    // 如果是 pooler 斷線錯誤，記錄詳細資訊
+    if (err.message?.includes('termination') || err.message?.includes('shutdown')) {
+      console.error('⚠️  This appears to be a Supabase pooler timeout.');
+      console.error('   Consider using Session Pooler (port 6543) instead of Transaction Pooler (port 5432)');
+      console.error('   Or optimize queries to complete faster.');
+    }
+  });
+
+  return pool;
 }
 
 /**

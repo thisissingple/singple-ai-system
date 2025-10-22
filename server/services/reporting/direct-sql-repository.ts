@@ -1,6 +1,24 @@
 /**
  * Direct SQL Repository
  * 使用 Supabase Client 直接查詢繞過 PostgREST schema cache 問題
+ *
+ * ⚠️  IMPORTANT: Transaction Pooler Timeout Issue
+ * ===============================================
+ * 這個 repository 使用 Supabase Client，它透過 PostgREST 連接到資料庫。
+ * 預設使用 Transaction Pooler (port 5432)，有嚴格的查詢時間限制。
+ *
+ * 問題：
+ * - 當查詢時間超過 ~5-7 秒，Transaction Pooler 會強制終止連線
+ * - 這會導致 {:shutdown, :db_termination} 錯誤
+ * - 可能造成 502 錯誤或 Node.js 崩潰
+ *
+ * 解決方案：
+ * 1. 【推薦】切換到 Session Pooler (port 6543) - 支援較長查詢時間
+ *    在 Zeabur 環境變數中，將 SUPABASE_URL 的 port 從 5432 改為 6543
+ * 2. 或優化查詢邏輯，使用分頁或更精確的過濾條件
+ * 3. 或使用 Direct Connection（無 pooler 限制）
+ *
+ * 參考：https://supabase.com/docs/guides/database/connecting-to-postgres#connection-pooler
  */
 
 import { getSupabaseClient } from '../supabase-client';

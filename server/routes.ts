@@ -3625,8 +3625,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: true,
         data: reportData,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error generating total report:', error);
+
+      // 🛡️ 特別處理 Supabase pooler 斷線錯誤
+      const errorMessage = error?.message || String(error);
+      const isPoolerTimeout = errorMessage.includes('termination') ||
+                             errorMessage.includes('shutdown') ||
+                             errorMessage.includes('db_termination');
+
+      if (isPoolerTimeout) {
+        console.error('⚠️  Supabase Transaction Pooler timeout detected!');
+        console.error('   This query took too long for the Transaction Pooler.');
+        console.error('   Recommendation: Switch to Session Pooler (port 6543) in SUPABASE_URL');
+
+        return res.status(503).json({
+          success: false,
+          error: 'Database query timeout',
+          message: '資料庫查詢超時。請稍後再試，或聯絡管理員切換到 Session Pooler 以支援更長的查詢時間。',
+        });
+      }
+
       res.status(500).json({
         success: false,
         error: 'Internal server error',
