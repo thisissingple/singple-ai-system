@@ -35,6 +35,7 @@ import TeachingQualityList from "@/pages/teaching-quality/teaching-quality-list"
 import TeachingQualityDetail from "@/pages/teaching-quality/teaching-quality-detail";
 import LoginPage from "@/pages/auth/login";
 import ChangePasswordPage from "@/pages/auth/change-password";
+import PublicTrialClassForm from "@/pages/forms/public-trial-class-form";
 
 function Router() {
   return (
@@ -42,6 +43,7 @@ function Router() {
       {/* 公開路由 - 無需登入 */}
       <Route path="/login" component={LoginPage} />
       <Route path="/forms/share/:id" component={PublicFormPage} />
+      <Route path="/forms/public/trial-class" component={PublicTrialClassForm} />
 
       {/* 需要登入但可在未修改密碼時訪問 */}
       <Route path="/change-password">

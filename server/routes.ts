@@ -5411,6 +5411,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ============================================================================
+  // Public Form APIs (No Authentication Required)
+  // 公開表單 API（不需要登入）
+  // ============================================================================
+
+  // 公開提交表單資料（不需登入）
+  app.post('/api/forms/public/:id/submit', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const result = await customFormService.submitFormData({
+        form_id: id,
+        data: req.body.data,
+        submitted_by: 'public' // 公開表單提交者標記為 public
+      });
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error('公開表單提交失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 取得公開的老師列表（不需登入）
+  app.get('/api/teachers/public', async (req, res) => {
+    try {
+      const pool = createPool();
+      const result = await queryDatabase(
+        pool,
+        `SELECT DISTINCT first_name as name
+         FROM users
+         WHERE 'teacher' = ANY(roles)
+         AND status = 'active'
+         AND first_name IS NOT NULL
+         ORDER BY first_name ASC`
+      );
+
+      const teachers = result.rows.map(row => row.name);
+      res.json({ success: true, teachers });
+    } catch (error: any) {
+      console.error('取得老師列表失敗:', error);
+      // 返回備用列表
+      res.json({ success: true, teachers: ['Karen', 'Vicky', 'Orange', 'Elena'] });
+    }
+  });
+
+  // ============================================================================
   // Teaching Quality Analysis API Endpoints
   // ============================================================================
 
