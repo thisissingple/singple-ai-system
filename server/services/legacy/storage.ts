@@ -45,7 +45,7 @@ import {
 } from "../../../configs/sheet-mapping-defaults";
 
 export interface IStorage {
-  // User operations - IMPORTANT: Required for Replit Auth
+  // User operations - IMPORTANT: Required for authentication
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
   updateUserLastLogin(id: string): Promise<User | undefined>;
@@ -321,7 +321,7 @@ export class MemStorage implements IStorage {
     }
   }
 
-  // User operations - IMPORTANT: Required for Replit Auth
+  // User operations - IMPORTANT: Required for authentication
   async getUser(id: string): Promise<User | undefined> {
     return this.users.get(id);
   }

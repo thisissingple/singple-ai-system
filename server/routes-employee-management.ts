@@ -4,7 +4,7 @@
  */
 
 import type { Express } from 'express';
-import { isAuthenticated, requireAdmin } from './replitAuth';
+import { isAuthenticated, requireAdmin } from './auth';
 import { createClient } from '@supabase/supabase-js';
 import { queryDatabase } from './services/pg-client';
 

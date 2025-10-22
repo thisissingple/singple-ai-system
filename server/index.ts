@@ -6,10 +6,10 @@ import { startAutoAnalyzer, stopAutoAnalyzer } from "./services/teaching-quality
 
 /**
  * Load environment variables from .env file
- * This is required for local/Replit development where .env is not auto-loaded
+ * This is required for local development where .env is not auto-loaded
  *
- * override: true - 強制使用 .env 的值覆蓋 Replit Secrets
- * 這樣可以確保認證系統正常啟用（SKIP_AUTH=false）
+ * override: true - Force .env values to take precedence
+ * This ensures authentication system works correctly
  */
 dotenv.config({ override: true });
 
@@ -20,13 +20,13 @@ console.log(`   SKIP_AUTH: ${process.env.SKIP_AUTH || 'not set'}`);
 console.log(`   PORT: ${process.env.PORT || 'not set'}`);
 
 /**
- * ⚠️ REPLIT PROJECT NOTICE ⚠️
- * This server is designed to run on Replit environment.
- * PORT must be provided by Replit - do not hardcode any port values.
- * Replit automatically assigns PORT environment variable.
+ * ⚠️ ZEABUR DEPLOYMENT NOTICE ⚠️
+ * This server is designed to run on Zeabur platform.
+ * PORT can be configured via environment variable (defaults to 5000).
+ * Zeabur automatically assigns PORT in production.
  */
 
-// Graceful shutdown handlers for Replit
+// Graceful shutdown handlers
 process.on('SIGTERM', () => {
   log('Received SIGTERM, shutting down gracefully...');
   stopAutoAnalyzer();
