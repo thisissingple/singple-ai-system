@@ -59,6 +59,7 @@
 - **[TELEMARKETING_SYSTEM_COMPLETE.md](TELEMARKETING_SYSTEM_COMPLETE.md)** - 完整開發報告
 - **[PROJECT_PROGRESS.md](PROJECT_PROGRESS.md)** - 專案進度追蹤（2602 行）
 - **[TODAY_COMPLETION_SUMMARY.md](TODAY_COMPLETION_SUMMARY.md)** - 今日完成總結
+- **[FACEBOOK_WEBHOOK_SETUP.md](FACEBOOK_WEBHOOK_SETUP.md)** - Facebook Webhook 設定 ⭐
 
 ### 系統狀態
 - **[DEPLOYMENT_STATUS.md](DEPLOYMENT_STATUS.md)** - 部署狀態報告
@@ -112,6 +113,11 @@ npx tsx tests/test-ai-field-mapper.ts
 
 # 環境變數檢查
 npx tsx tests/test-env-check.ts
+
+# Facebook Webhook 測試 ⭐
+npx tsx tests/test-facebook-webhook.ts
+# 或測試線上版本
+WEBHOOK_URL=https://singple-ai-system.zeabur.app/api/webhooks/facebook-leads npx tsx tests/test-facebook-webhook.ts
 ```
 
 ---
@@ -227,11 +233,17 @@ A: 正常，後端 API 待實作（Phase 3）
 
 ### API 端點
 ```
+# 電訪系統
 GET  /api/telemarketing/calls           # 查詢通話記錄
 GET  /api/telemarketing/calls/stats     # 統計資訊
 POST /api/telemarketing/calls           # 新增通話記錄
 GET  /api/trial-class-purchases/students # 學生列表
 GET  /api/teachers                      # 教師列表
+
+# Facebook Webhook ⭐
+POST /api/webhooks/facebook-leads       # 接收 FB Lead Ads 名單
+GET  /api/webhooks/facebook-leads       # FB 訂閱驗證
+GET  /api/leads/ad-leads                # 取得廣告名單列表
 ```
 
 ### 核心檔案
