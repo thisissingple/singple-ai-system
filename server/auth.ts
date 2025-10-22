@@ -19,13 +19,15 @@ export function getSession() {
       const pgStore = connectPg(session);
       sessionStore = new pgStore({
         conString: process.env.SESSION_DB_URL,
-        createTableIfMissing: false,
+        createTableIfMissing: true,  // Auto-create table if missing
         ttl: sessionTtl,
         tableName: "sessions",
       });
       console.log("✓ Using PostgreSQL session store");
     } catch (error) {
-      console.warn("⚠️  PostgreSQL session store failed, using memory store");
+      console.error("⚠️  PostgreSQL session store error:", error);
+      console.warn("⚠️  Falling back to memory session store");
+      // Fallback to memory store if PostgreSQL fails
     }
   } else {
     console.log("ℹ️  Using memory session store (development mode)");
