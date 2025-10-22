@@ -5143,6 +5143,437 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ========================================
+  // 廣告名單系統 API (Facebook Lead Ads)
+  // ========================================
+
+  // Webhook - 接收 Facebook Lead Ads 名單
+  app.post('/api/webhooks/facebook-leads', async (req, res) => {
+    try {
+      const { object, entry } = req.body;
+
+      // 驗證是否為 Facebook page webhook
+      if (object !== 'page') {
+        return res.status(400).json({ error: 'Invalid webhook object type' });
+      }
+
+      if (!isSupabaseAvailable()) {
+        console.error('⚠️  Supabase 未連線，無法儲存 Facebook 名單');
+        return res.status(503).json({ error: 'Supabase 未連線' });
+      }
+
+      const supabase = getSupabaseClient();
+      const insertedLeads = [];
+
+      // 處理每個 entry（可能有多個名單）
+      for (const entryItem of entry) {
+        const changes = entryItem.changes || [];
+
+        for (const change of changes) {
+          if (change.field === 'leadgen') {
+            const leadgenData = change.value;
+            const {
+              leadgen_id,
+              ad_id,
+              ad_name,
+              form_id,
+              form_name,
+              campaign_id,
+              campaign_name,
+              created_time,
+              field_data,
+            } = leadgenData;
+
+            // 解析表單欄位資料
+            const fieldMap: Record<string, string> = {};
+            if (field_data && Array.isArray(field_data)) {
+              field_data.forEach((field: any) => {
+                fieldMap[field.name] = field.values?.[0] || '';
+              });
+            }
+
+            // 提取姓名、電話、Email
+            const studentName = fieldMap['姓名'] || fieldMap['full_name'] || fieldMap['name'] || '';
+            const studentPhone = fieldMap['電話'] || fieldMap['phone_number'] || fieldMap['phone'] || '';
+            const studentEmail = fieldMap['Email'] || fieldMap['email'] || '';
+
+            // 驗證必填欄位
+            if (!studentName || !studentPhone) {
+              console.warn('⚠️  名單缺少姓名或電話，跳過:', leadgen_id);
+              continue;
+            }
+
+            // 檢查是否已存在（防止重複）
+            const { data: existingLead } = await supabase
+              .from('ad_leads')
+              .select('id')
+              .eq('leadgen_id', leadgen_id)
+              .single();
+
+            if (existingLead) {
+              console.log(`ℹ️  名單已存在，跳過: ${leadgen_id}`);
+              continue;
+            }
+
+            // 插入新名單
+            const { data: newLead, error } = await supabase
+              .from('ad_leads')
+              .insert({
+                leadgen_id,
+                ad_id,
+                ad_name,
+                campaign_id,
+                campaign_name,
+                form_id,
+                form_name,
+                student_name: studentName,
+                student_phone: studentPhone,
+                student_email: studentEmail || null,
+                claim_status: 'unclaimed',
+                contact_status: 'pending',
+                stage1_status: 'pending',
+                stage2_status: 'pending',
+                stage3_status: 'pending',
+                raw_data: {
+                  facebook_data: leadgenData,
+                  field_map: fieldMap,
+                  received_at: new Date().toISOString(),
+                },
+              })
+              .select()
+              .single();
+
+            if (error) {
+              console.error('❌ 插入名單失敗:', error);
+              continue;
+            }
+
+            insertedLeads.push(newLead);
+            console.log(`✅ 新增廣告名單: ${studentName} (${studentPhone})`);
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `成功接收 ${insertedLeads.length} 筆名單`,
+        count: insertedLeads.length,
+      });
+    } catch (error: any) {
+      console.error('Facebook webhook 錯誤:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Webhook 驗證端點（Facebook 訂閱驗證）
+  app.get('/api/webhooks/facebook-leads', (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    // 驗證 token（需要在環境變數設定 FACEBOOK_VERIFY_TOKEN）
+    const VERIFY_TOKEN = process.env.FACEBOOK_VERIFY_TOKEN || 'singple_webhook_2024';
+
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+      console.log('✅ Facebook webhook 驗證成功');
+      res.status(200).send(challenge);
+    } else {
+      console.error('❌ Facebook webhook 驗證失敗');
+      res.sendStatus(403);
+    }
+  });
+
+  // GET - 取得廣告名單列表（支援篩選）
+  app.get('/api/leads/ad-leads', isAuthenticated, async (req, res) => {
+    try {
+      const {
+        claim_status,
+        stage1_status,
+        stage2_status,
+        claimed_by,
+        start_date,
+        end_date,
+        page = '1',
+        limit = '20',
+      } = req.query;
+
+      if (!isSupabaseAvailable()) {
+        return res.status(503).json({ error: 'Supabase 未連線' });
+      }
+
+      const supabase = getSupabaseClient();
+      let query = supabase.from('ad_leads').select('*', { count: 'exact' });
+
+      // 篩選條件
+      if (claim_status) query = query.eq('claim_status', claim_status);
+      if (stage1_status) query = query.eq('stage1_status', stage1_status);
+      if (stage2_status) query = query.eq('stage2_status', stage2_status);
+      if (claimed_by) query = query.eq('claimed_by', claimed_by);
+      if (start_date) query = query.gte('created_at', start_date);
+      if (end_date) query = query.lte('created_at', end_date);
+
+      // 分頁
+      const pageNum = parseInt(page as string);
+      const limitNum = parseInt(limit as string);
+      const offset = (pageNum - 1) * limitNum;
+      query = query.range(offset, offset + limitNum - 1);
+
+      // 排序（最新優先）
+      query = query.order('created_at', { ascending: false });
+
+      const { data, error, count } = await query;
+
+      if (error) {
+        console.error('查詢名單失敗:', error);
+        return res.status(500).json({ error: error.message });
+      }
+
+      res.json({
+        success: true,
+        data,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total: count || 0,
+          totalPages: Math.ceil((count || 0) / limitNum),
+        },
+      });
+    } catch (error: any) {
+      console.error('廣告名單列表 API 錯誤:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // PATCH - 認領名單
+  app.patch('/api/leads/ad-leads/:id/claim', isAuthenticated, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const user = (req as any).user;
+
+      if (!isSupabaseAvailable()) {
+        return res.status(503).json({ error: 'Supabase 未連線' });
+      }
+
+      const supabase = getSupabaseClient();
+
+      // 檢查名單是否存在且未被認領
+      const { data: lead } = await supabase
+        .from('ad_leads')
+        .select('id, claim_status')
+        .eq('id', id)
+        .single();
+
+      if (!lead) {
+        return res.status(404).json({ error: '找不到此名單' });
+      }
+
+      if (lead.claim_status === 'claimed') {
+        return res.status(400).json({ error: '此名單已被認領' });
+      }
+
+      // 認領名單
+      const { data, error } = await supabase
+        .from('ad_leads')
+        .update({
+          claim_status: 'claimed',
+          claimed_by: user.first_name || user.email,
+          claimed_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('認領名單失敗:', error);
+        return res.status(500).json({ error: error.message });
+      }
+
+      res.json({
+        success: true,
+        message: '認領成功',
+        data,
+      });
+    } catch (error: any) {
+      console.error('認領名單 API 錯誤:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // PATCH - 更新名單狀態
+  app.patch('/api/leads/ad-leads/:id', isAuthenticated, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+
+      if (!isSupabaseAvailable()) {
+        return res.status(503).json({ error: 'Supabase 未連線' });
+      }
+
+      const supabase = getSupabaseClient();
+
+      // 更新名單
+      const { data, error } = await supabase
+        .from('ad_leads')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('更新名單失敗:', error);
+        return res.status(500).json({ error: error.message });
+      }
+
+      res.json({
+        success: true,
+        message: '更新成功',
+        data,
+      });
+    } catch (error: any) {
+      console.error('更新名單 API 錯誤:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GET - 廣告成效報表（兩階段轉換率）
+  app.get('/api/reports/ad-performance', isAuthenticated, async (req, res) => {
+    try {
+      const {
+        start_date,
+        end_date,
+        campaign_id,
+        groupBy = 'campaign', // 'campaign' or 'daily'
+      } = req.query;
+
+      if (!isSupabaseAvailable()) {
+        return res.status(503).json({ error: 'Supabase 未連線' });
+      }
+
+      const supabase = getSupabaseClient();
+
+      // 建立基本查詢
+      let query = supabase.from('ad_leads').select('*');
+
+      // 時間篩選（預設本週）
+      if (start_date) {
+        query = query.gte('created_at', start_date);
+      } else {
+        // 預設本週一
+        const monday = new Date();
+        monday.setDate(monday.getDate() - monday.getDay() + 1);
+        monday.setHours(0, 0, 0, 0);
+        query = query.gte('created_at', monday.toISOString());
+      }
+
+      if (end_date) {
+        query = query.lte('created_at', end_date);
+      }
+
+      if (campaign_id) {
+        query = query.eq('campaign_id', campaign_id);
+      }
+
+      const { data: leads, error } = await query;
+
+      if (error) {
+        console.error('查詢廣告成效失敗:', error);
+        return res.status(500).json({ error: error.message });
+      }
+
+      // 計算總覽數據（三階段轉換）
+      const totalLeads = leads?.length || 0;
+
+      // 階段 1：預約諮詢（出現在 EOD）
+      const stage1Converted = leads?.filter(l => l.stage1_status === 'scheduled').length || 0;
+
+      // 階段 2：是否上線
+      const stage2Converted = leads?.filter(l => l.stage2_status === 'showed').length || 0;
+
+      // 階段 3：高階課程成交
+      const stage3Converted = leads?.filter(l => l.stage3_status === 'converted').length || 0;
+      const trialOnlyCount = leads?.filter(l => l.stage3_status === 'trial_only').length || 0;
+
+      const totalRevenue = leads?.reduce((sum, l) => sum + (parseFloat(l.deal_amount) || 0), 0) || 0;
+
+      const stage1ConversionRate = totalLeads > 0 ? (stage1Converted / totalLeads) * 100 : 0;
+      const stage2ConversionRate = stage1Converted > 0 ? (stage2Converted / stage1Converted) * 100 : 0;
+      const stage3ConversionRate = stage2Converted > 0 ? (stage3Converted / stage2Converted) * 100 : 0;
+      const overallConversionRate = totalLeads > 0 ? (stage3Converted / totalLeads) * 100 : 0;
+
+      // 按廣告活動分組統計
+      const campaignStats: Record<string, any> = {};
+      leads?.forEach(lead => {
+        const campaignName = lead.campaign_name || '未知廣告活動';
+        if (!campaignStats[campaignName]) {
+          campaignStats[campaignName] = {
+            campaign_name: campaignName,
+            campaign_id: lead.campaign_id,
+            total_leads: 0,
+            stage1_converted: 0,
+            stage2_converted: 0,
+            stage3_converted: 0,
+            trial_only: 0,
+            total_revenue: 0,
+          };
+        }
+
+        campaignStats[campaignName].total_leads += 1;
+        if (lead.stage1_status === 'scheduled') {
+          campaignStats[campaignName].stage1_converted += 1;
+        }
+        if (lead.stage2_status === 'showed') {
+          campaignStats[campaignName].stage2_converted += 1;
+        }
+        if (lead.stage3_status === 'converted') {
+          campaignStats[campaignName].stage3_converted += 1;
+          campaignStats[campaignName].total_revenue += parseFloat(lead.deal_amount) || 0;
+        }
+        if (lead.stage3_status === 'trial_only') {
+          campaignStats[campaignName].trial_only += 1;
+        }
+      });
+
+      // 計算各廣告活動的轉換率
+      const campaignList = Object.values(campaignStats).map((campaign: any) => ({
+        ...campaign,
+        stage1_conversion_rate: campaign.total_leads > 0
+          ? ((campaign.stage1_converted / campaign.total_leads) * 100).toFixed(2)
+          : '0.00',
+        stage2_conversion_rate: campaign.stage1_converted > 0
+          ? ((campaign.stage2_converted / campaign.stage1_converted) * 100).toFixed(2)
+          : '0.00',
+        stage3_conversion_rate: campaign.stage2_converted > 0
+          ? ((campaign.stage3_converted / campaign.stage2_converted) * 100).toFixed(2)
+          : '0.00',
+        overall_conversion_rate: campaign.total_leads > 0
+          ? ((campaign.stage3_converted / campaign.total_leads) * 100).toFixed(2)
+          : '0.00',
+      }));
+
+      res.json({
+        success: true,
+        data: {
+          summary: {
+            total_leads: totalLeads,
+            stage1_converted: stage1Converted,
+            stage2_converted: stage2Converted,
+            stage3_converted: stage3Converted,
+            trial_only: trialOnlyCount,
+            total_revenue: totalRevenue,
+            stage1_conversion_rate: stage1ConversionRate.toFixed(2) + '%',
+            stage2_conversion_rate: stage2ConversionRate.toFixed(2) + '%',
+            stage3_conversion_rate: stage3ConversionRate.toFixed(2) + '%',
+            overall_conversion_rate: overallConversionRate.toFixed(2) + '%',
+          },
+          campaigns: campaignList,
+        },
+      });
+    } catch (error: any) {
+      console.error('廣告成效報表 API 錯誤:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ================================================
   // Custom Forms API - 自訂表單系統
   // ================================================

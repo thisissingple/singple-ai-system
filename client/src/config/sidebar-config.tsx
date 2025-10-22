@@ -20,6 +20,9 @@ import {
   PenTool,
   FormInput,
   GraduationCap,
+  Phone,
+  PhoneCall,
+  BarChart3,
 } from 'lucide-react';
 import { SidebarSectionConfig } from '@/components/layout/sidebar';
 import type { Role } from './permissions';
@@ -96,6 +99,29 @@ export const sidebarConfig: SidebarSection[] = [
         icon: Smile,
         badge: '即將推出',
         requiredRoles: ['admin', 'manager', 'teacher'],
+      },
+    ],
+  },
+  {
+    title: '電訪系統',
+    items: [
+      {
+        label: '廣告名單',
+        href: '/telemarketing/ad-leads',
+        icon: Phone,
+        requiredRoles: ['admin', 'manager', 'setter'],
+      },
+      {
+        label: '電訪記錄',
+        href: '/telemarketing/call-records',
+        icon: PhoneCall,
+        requiredRoles: ['admin', 'manager', 'setter'],
+      },
+      {
+        label: '廣告成效',
+        href: '/telemarketing/ad-performance',
+        icon: BarChart3,
+        requiredRoles: ['admin', 'manager'],
       },
     ],
   },
