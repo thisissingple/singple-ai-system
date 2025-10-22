@@ -23,6 +23,7 @@ import {
   Phone,
   PhoneCall,
   BarChart3,
+  Facebook,
 } from 'lucide-react';
 import { SidebarSectionConfig } from '@/components/layout/sidebar';
 import type { Role } from './permissions';
@@ -192,6 +193,12 @@ export const sidebarConfig: SidebarSection[] = [
         href: '/settings/form-builder',
         icon: FormInput,
         requiredRoles: ['admin', 'manager'],
+      },
+      {
+        label: 'Facebook 整合',
+        href: '/settings/facebook',
+        icon: Facebook,
+        requiredRoles: ['admin'],
       },
       {
         label: '系統設定',

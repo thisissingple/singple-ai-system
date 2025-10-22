@@ -31,6 +31,7 @@ import FormBuilderList from "@/pages/settings/form-builder-list";
 import FormBuilderEditor from "@/pages/settings/form-builder-editor";
 import UserManagement from "@/pages/settings/user-management";
 import EmployeesPage from "@/pages/settings/employees";
+import FacebookSettings from "@/pages/settings/facebook-settings";
 import TeachingQualityList from "@/pages/teaching-quality/teaching-quality-list";
 import TeachingQualityDetail from "@/pages/teaching-quality/teaching-quality-detail";
 import LoginPage from "@/pages/auth/login";
@@ -134,6 +135,9 @@ function Router() {
       </Route>
       <Route path="/settings/employees">
         <ProtectedRoute><EmployeesPage /></ProtectedRoute>
+      </Route>
+      <Route path="/settings/facebook">
+        <ProtectedRoute><FacebookSettings /></ProtectedRoute>
       </Route>
 
       {/* 舊路由兼容（保持原有功能） */}
