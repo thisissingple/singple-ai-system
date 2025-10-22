@@ -7235,5 +7235,393 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ========================================
+  // Facebook Lead Ads API 整合
+  // ========================================
+
+  const {
+    generateFacebookAuthUrl,
+    exchangeCodeForToken,
+    getFacebookUser,
+    getFacebookPages,
+    getPageLeadForms,
+    getFormLeads,
+    parseFieldData,
+    checkFacebookConfig,
+  } = await import('./services/facebook-service.js');
+
+  // 1. 取得 Facebook 登入 URL
+  app.get('/api/facebook/auth-url', requireAdmin, async (req, res) => {
+    try {
+      // 檢查環境變數
+      const configCheck = checkFacebookConfig();
+      if (!configCheck.valid) {
+        return res.status(500).json({
+          success: false,
+          error: 'Facebook 環境變數未設定',
+          missing: configCheck.missing,
+        });
+      }
+
+      // 產生隨機 state 防止 CSRF
+      const state = Math.random().toString(36).substring(7);
+
+      // 將 state 存到 session（供 callback 驗證用）
+      if (req.session) {
+        req.session.facebookOAuthState = state;
+      }
+
+      const authUrl = generateFacebookAuthUrl(state);
+
+      res.json({ success: true, authUrl });
+    } catch (error: any) {
+      console.error('產生 Facebook 登入 URL 失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 2. Facebook OAuth Callback
+  app.get('/api/facebook/callback', async (req, res) => {
+    try {
+      const { code, state, error, error_description } = req.query;
+
+      // 檢查是否有錯誤
+      if (error) {
+        console.error('Facebook OAuth 錯誤:', error, error_description);
+        return res.redirect(`/settings/facebook?error=${error}`);
+      }
+
+      // 驗證 state（防止 CSRF）
+      if (req.session?.facebookOAuthState !== state) {
+        console.error('State 不符，可能是 CSRF 攻擊');
+        return res.redirect('/settings/facebook?error=invalid_state');
+      }
+
+      if (!code || typeof code !== 'string') {
+        return res.redirect('/settings/facebook?error=no_code');
+      }
+
+      // 用 code 換取 access_token
+      const tokenData = await exchangeCodeForToken(code);
+      const { access_token, expires_in } = tokenData;
+
+      // 取得使用者資訊
+      const fbUser = await getFacebookUser(access_token);
+
+      // 取得粉絲專頁列表（同時取得 page access token）
+      const pages = await getFacebookPages(access_token);
+
+      if (pages.length === 0) {
+        return res.redirect('/settings/facebook?error=no_pages');
+      }
+
+      // 預設選第一個粉絲專頁
+      const firstPage = pages[0];
+
+      // 計算 token 過期時間
+      const expiresAt = new Date(Date.now() + expires_in * 1000);
+
+      if (!isSupabaseAvailable()) {
+        return res.redirect('/settings/facebook?error=db_unavailable');
+      }
+
+      const supabase = getSupabaseClient();
+
+      // 檢查是否已有設定（Singleton）
+      const { data: existingSettings } = await supabase
+        .from('facebook_settings')
+        .select('id')
+        .single();
+
+      if (existingSettings) {
+        // 更新現有設定
+        await supabase
+          .from('facebook_settings')
+          .update({
+            access_token,
+            token_expires_at: expiresAt.toISOString(),
+            facebook_user_id: fbUser.id,
+            facebook_user_name: fbUser.name,
+            page_id: firstPage.id,
+            page_name: firstPage.name,
+            page_access_token: firstPage.access_token,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingSettings.id);
+      } else {
+        // 建立新設定
+        await supabase.from('facebook_settings').insert({
+          access_token,
+          token_expires_at: expiresAt.toISOString(),
+          facebook_user_id: fbUser.id,
+          facebook_user_name: fbUser.name,
+          page_id: firstPage.id,
+          page_name: firstPage.name,
+          page_access_token: firstPage.access_token,
+          sync_enabled: true,
+          sync_interval_minutes: 5,
+        });
+      }
+
+      // 清除 session 中的 state
+      if (req.session) {
+        delete req.session.facebookOAuthState;
+      }
+
+      // 重導向回設定頁面
+      res.redirect('/settings/facebook?success=true');
+    } catch (error: any) {
+      console.error('Facebook OAuth callback 失敗:', error);
+      res.redirect(`/settings/facebook?error=${encodeURIComponent(error.message)}`);
+    }
+  });
+
+  // 3. 取得 Facebook 設定狀態
+  app.get('/api/facebook/settings', requireAdmin, async (req, res) => {
+    try {
+      if (!isSupabaseAvailable()) {
+        return res.status(503).json({ success: false, error: 'Supabase 未連線' });
+      }
+
+      const supabase = getSupabaseClient();
+
+      const { data: settings } = await supabase
+        .from('facebook_settings')
+        .select('*')
+        .single();
+
+      if (!settings) {
+        return res.json({ success: true, connected: false, settings: null });
+      }
+
+      // 不返回敏感的 access_token
+      const safeSettings = {
+        connected: true,
+        facebook_user_name: settings.facebook_user_name,
+        page_id: settings.page_id,
+        page_name: settings.page_name,
+        form_ids: settings.form_ids || [],
+        form_names: settings.form_names || {},
+        sync_enabled: settings.sync_enabled,
+        sync_interval_minutes: settings.sync_interval_minutes,
+        last_sync_at: settings.last_sync_at,
+        last_sync_status: settings.last_sync_status,
+        last_sync_count: settings.last_sync_count,
+        last_sync_new_leads: settings.last_sync_new_leads,
+        last_sync_error: settings.last_sync_error,
+        token_expires_at: settings.token_expires_at,
+      };
+
+      res.json({ success: true, connected: true, settings: safeSettings });
+    } catch (error: any) {
+      console.error('取得 Facebook 設定失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 4. 取得粉絲專頁的表單列表
+  app.get('/api/facebook/forms', requireAdmin, async (req, res) => {
+    try {
+      if (!isSupabaseAvailable()) {
+        return res.status(503).json({ success: false, error: 'Supabase 未連線' });
+      }
+
+      const supabase = getSupabaseClient();
+
+      const { data: settings } = await supabase
+        .from('facebook_settings')
+        .select('page_id, page_access_token')
+        .single();
+
+      if (!settings) {
+        return res.status(400).json({ success: false, error: '尚未連接 Facebook' });
+      }
+
+      const forms = await getPageLeadForms(settings.page_id, settings.page_access_token);
+
+      res.json({ success: true, forms });
+    } catch (error: any) {
+      console.error('取得表單列表失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 5. 更新 Facebook 設定（選擇要追蹤的表單）
+  app.put('/api/facebook/settings', requireAdmin, async (req, res) => {
+    try {
+      const { form_ids, form_names, sync_enabled, sync_interval_minutes } = req.body;
+
+      if (!isSupabaseAvailable()) {
+        return res.status(503).json({ success: false, error: 'Supabase 未連線' });
+      }
+
+      const supabase = getSupabaseClient();
+
+      const updateData: any = {};
+
+      if (form_ids !== undefined) updateData.form_ids = form_ids;
+      if (form_names !== undefined) updateData.form_names = form_names;
+      if (sync_enabled !== undefined) updateData.sync_enabled = sync_enabled;
+      if (sync_interval_minutes !== undefined)
+        updateData.sync_interval_minutes = sync_interval_minutes;
+
+      const { data, error } = await supabase
+        .from('facebook_settings')
+        .update(updateData)
+        .eq('id', (await supabase.from('facebook_settings').select('id').single()).data.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      res.json({ success: true, settings: data });
+    } catch (error: any) {
+      console.error('更新 Facebook 設定失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 6. 手動同步名單
+  app.post('/api/facebook/sync', requireAdmin, async (req, res) => {
+    try {
+      if (!isSupabaseAvailable()) {
+        return res.status(503).json({ success: false, error: 'Supabase 未連線' });
+      }
+
+      const supabase = getSupabaseClient();
+
+      const { data: settings } = await supabase
+        .from('facebook_settings')
+        .select('*')
+        .single();
+
+      if (!settings || !settings.page_access_token) {
+        return res.status(400).json({ success: false, error: '尚未連接 Facebook' });
+      }
+
+      if (!settings.form_ids || settings.form_ids.length === 0) {
+        return res.status(400).json({ success: false, error: '尚未選擇要追蹤的表單' });
+      }
+
+      let totalNewLeads = 0;
+      let totalProcessed = 0;
+
+      // 對每個表單抓取名單
+      for (const formId of settings.form_ids) {
+        try {
+          // 取得最後一次同步時間（只抓新的）
+          const sinceTimestamp = settings.last_sync_at
+            ? Math.floor(new Date(settings.last_sync_at).getTime() / 1000)
+            : undefined;
+
+          const leads = await getFormLeads(formId, settings.page_access_token, {
+            sinceTimestamp,
+            limit: 100,
+          });
+
+          totalProcessed += leads.length;
+
+          // 插入到 ad_leads 表
+          for (const lead of leads) {
+            // 解析欄位資料
+            const { studentName, studentPhone, studentEmail, allFields } = parseFieldData(
+              lead.field_data
+            );
+
+            // 驗證必填欄位
+            if (!studentName || !studentPhone) {
+              console.warn(`名單缺少姓名或電話，跳過: ${lead.id}`);
+              continue;
+            }
+
+            // 檢查是否已存在
+            const { data: existingLead } = await supabase
+              .from('ad_leads')
+              .select('id')
+              .eq('leadgen_id', lead.id)
+              .single();
+
+            if (existingLead) {
+              console.log(`名單已存在，跳過: ${lead.id}`);
+              continue;
+            }
+
+            // 插入新名單
+            const { error } = await supabase.from('ad_leads').insert({
+              leadgen_id: lead.id,
+              ad_id: lead.ad_id || null,
+              ad_name: lead.ad_name || null,
+              form_id: lead.form_id,
+              form_name: settings.form_names?.[lead.form_id] || null,
+              student_name: studentName,
+              student_phone: studentPhone,
+              student_email: studentEmail || null,
+              claim_status: 'unclaimed',
+              contact_status: 'pending',
+              stage1_status: 'pending',
+              stage2_status: 'pending',
+              stage3_status: 'pending',
+              raw_data: {
+                facebook_data: lead,
+                field_map: allFields,
+                synced_at: new Date().toISOString(),
+              },
+            });
+
+            if (!error) {
+              totalNewLeads++;
+              console.log(`✅ 新增廣告名單: ${studentName} (${studentPhone})`);
+            }
+          }
+        } catch (formError: any) {
+          console.error(`抓取表單 ${formId} 失敗:`, formError);
+        }
+      }
+
+      // 更新同步狀態
+      await supabase
+        .from('facebook_settings')
+        .update({
+          last_sync_at: new Date().toISOString(),
+          last_sync_status: 'success',
+          last_sync_count: totalProcessed,
+          last_sync_new_leads: totalNewLeads,
+          last_sync_error: null,
+        })
+        .eq('id', settings.id);
+
+      res.json({
+        success: true,
+        message: `同步完成，處理 ${totalProcessed} 筆，新增 ${totalNewLeads} 筆`,
+        totalProcessed,
+        totalNewLeads,
+      });
+    } catch (error: any) {
+      console.error('同步名單失敗:', error);
+
+      // 記錄錯誤到資料庫
+      if (isSupabaseAvailable()) {
+        const supabase = getSupabaseClient();
+        const { data: settings } = await supabase
+          .from('facebook_settings')
+          .select('id')
+          .single();
+
+        if (settings) {
+          await supabase
+            .from('facebook_settings')
+            .update({
+              last_sync_at: new Date().toISOString(),
+              last_sync_status: 'error',
+              last_sync_error: error.message,
+            })
+            .eq('id', settings.id);
+        }
+      }
+
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   return httpServer;
 }
