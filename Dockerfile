@@ -23,8 +23,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install only production dependencies
-RUN npm install --omit=dev
+# Install ALL dependencies (vite is needed at runtime for this app)
+RUN npm install --include=dev
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
