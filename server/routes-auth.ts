@@ -39,19 +39,22 @@ export function registerAuthRoutes(app: Express) {
       }
 
       // 儲存 Session
+      console.log('[AUTH] Saving session for user:', result.user!.id);
       (req as any).session.userId = result.user!.id;
       (req as any).session.user = result.user;
 
       // 強制保存 session（確保 cookie 被正確設定）
       (req as any).session.save((err: any) => {
         if (err) {
-          console.error('Session 保存失敗:', err);
+          console.error('[AUTH] ❌ Session 保存失敗:', err);
+          console.error('[AUTH] Error details:', JSON.stringify(err, null, 2));
           return res.status(500).json({
             success: false,
-            error: '登入失敗，請稍後再試',
+            error: '登入失敗：Session 儲存錯誤',
           });
         }
 
+        console.log('[AUTH] ✅ Session saved successfully for user:', result.user!.id);
         res.json({
           success: true,
           user: result.user,

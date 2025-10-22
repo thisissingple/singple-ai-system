@@ -40,9 +40,10 @@ export function getSession() {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'lax' : 'none',
+      secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+      sameSite: 'lax', // Works with same-site requests
       maxAge: sessionTtl,
+      path: '/', // Ensure cookie is available for all paths
     },
   });
 }
