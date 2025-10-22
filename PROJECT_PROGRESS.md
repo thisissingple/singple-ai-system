@@ -1,11 +1,11 @@
 # 📊 專案進度追蹤文檔
 
-> **最後更新**: 2025-10-21（下午 3:30 PM）
+> **最後更新**: 2025-10-22（晚上 10:00 PM）
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家）
-> **專案狀態**: ✅ Phase 23 完成 - 員工管理系統遷移與功能修復
-> **當前階段**: 所有 Transaction Mode 問題已修復
-> **今日進度**: 修復 7 個功能 + 建立 2 個系統文檔
-> **整體進度**: 89% █████████████████░░░
+> **專案狀態**: ✅ Phase 24-26 完成 - 電訪系統 (學生跟進 + 通話記錄)
+> **當前階段**: 電訪系統 Phase 1 & 2 已完成，等待部署驗收
+> **今日進度**: 完成電訪系統核心功能 + Facebook 廣告追蹤系統
+> **整體進度**: 92% ██████████████████░░
 
 ---
 
@@ -126,7 +126,7 @@
 │  │  └─ ✅ 授權中介層修復
 │  │     └─ ✅ requireAdmin 支援 Session Auth
 │  │
-│  └─ ❌ Phase 24: 權限控制系統 ← 下一步！
+│  └─ ❌ Phase 27: 權限控制系統 ← 未來！
 │     ├─ ❌ API 層級權限過濾
 │     │  ├─ 體驗課報表 (教師只看自己)
 │     │  ├─ 諮詢記錄 (諮詢師只看自己)
@@ -141,8 +141,79 @@
 │        ├─ 建立測試帳號
 │        └─ 權限測試
 │
+├─ 📞 電訪系統 (90%) ✅ ← 今日完成！
+│  ├─ Phase 24: 學生跟進系統 ✅
+│  │  ├─ ✅ 學生跟進頁面 (student-follow-up.tsx)
+│  │  │  ├─ 優先級計算 (高/中/低 with 🔴🟡🟢)
+│  │  │  ├─ 6 個統計卡片
+│  │  │  ├─ 進階篩選 (今日待辦/狀態/優先級)
+│  │  │  ├─ 智能排序 (優先級 > 購買日期)
+│  │  │  └─ 搜尋功能
+│  │  ├─ ✅ 資料整合
+│  │  │  ├─ trial_class_purchases (購買記錄)
+│  │  │  ├─ trial_class_records (上課記錄)
+│  │  │  └─ telemarketing_calls (通話記錄)
+│  │  └─ ✅ UI/UX 優化
+│  │     ├─ 響應式卡片佈局
+│  │     ├─ 顏色標記 (紅/黃/綠)
+│  │     └─ 快速篩選按鈕
+│  │
+│  ├─ Phase 25: 通話記錄系統 ✅
+│  │  ├─ ✅ 撥打對話框 (call-dialog.tsx)
+│  │  │  ├─ 通話結果選擇 (已接通/未接通/拒接/無效)
+│  │  │  ├─ 條件式欄位 (僅「已接通」顯示)
+│  │  │  ├─ 聯絡狀態 (有意願/無意願/考慮中)
+│  │  │  ├─ 意願程度 (高/中/低)
+│  │  │  └─ 備註欄位
+│  │  ├─ ✅ 通話記錄列表 (call-records-list.tsx)
+│  │  │  ├─ 完整記錄查詢
+│  │  │  ├─ 篩選功能
+│  │  │  └─ 統計資訊
+│  │  └─ ✅ API 端點
+│  │     ├─ GET /api/telemarketing/calls
+│  │     ├─ GET /api/telemarketing/calls/stats
+│  │     └─ POST /api/telemarketing/calls
+│  │
+│  ├─ Phase 26: 教師分配系統 ✅
+│  │  ├─ ✅ 分配對話框 (assign-teacher-dialog.tsx)
+│  │  │  ├─ 教師列表顯示
+│  │  │  ├─ 工作量顯示 (active_students)
+│  │  │  ├─ 智能推薦 (⭐ 標記工作量最低者)
+│  │  │  └─ 預定上課日期選擇
+│  │  └─ ⏳ 後端 API (待實作)
+│  │     └─ POST /api/students/assign-teacher
+│  │
+│  ├─ ✅ 路由與導航
+│  │  ├─ App.tsx 路由設定
+│  │  ├─ sidebar-config.tsx 選單配置
+│  │  └─ 權限控制 (admin/manager/setter)
+│  │
+│  └─ ✅ 文檔系統
+│     ├─ TELEMARKETING_SYSTEM_COMPLETE.md (開發報告)
+│     ├─ TELEMARKETING_ACCEPTANCE_TEST.md (85+ 測試項)
+│     └─ HOW_TO_VERIFY.md (驗收指南)
+│
+├─ 📱 Facebook 廣告追蹤 (100%) ✅
+│  ├─ Phase 24: Lead Ads 整合 ✅
+│  │  ├─ ✅ 3 階段轉換漏斗
+│  │  │  ├─ Stage 1: Facebook Lead (fb_lead_ads)
+│  │  │  ├─ Stage 2: Trial Class (trial_class_purchases)
+│  │  │  └─ Stage 3: Conversion (conversions)
+│  │  ├─ ✅ 前端頁面
+│  │  │  ├─ ad-leads-list.tsx (名單列表)
+│  │  │  └─ ad-performance-report.tsx (成效報表)
+│  │  ├─ ✅ API 端點
+│  │  │  ├─ GET /api/facebook-leads
+│  │  │  ├─ POST /api/facebook-leads/webhook
+│  │  │  └─ GET /api/facebook-leads/performance
+│  │  └─ ✅ 資料庫遷移
+│  │     └─ Migration 035: fb_lead_ads 表
+│  │
+│  └─ ✅ 導航與權限
+│     └─ 側邊欄「廣告追蹤」選單
+│
 └─ 🚀 未來規劃 (0%)
-   ├─ ⏳ Phase 25: UI/UX 優化
+   ├─ ⏳ Phase 28: UI/UX 優化
    │  ├─ 員工前台 (Portal)
    │  ├─ 路由分流 (/admin vs /portal)
    │  ├─ 個人化儀表板
@@ -188,11 +259,18 @@
     │
 👥 員工管理 ──────────────── ✅ 完成 (95%)
     │
-🔐 認證系統 ──────────────── ✅ 剛完成
+🔐 認證系統 ──────────────── ✅ 完成
     │
-    ├─ 你在這裡 📍
+📞 電訪系統 ──────────────── ✅ 剛完成！Phase 1 & 2
     │
-❌ 權限控制 ──────────────── ⬅️ 下一步要做
+📱 FB 廣告追蹤 ─────────── ✅ 完成
+    │
+    ├─ 你在這裡 📍 等待部署驗收
+    │
+⏳ 電訪 Phase 3 ────────── ⬅️ 可選進階功能
+    │
+    ↓
+❌ 權限控制 ──────────────── 未來規劃
     │
     ↓
 ⏳ UI 優化 ───────────────── 未來
