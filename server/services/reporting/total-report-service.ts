@@ -159,7 +159,7 @@ export class TotalReportService {
         warnings
       );
 
-      const studentInsights = this.calculateStudentInsights(
+      const studentInsights = await this.calculateStudentInsights(
         attendanceData,
         purchaseData,
         eodsData,
@@ -706,17 +706,76 @@ export class TotalReportService {
   }
 
   /**
+   * 從 course_plans 表查詢方案的總堂數
+   */
+  private async getCoursePlanTotalClasses(planName: string): Promise<number | null> {
+    if (!planName) return null;
+
+    try {
+      const result = await queryDatabase(
+        'SELECT total_classes FROM course_plans WHERE plan_name = $1 AND is_active = TRUE',
+        [planName]
+      );
+
+      if (result.rows.length > 0) {
+        return result.rows[0].total_classes;
+      }
+      return null;
+    } catch (error) {
+      console.error(`Error querying course_plans for plan "${planName}":`, error);
+      return null;
+    }
+  }
+
+  /**
    * 計算學生數據
    */
-  private calculateStudentInsights(
+  private async calculateStudentInsights(
     attendanceData: any[],
     purchaseData: any[],
     eodsData: any[],
     warnings: string[]
-  ): TotalReportData['studentInsights'] {
+  ): Promise<TotalReportData['studentInsights']> {
     const insights: TotalReportData['studentInsights'] = [];
     const studentMap = new Map<string, any>();
     const studentsWithoutPurchase: string[] = []; // Track students in attendance but not in purchase
+
+    // Step 0: 批量查詢所有方案的總堂數（提升效能）
+    const planNamesSet = new Set<string>();
+    purchaseData.forEach((row) => {
+      const packageName = row.plan || row.data?.成交方案 || row.data?.plan || '';
+      if (packageName) planNamesSet.add(packageName);
+    });
+
+    const planTotalClassesMap = new Map<string, number>();
+    const missingPlans: string[] = [];
+
+    try {
+      const result = await queryDatabase(
+        'SELECT plan_name, total_classes FROM course_plans WHERE is_active = TRUE'
+      );
+
+      result.rows.forEach((row: any) => {
+        planTotalClassesMap.set(row.plan_name, row.total_classes);
+      });
+
+      // 檢查缺少的方案
+      planNamesSet.forEach((planName) => {
+        if (!planTotalClassesMap.has(planName)) {
+          missingPlans.push(planName);
+        }
+      });
+
+      if (missingPlans.length > 0) {
+        warnings.push(
+          `⚠️ 以下 ${missingPlans.length} 個方案尚未定義在 course_plans 表中，將使用原始資料的堂數：\n` +
+          missingPlans.map(p => `  - "${p}"`).join('\n')
+        );
+      }
+    } catch (error) {
+      console.error('Error querying course_plans:', error);
+      warnings.push('⚠️ 無法查詢 course_plans 表，將使用原始資料的堂數');
+    }
 
     // Step 1: Build from purchase records (most complete info)
     purchaseData.forEach((row, index) => {
@@ -730,12 +789,25 @@ export class TotalReportService {
       if (!email) return;
 
       const name = resolveField(row.data, 'studentName') || row.data?.學員姓名 || '';
-      // 優先從頂層欄位讀取（direct-sql-repository 已提取）
-      const totalTrialClasses = row.trial_class_count || parseNumberField(row.data?.體驗堂數) || 0;
+      const packageName = row.plan || row.data?.成交方案 || row.data?.plan || '';
+
+      // 🆕 優先從 course_plans 表查詢總堂數
+      let totalTrialClasses: number;
+      const planTotalFromDB = packageName ? planTotalClassesMap.get(packageName) : null;
+
+      if (planTotalFromDB !== null && planTotalFromDB !== undefined) {
+        // ✅ 從 course_plans 表取得總堂數
+        totalTrialClasses = planTotalFromDB;
+      } else {
+        // ⚠️ Fallback: 使用原始資料的堂數
+        totalTrialClasses = row.trial_class_count || parseNumberField(row.data?.體驗堂數) || 0;
+      }
+
+      // 計算已上堂數和剩餘堂數
       const remainingTrialClasses = row.remaining_classes || parseNumberField(row.data?.['剩餘堂數（自動計算）']) || 0;
       const attendedClasses = row.attended_classes || (totalTrialClasses - remainingTrialClasses);
+
       const currentStatus = row.status || row.data?.['目前狀態（自動計算）'] || '';
-      const packageName = row.plan || row.data?.成交方案 || row.data?.plan || '';
       const purchaseDateRaw = row.purchase_date || row.data?.購買日期 || row.data?.purchaseDate || '';
       const purchaseDate = parseDateField(purchaseDateRaw);
 
