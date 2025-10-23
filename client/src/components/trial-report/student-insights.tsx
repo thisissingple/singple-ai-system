@@ -260,36 +260,36 @@ function PriorityExplanationDialog() {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-1.5 border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-700">
-          <HelpCircle className="h-4 w-4" />
-          <span className="text-xs font-medium">優先級說明</span>
-        </Button>
+        <button className="h-8 px-3 text-xs rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-1.5">
+          <HelpCircle className="h-3.5 w-3.5" />
+          <span>優先級說明</span>
+        </button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>📋 學生跟進優先級規則</DialogTitle>
-          <DialogDescription>
+          <DialogTitle className="text-lg text-gray-900">學生跟進優先級規則</DialogTitle>
+          <DialogDescription className="text-sm text-gray-600">
             電話人員專用：幫助你快速識別需要優先聯繫的學生
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           {/* 分群說明 */}
-          <div className="border-l-4 border-blue-500 pl-4 py-2 bg-blue-50 rounded-r-lg">
-            <h3 className="font-semibold text-blue-900 mb-1">📌 學生分群</h3>
-            <p className="text-sm text-blue-800">
+          <div className="border-l-4 border-gray-300 pl-4 py-2 bg-gray-50 rounded-r-lg">
+            <h3 className="font-semibold text-gray-900 mb-1 text-sm">學生分群</h3>
+            <p className="text-sm text-gray-700">
               第一優先：<strong>未完課學生</strong>（未開始 + 體驗中）<br />
               第二優先：<strong>已完課學生</strong>（未轉高 + 已轉高）
             </p>
           </div>
 
           {/* 高優先 */}
-          <div className="border-l-4 border-red-500 pl-4 py-2 bg-red-50 rounded-r-lg">
-            <h3 className="font-semibold text-red-900 flex items-center gap-2 mb-2">
-              <span className="text-2xl">🔴</span>
+          <div className="border-l-4 border-orange-400 pl-4 py-2 bg-orange-50 rounded-r-lg">
+            <h3 className="font-semibold text-gray-900 flex items-center gap-2 mb-2 text-sm">
+              <div className="w-2.5 h-2.5 rounded-full bg-orange-500"></div>
               高優先（立即處理）
             </h3>
-            <div className="space-y-1.5 text-sm text-red-800">
+            <div className="space-y-1.5 text-sm text-gray-700">
               <p><strong>未完課：</strong></p>
               <ul className="list-disc list-inside ml-2 space-y-0.5">
                 <li><strong>未開始</strong> + 購買 <strong>7 天內</strong> → 熱度最高，趁熱打鐵</li>
@@ -303,12 +303,12 @@ function PriorityExplanationDialog() {
           </div>
 
           {/* 中優先 */}
-          <div className="border-l-4 border-yellow-500 pl-4 py-2 bg-yellow-50 rounded-r-lg">
-            <h3 className="font-semibold text-yellow-900 flex items-center gap-2 mb-2">
-              <span className="text-2xl">🟡</span>
+          <div className="border-l-4 border-orange-300 pl-4 py-2 bg-orange-50/50 rounded-r-lg">
+            <h3 className="font-semibold text-gray-900 flex items-center gap-2 mb-2 text-sm">
+              <div className="w-2.5 h-2.5 rounded-full bg-orange-300"></div>
               中優先（本週內處理）
             </h3>
-            <div className="space-y-1.5 text-sm text-yellow-800">
+            <div className="space-y-1.5 text-sm text-gray-700">
               <p><strong>未完課：</strong></p>
               <ul className="list-disc list-inside ml-2 space-y-0.5">
                 <li><strong>未開始</strong> + 購買 <strong>8-14 天</strong> → 開始冷卻，加快聯繫</li>
@@ -322,12 +322,12 @@ function PriorityExplanationDialog() {
           </div>
 
           {/* 低優先 */}
-          <div className="border-l-4 border-green-500 pl-4 py-2 bg-green-50 rounded-r-lg">
-            <h3 className="font-semibold text-green-900 flex items-center gap-2 mb-2">
-              <span className="text-2xl">🟢</span>
+          <div className="border-l-4 border-gray-300 pl-4 py-2 bg-gray-50 rounded-r-lg">
+            <h3 className="font-semibold text-gray-900 flex items-center gap-2 mb-2 text-sm">
+              <div className="w-2.5 h-2.5 rounded-full bg-gray-300"></div>
               低優先（持續關注）
             </h3>
-            <div className="space-y-1.5 text-sm text-green-800">
+            <div className="space-y-1.5 text-sm text-gray-700">
               <p><strong>未完課：</strong></p>
               <ul className="list-disc list-inside ml-2 space-y-0.5">
                 <li><strong>未開始</strong> + 購買 <strong>15+ 天</strong> → 已冷淡，重新評估策略</li>
@@ -343,9 +343,9 @@ function PriorityExplanationDialog() {
           </div>
 
           {/* 排序說明 */}
-          <div className="border-l-4 border-purple-500 pl-4 py-2 bg-purple-50 rounded-r-lg">
-            <h3 className="font-semibold text-purple-900 mb-2">🎯 表格排序邏輯</h3>
-            <div className="space-y-1 text-sm text-purple-800">
+          <div className="border-l-4 border-gray-400 pl-4 py-2 bg-gray-100 rounded-r-lg">
+            <h3 className="font-semibold text-gray-900 mb-2 text-sm">表格排序邏輯</h3>
+            <div className="space-y-1 text-sm text-gray-700">
               <p><strong>1. 群組排序：</strong>未完課學生 → 已完課學生</p>
               <p><strong>2. 優先級排序：</strong>高優先 → 中優先 → 低優先</p>
               <p><strong>3. 細部排序：</strong></p>
@@ -358,10 +358,10 @@ function PriorityExplanationDialog() {
           </div>
 
           {/* 使用建議 */}
-          <div className="bg-gray-100 p-3 rounded-lg">
-            <h4 className="font-semibold text-gray-900 mb-2">💡 使用建議</h4>
+          <div className="bg-gray-50 border border-gray-200 p-3 rounded-lg">
+            <h4 className="font-semibold text-gray-900 mb-2 text-sm">使用建議</h4>
             <ul className="text-sm text-gray-700 space-y-1">
-              <li>• 每天優先處理 🔴 高優先學生</li>
+              <li>• 每天優先處理 <span className="inline-flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-orange-500"></div>高優先</span> 學生</li>
               <li>• 未開始學生：7天內是黃金期，盡快聯繫分配教師</li>
               <li>• 體驗中學生：剩1堂時提前準備轉換話術</li>
               <li>• 未轉高學生：<strong>完課後3天內是黃金期</strong>，趁熱打鐵</li>
