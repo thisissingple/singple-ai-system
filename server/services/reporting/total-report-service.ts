@@ -1274,8 +1274,7 @@ export class TotalReportService {
       }
 
       // 取得使用者資訊（包含業務身份）
-      const pool = createPool();
-      const userResult = await queryDatabase(pool, 'SELECT id, roles FROM users WHERE id = $1', [userId]);
+      const userResult = await queryDatabase('SELECT id, roles FROM users WHERE id = $1', [userId]);
 
       if (userResult.rows.length === 0) {
         console.warn(`User not found: ${userId}`);
@@ -1295,7 +1294,7 @@ export class TotalReportService {
       const primaryRole = userRoles.find(r => ['teacher', 'consultant', 'setter'].includes(r)) || userRoles[0];
 
       // 取得業務身份
-      const identitiesResult = await queryDatabase(pool, `
+      const identitiesResult = await queryDatabase(`
         SELECT identity_type, identity_code
         FROM business_identities
         WHERE user_id = $1 AND is_active = true
@@ -1320,11 +1319,11 @@ export class TotalReportService {
 
         switch (tableName) {
           case 'trial_class_attendance':
-            matches = await this.matchTrialClassAttendance(itemData, primaryRole, userRoles, identities, userId, pool);
+            matches = await this.matchTrialClassAttendance(itemData, primaryRole, userRoles, identities, userId);
             break;
 
           case 'trial_class_purchases':
-            matches = await this.matchTrialClassPurchases(itemData, primaryRole, userRoles, identities, userId, pool);
+            matches = await this.matchTrialClassPurchases(itemData, primaryRole, userRoles, identities, userId);
             break;
 
           case 'telemarketing_calls':
@@ -1354,7 +1353,7 @@ export class TotalReportService {
   /**
    * 檢查體驗課出席記錄是否符合權限
    */
-  private async matchTrialClassAttendance(item: any, primaryRole: string, allRoles: string[], identities: any, userId: string, pool: any): Promise<boolean> {
+  private async matchTrialClassAttendance(item: any, primaryRole: string, allRoles: string[], identities: any, userId: string): Promise<boolean> {
     // Manager 看所有
     if (allRoles.includes('manager')) {
       return true;
@@ -1373,7 +1372,7 @@ export class TotalReportService {
       const teacherName = item.teacher_name || item.teacherName || item.raw_data?.teacher_name || item.raw_data?.授課老師;
       if (teacherName) {
         // 取得該 teacher_name 對應的使用者
-        const userResult = await queryDatabase(pool, 'SELECT id, first_name FROM users WHERE id = $1', [userId]);
+        const userResult = await queryDatabase('SELECT id, first_name FROM users WHERE id = $1', [userId]);
         if (userResult.rows.length > 0) {
           const userName = userResult.rows[0].first_name;
           if (teacherName.includes(userName)) {
@@ -1397,7 +1396,7 @@ export class TotalReportService {
   /**
    * 檢查購買記錄是否符合權限
    */
-  private async matchTrialClassPurchases(item: any, primaryRole: string, allRoles: string[], identities: any, userId: string, pool: any): Promise<boolean> {
+  private async matchTrialClassPurchases(item: any, primaryRole: string, allRoles: string[], identities: any, userId: string): Promise<boolean> {
     // Manager 看所有
     if (allRoles.includes('manager')) {
       return true;
@@ -1418,7 +1417,7 @@ export class TotalReportService {
       // 方法2: 如果沒有 teacher_code，嘗試通過學生姓名關聯到出席記錄
       if (studentName) {
         try {
-          const attendanceResult = await queryDatabase(pool, `
+          const attendanceResult = await queryDatabase(`
             SELECT teacher_code, teacher_name
             FROM trial_class_attendance
             WHERE student_name = $1
