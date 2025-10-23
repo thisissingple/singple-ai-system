@@ -1,0 +1,8 @@
+{
+  "service": {
+    "type": "nodejs",
+    "buildCommand": "npm run build",
+    "startCommand": "npm start",
+    "outputDirectory": "dist"
+  }
+}
