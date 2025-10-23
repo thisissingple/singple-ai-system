@@ -960,10 +960,16 @@ export function StudentInsights({ students, initialFilter = 'all' }: StudentInsi
                   教師 {renderSortIcon('teacherName')}
                 </TableHead>
                 <TableHead
-                  className="text-center cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="text-center cursor-pointer hover:bg-muted/50 transition-colors w-20"
                   onClick={(e) => handleSort('remainingClasses', e)}
                 >
-                  總堂/已上/剩餘 {renderSortIcon('remainingClasses')}
+                  總堂 {renderSortIcon('remainingClasses')}
+                </TableHead>
+                <TableHead className="text-center w-20">
+                  已上
+                </TableHead>
+                <TableHead className="text-center w-20">
+                  剩餘
                 </TableHead>
                 <TableHead
                   className="cursor-pointer hover:bg-muted/50 transition-colors"
@@ -1057,11 +1063,31 @@ export function StudentInsights({ students, initialFilter = 'all' }: StudentInsi
                     </span>
                   </TableCell>
 
-                  {/* 總堂數/已上/剩餘（合併顯示） */}
-                  <TableCell>
-                    <div className="text-center text-sm font-medium">
-                      {student.totalTrialClasses || 0} / {student.attendedClasses || 0} / {student.remainingTrialClasses || 0}
-                    </div>
+                  {/* 總堂數 */}
+                  <TableCell className="text-center">
+                    <span className="text-sm font-medium text-gray-700">
+                      {student.totalTrialClasses || 0}
+                    </span>
+                  </TableCell>
+
+                  {/* 已上堂數 */}
+                  <TableCell className="text-center">
+                    <span className="text-sm font-medium text-blue-600">
+                      {student.attendedClasses || 0}
+                    </span>
+                  </TableCell>
+
+                  {/* 剩餘堂數 */}
+                  <TableCell className="text-center">
+                    <span className={`text-sm font-semibold ${
+                      (student.remainingTrialClasses || 0) <= 1
+                        ? 'text-red-600'
+                        : (student.remainingTrialClasses || 0) <= 2
+                        ? 'text-orange-600'
+                        : 'text-green-600'
+                    }`}>
+                      {student.remainingTrialClasses || 0}
+                    </span>
                   </TableCell>
 
                   {/* 最近一次上課日 */}
