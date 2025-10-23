@@ -41,7 +41,7 @@ export function getSession() {
     cookie: {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production', // HTTPS only in production
-      sameSite: 'lax', // Works with same-site requests
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // 'none' for cross-site cookies in production
       maxAge: sessionTtl,
       path: '/', // Ensure cookie is available for all paths
     },
