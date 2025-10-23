@@ -39,7 +39,8 @@ SELECT
   p.student_email,
   p.package_name,
   p.purchase_date,
-  p.status,
+  p.created_at,
+  p.updated_at,
 
   -- 從 course_plans 查詢總堂數
   COALESCE(cp.total_classes, p.trial_class_count, 0) AS total_classes,
@@ -63,9 +64,11 @@ SELECT
   ) AS remaining_classes,
 
   -- 課程方案資訊
+  cp.plan_name AS plan_name_from_db,
   cp.category AS plan_category,
   cp.description AS plan_description,
-  cp.total_price AS plan_price
+  cp.total_price AS plan_price,
+  cp.is_active AS plan_is_active
 
 FROM trial_class_purchases p
 LEFT JOIN course_plans cp ON p.package_name = cp.plan_name AND cp.is_active = TRUE
