@@ -3,6 +3,7 @@
  * 設計風格: 簡潔表格式
  */
 
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Table,
@@ -12,6 +13,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Calendar } from 'lucide-react';
 import { format, parseISO, isToday, isYesterday, differenceInDays } from 'date-fns';
 import { zhTW } from 'date-fns/locale';
@@ -23,6 +31,7 @@ interface AttendanceLogProps {
 }
 
 export function AttendanceLog({ classRecords, maxRecords = 40 }: AttendanceLogProps) {
+  const [displayCount, setDisplayCount] = useState<number>(maxRecords);
   // 按日期排序（最新的在前）
   const sortedRecords = [...classRecords]
     .filter(record => record.classDate)
@@ -31,7 +40,7 @@ export function AttendanceLog({ classRecords, maxRecords = 40 }: AttendanceLogPr
       const dateB = b.classDate ? new Date(b.classDate) : new Date(0);
       return dateB.getTime() - dateA.getTime();
     })
-    .slice(0, maxRecords);
+    .slice(0, displayCount);
 
   // 格式化相對日期
   const formatRelativeDate = (dateString: string) => {
@@ -73,9 +82,23 @@ export function AttendanceLog({ classRecords, maxRecords = 40 }: AttendanceLogPr
             <Calendar className="h-3.5 w-3.5 text-gray-400" />
             最近上課記錄
           </CardTitle>
-          <span className="text-[10px] text-gray-500">
-            最近 {sortedRecords.length} 筆
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-gray-500">顯示</span>
+            <Select
+              value={displayCount.toString()}
+              onValueChange={(value) => setDisplayCount(Number(value))}
+            >
+              <SelectTrigger className="h-6 w-16 text-[10px] border-gray-300">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="25" className="text-xs">25 筆</SelectItem>
+                <SelectItem value="50" className="text-xs">50 筆</SelectItem>
+                <SelectItem value="75" className="text-xs">75 筆</SelectItem>
+                <SelectItem value="100" className="text-xs">100 筆</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="pt-0 px-3 pb-3">
@@ -132,10 +155,10 @@ export function AttendanceLog({ classRecords, maxRecords = 40 }: AttendanceLogPr
         </div>
 
         {/* 總記錄數提示 */}
-        {classRecords.length > maxRecords && (
+        {classRecords.length > displayCount && (
           <div className="mt-2 pt-2 border-t border-gray-100">
             <p className="text-[10px] text-gray-500 text-center">
-              顯示最近 {maxRecords} 筆，共 {classRecords.length} 筆記錄
+              顯示最近 {displayCount} 筆，共 {classRecords.length} 筆記錄
             </p>
           </div>
         )}
