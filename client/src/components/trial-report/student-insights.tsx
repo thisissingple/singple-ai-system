@@ -11,6 +11,19 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
   Table,
   TableBody,
   TableCell,
@@ -817,94 +830,84 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* 精簡的篩選列 */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* 精簡的篩選列 - 下拉選單模式 */}
+          <div className="flex items-center gap-3">
             {/* 搜尋框 */}
             <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
               <Input
                 type="text"
                 placeholder="搜尋姓名或 Email"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-[200px] h-8 text-xs pl-8"
+                className="w-[240px] h-9 text-sm pl-8"
               />
             </div>
 
-            <div className="h-6 w-px bg-border" />
+            {/* 狀態篩選 - 下拉選單 */}
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[160px] h-9 text-sm">
+                <SelectValue placeholder="篩選狀態" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">
+                  <span className="flex items-center justify-between w-full">
+                    全部
+                    <span className="ml-3 text-gray-400 text-xs">({statusCounts.all})</span>
+                  </span>
+                </SelectItem>
+                {(['未開始', '體驗中', '已轉高', '未轉高'] as const).map((status) => (
+                  <SelectItem key={status} value={status}>
+                    <span className="flex items-center justify-between w-full">
+                      {status}
+                      <span className="ml-3 text-gray-400 text-xs">({statusCounts[status]})</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-            {/* 狀態篩選 */}
-            <div className="flex flex-wrap gap-1">
-              <button
-                onClick={() => setStatusFilter('all')}
-                className={`h-8 px-3 text-xs rounded-md border transition-colors ${
-                  statusFilter === 'all'
-                    ? 'border-orange-400 bg-orange-50 text-orange-700'
-                    : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                全部 ({statusCounts.all})
-              </button>
-              {(['未開始', '體驗中', '已轉高', '未轉高'] as const).map((status) => (
-                <button
-                  key={status}
-                  onClick={() => setStatusFilter(status)}
-                  className={`h-8 px-3 text-xs rounded-md border transition-colors ${
-                    statusFilter === status
-                      ? 'border-orange-400 bg-orange-50 text-orange-700'
-                      : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  {status} ({statusCounts[status]})
-                </button>
-              ))}
+            {/* 教師篩選 - 下拉選單 */}
+            <Select value={teacherFilter} onValueChange={setTeacherFilter}>
+              <SelectTrigger className="w-[160px] h-9 text-sm">
+                <SelectValue placeholder="篩選教師" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">
+                  <span className="flex items-center justify-between w-full">
+                    全部老師
+                    <span className="ml-3 text-gray-400 text-xs">({statusCounts.all})</span>
+                  </span>
+                </SelectItem>
+                {teacherCounts.map(([teacherName, count]) => (
+                  <SelectItem key={teacherName} value={teacherName}>
+                    <span className="flex items-center justify-between w-full">
+                      {teacherName}
+                      <span className="ml-3 text-gray-400 text-xs">({count})</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* 日期篩選 */}
+            <div className="flex items-center gap-2">
+              <Input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-[140px] h-9 text-sm"
+                placeholder="開始日期"
+              />
+              <span className="text-xs text-gray-400">至</span>
+              <Input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-[140px] h-9 text-sm"
+                placeholder="結束日期"
+              />
             </div>
-
-            <div className="h-6 w-px bg-border" />
-
-            {/* 教師篩選 - 按鈕群組 */}
-            <div className="flex flex-wrap gap-1">
-              <button
-                onClick={() => setTeacherFilter('all')}
-                className={`h-8 px-3 text-xs rounded-md border transition-colors ${
-                  teacherFilter === 'all'
-                    ? 'border-orange-400 bg-orange-50 text-orange-700'
-                    : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                全部老師 ({statusCounts.all})
-              </button>
-              {teacherCounts.map(([teacherName, count]) => (
-                <button
-                  key={teacherName}
-                  onClick={() => setTeacherFilter(teacherName)}
-                  className={`h-8 px-3 text-xs rounded-md border transition-colors ${
-                    teacherFilter === teacherName
-                      ? 'border-orange-400 bg-orange-50 text-orange-700'
-                      : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  {teacherName} ({count})
-                </button>
-              ))}
-            </div>
-
-            {/* 日期篩選 - 簡化 */}
-            <Input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-[140px] h-8 text-xs"
-              placeholder="開始日期"
-            />
-            <span className="text-xs text-muted-foreground">至</span>
-            <Input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-[140px] h-8 text-xs"
-              placeholder="結束日期"
-            />
 
             {/* 清除篩選 */}
             {hasActiveFilters && (
@@ -912,10 +915,11 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
                 size="sm"
                 variant="ghost"
                 onClick={clearFilters}
-                className="h-8 px-2"
+                className="h-9 px-3"
                 title="清除所有篩選"
               >
-                <X className="h-4 w-4" />
+                <X className="h-4 w-4 mr-1" />
+                <span className="text-xs">清除</span>
               </Button>
             )}
           </div>
@@ -948,63 +952,63 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
           )}
           <Table>
             <TableHeader>
-              <TableRow>
+              <TableRow className="h-10">
                 <TableHead
-                  className="w-[60px] cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="w-[50px] cursor-pointer hover:bg-muted/50 transition-colors text-xs"
                   onClick={(e) => handleSort('priority', e)}
                 >
                   優先級 {renderSortIcon('priority')}
                 </TableHead>
                 <TableHead
-                  className="w-[220px] cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="w-[200px] cursor-pointer hover:bg-muted/50 transition-colors text-xs"
                   onClick={(e) => handleSort('studentName', e)}
                 >
                   學生資訊 {renderSortIcon('studentName')}
                 </TableHead>
                 <TableHead
-                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="w-[90px] cursor-pointer hover:bg-muted/50 transition-colors text-xs"
                   onClick={(e) => handleSort('purchaseDate', e)}
                 >
                   購買日期 {renderSortIcon('purchaseDate')}
                 </TableHead>
                 <TableHead
-                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="w-[140px] cursor-pointer hover:bg-muted/50 transition-colors text-xs"
                   onClick={(e) => handleSort('packageName', e)}
                 >
                   方案 {renderSortIcon('packageName')}
                 </TableHead>
                 <TableHead
-                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="w-[90px] cursor-pointer hover:bg-muted/50 transition-colors text-xs"
                   onClick={(e) => handleSort('teacherName', e)}
                 >
                   教師 {renderSortIcon('teacherName')}
                 </TableHead>
                 <TableHead
-                  className="text-center cursor-pointer hover:bg-muted/50 transition-colors w-20"
+                  className="text-center cursor-pointer hover:bg-muted/50 transition-colors w-[55px] text-xs"
                   onClick={(e) => handleSort('remainingClasses', e)}
                 >
                   總堂 {renderSortIcon('remainingClasses')}
                 </TableHead>
-                <TableHead className="text-center w-20">
+                <TableHead className="text-center w-[55px] text-xs">
                   已上
                 </TableHead>
-                <TableHead className="text-center w-20">
+                <TableHead className="text-center w-[55px] text-xs">
                   剩餘
                 </TableHead>
                 <TableHead
-                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="w-[90px] cursor-pointer hover:bg-muted/50 transition-colors text-xs"
                   onClick={(e) => handleSort('lastClassDate', e)}
                 >
                   最近上課 {renderSortIcon('lastClassDate')}
                 </TableHead>
                 <TableHead
-                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="w-[100px] cursor-pointer hover:bg-muted/50 transition-colors text-xs"
                   onClick={(e) => handleSort('currentStatus', e)}
                 >
                   狀態 {renderSortIcon('currentStatus')}
                 </TableHead>
                 <TableHead
-                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="w-[110px] cursor-pointer hover:bg-muted/50 transition-colors text-xs text-right"
                   onClick={(e) => handleSort('dealAmount', e)}
                 >
                   累積金額 {renderSortIcon('dealAmount')}
@@ -1018,29 +1022,35 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
                 return (
                 <TableRow
                   key={student.studentId}
-                  className="hover:bg-gray-50 transition-colors border-l-2 border-gray-100"
+                  className="h-14 hover:bg-gray-50 transition-colors border-l-2 border-gray-100"
                 >
                   {/* 優先級 */}
-                  <TableCell>
-                    <div className="flex items-center gap-1.5">
-                      <div className={`w-2 h-2 rounded-full ${priorityConfig.dotColor}`}></div>
-                      <span className={`text-xs ${priorityConfig.textColor}`}>
-                        {priorityConfig.label}
-                      </span>
-                    </div>
+                  <TableCell className="w-[50px]">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex items-center justify-center cursor-help">
+                            <div className={`w-2.5 h-2.5 rounded-full ${priorityConfig.dotColor}`}></div>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="right">
+                          <p className="text-xs">{priorityConfig.label}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </TableCell>
 
                   {/* 學生資訊：姓名、Email、電話 */}
-                  <TableCell>
+                  <TableCell className="w-[200px]">
                     <div className="space-y-1">
-                      <div className="font-medium">{student.studentName}</div>
+                      <div className="font-medium text-sm">{student.studentName}</div>
                       <button
                         onClick={() => copyEmail(student.email)}
                         className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group cursor-pointer"
                         title="點擊複製 Email"
                       >
                         <Mail className="h-3 w-3" />
-                        <span className="group-hover:underline truncate max-w-[180px]">{student.email}</span>
+                        <span className="group-hover:underline truncate max-w-[160px]">{student.email}</span>
                         {copiedEmail === student.email ? (
                           <Check className="h-3 w-3 text-green-600" />
                         ) : (
@@ -1056,25 +1066,27 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
                   </TableCell>
 
                   {/* 購買日期 */}
-                  <TableCell>
-                    <div className="flex items-center gap-1 text-sm">
+                  <TableCell className="w-[90px]">
+                    <div className="flex items-center gap-1 text-xs text-gray-700">
                       <ShoppingCart className="h-3 w-3 text-muted-foreground" />
                       {student.purchaseDate || '—'}
                     </div>
                   </TableCell>
 
                   {/* 方案 */}
-                  <TableCell>
+                  <TableCell className="w-[140px]">
                     {student.packageName ? (
-                      <span className="text-sm font-medium">{student.packageName}</span>
+                      <span className="inline-flex px-2 py-1 text-xs rounded-full bg-orange-50 text-orange-700 border border-orange-200">
+                        {student.packageName}
+                      </span>
                     ) : (
-                      <span className="text-xs text-muted-foreground">未設定</span>
+                      <span className="text-xs text-gray-400">未設定</span>
                     )}
                   </TableCell>
 
                   {/* 教師 */}
-                  <TableCell>
-                    <span className="font-medium">
+                  <TableCell className="w-[90px]">
+                    <span className="font-medium text-sm">
                       {student.teacherName === '未知教師' ? (
                         <span className="text-orange-600">未分配</span>
                       ) : (
@@ -1084,22 +1096,22 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
                   </TableCell>
 
                   {/* 總堂數 */}
-                  <TableCell className="text-center">
-                    <span className="text-sm font-medium text-gray-700">
+                  <TableCell className="text-center w-[55px]">
+                    <span className="text-xs font-medium text-gray-700">
                       {student.totalTrialClasses || 0}
                     </span>
                   </TableCell>
 
                   {/* 已上堂數 */}
-                  <TableCell className="text-center">
-                    <span className="text-sm font-medium text-gray-700">
+                  <TableCell className="text-center w-[55px]">
+                    <span className="text-xs font-medium text-gray-700">
                       {student.attendedClasses || 0}
                     </span>
                   </TableCell>
 
                   {/* 剩餘堂數 */}
-                  <TableCell className="text-center">
-                    <span className={`text-sm font-semibold ${
+                  <TableCell className="text-center w-[55px]">
+                    <span className={`text-xs font-semibold ${
                       (student.remainingTrialClasses || 0) <= 1
                         ? 'text-orange-600'
                         : 'text-gray-700'
@@ -1109,15 +1121,15 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
                   </TableCell>
 
                   {/* 最近一次上課日 */}
-                  <TableCell>
-                    <div className="flex items-center gap-1 text-sm">
+                  <TableCell className="w-[90px]">
+                    <div className="flex items-center gap-1 text-xs text-gray-700">
                       <Calendar className="h-3 w-3 text-muted-foreground" />
                       {student.lastClassDate || '—'}
                     </div>
                   </TableCell>
 
                   {/* 狀態 */}
-                  <TableCell>
+                  <TableCell className="w-[100px]">
                     {student.currentStatus ? (
                       <span className={`px-2 py-1 text-xs rounded-full ${
                         student.currentStatus === '已轉高' ? 'bg-green-50 text-green-700' :
@@ -1133,7 +1145,7 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
                   </TableCell>
 
                   {/* 累積金額 */}
-                  <TableCell>
+                  <TableCell className="w-[110px] text-right">
                     {student.dealAmount ? (
                       <span className="text-sm font-semibold text-gray-900">
                         NT$ {student.dealAmount.toLocaleString()}
