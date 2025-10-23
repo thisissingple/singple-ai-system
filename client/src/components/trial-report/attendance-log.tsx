@@ -78,56 +78,58 @@ export function AttendanceLog({ classRecords, maxRecords = 20 }: AttendanceLogPr
           </span>
         </div>
       </CardHeader>
-      <CardContent className="pt-0">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="w-[80px] h-8 text-xs">日期</TableHead>
-              <TableHead className="w-[100px] h-8 text-xs">教師</TableHead>
-              <TableHead className="h-8 text-xs">學生</TableHead>
-              <TableHead className="w-[100px] h-8 text-xs">狀態</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sortedRecords.map((record) => (
-              <TableRow key={record.id} className="h-10 hover:bg-gray-50">
-                {/* 日期 */}
-                <TableCell className="py-2 text-xs text-gray-600">
-                  {record.classDate && formatRelativeDate(record.classDate)}
-                </TableCell>
-
-                {/* 教師 */}
-                <TableCell className="py-2 text-xs text-gray-700">
-                  {record.teacherName || '未分配'}
-                </TableCell>
-
-                {/* 學生 */}
-                <TableCell className="py-2 text-sm text-gray-900">
-                  {record.studentName || '未命名'}
-                </TableCell>
-
-                {/* 狀態 */}
-                <TableCell className="py-2">
-                  {record.status ? (
-                    <span
-                      className={`text-xs px-2 py-1 rounded-full inline-block ${
-                        record.status === '已完成' || record.status === '出席'
-                          ? 'bg-green-50 text-green-700'
-                          : record.status === '缺席'
-                          ? 'bg-red-50 text-red-700'
-                          : 'bg-gray-100 text-gray-700'
-                      }`}
-                    >
-                      {record.status}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-gray-400">—</span>
-                  )}
-                </TableCell>
+      <CardContent className="pt-0 px-4">
+        <div className="overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent border-b">
+                <TableHead className="w-[70px] h-9 text-xs px-2 py-2">日期</TableHead>
+                <TableHead className="w-[80px] h-9 text-xs px-2 py-2">教師</TableHead>
+                <TableHead className="h-9 text-xs px-2 py-2">學生</TableHead>
+                <TableHead className="w-[80px] h-9 text-xs px-2 py-2 text-center">狀態</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {sortedRecords.map((record) => (
+                <TableRow key={record.id} className="h-9 hover:bg-gray-50 border-b border-gray-100">
+                  {/* 日期 */}
+                  <TableCell className="px-2 py-1.5 text-xs text-gray-600 w-[70px]">
+                    {record.classDate && formatRelativeDate(record.classDate)}
+                  </TableCell>
+
+                  {/* 教師 */}
+                  <TableCell className="px-2 py-1.5 text-xs text-gray-700 w-[80px]">
+                    {record.teacherName || '未分配'}
+                  </TableCell>
+
+                  {/* 學生 */}
+                  <TableCell className="px-2 py-1.5 text-sm text-gray-900">
+                    {record.studentName || '未命名'}
+                  </TableCell>
+
+                  {/* 狀態 */}
+                  <TableCell className="px-2 py-1.5 w-[80px] text-center">
+                    {record.status ? (
+                      <span
+                        className={`text-xs px-1.5 py-0.5 rounded-full inline-block ${
+                          record.status === '已完成' || record.status === '出席'
+                            ? 'bg-green-50 text-green-700'
+                            : record.status === '缺席'
+                            ? 'bg-red-50 text-red-700'
+                            : 'bg-gray-100 text-gray-700'
+                        }`}
+                      >
+                        {record.status}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-400">—</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
 
         {/* 總記錄數提示 */}
         {classRecords.length > maxRecords && (
