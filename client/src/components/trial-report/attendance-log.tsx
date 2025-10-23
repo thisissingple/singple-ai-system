@@ -22,7 +22,7 @@ interface AttendanceLogProps {
   maxRecords?: number;
 }
 
-export function AttendanceLog({ classRecords, maxRecords = 20 }: AttendanceLogProps) {
+export function AttendanceLog({ classRecords, maxRecords = 40 }: AttendanceLogProps) {
   // 按日期排序（最新的在前）
   const sortedRecords = [...classRecords]
     .filter(record => record.classDate)
@@ -67,51 +67,51 @@ export function AttendanceLog({ classRecords, maxRecords = 20 }: AttendanceLogPr
 
   return (
     <Card className="border border-gray-200 shadow-sm bg-white">
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-2 px-3">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-gray-400" />
+          <CardTitle className="text-xs font-semibold text-gray-900 flex items-center gap-1.5">
+            <Calendar className="h-3.5 w-3.5 text-gray-400" />
             最近上課記錄
           </CardTitle>
-          <span className="text-xs text-gray-500">
+          <span className="text-[10px] text-gray-500">
             最近 {sortedRecords.length} 筆
           </span>
         </div>
       </CardHeader>
-      <CardContent className="pt-0 px-4">
-        <div className="overflow-hidden">
+      <CardContent className="pt-0 px-3 pb-3">
+        <div className="overflow-hidden -mx-3">
           <Table>
             <TableHeader>
-              <TableRow className="hover:bg-transparent border-b">
-                <TableHead className="w-[70px] h-9 text-xs px-2 py-2">日期</TableHead>
-                <TableHead className="w-[80px] h-9 text-xs px-2 py-2">教師</TableHead>
-                <TableHead className="h-9 text-xs px-2 py-2">學生</TableHead>
-                <TableHead className="w-[80px] h-9 text-xs px-2 py-2 text-center">狀態</TableHead>
+              <TableRow className="hover:bg-transparent border-b border-gray-200">
+                <TableHead className="w-[60px] h-6 text-[10px] px-2 py-1 font-medium">日期</TableHead>
+                <TableHead className="w-[65px] h-6 text-[10px] px-2 py-1 font-medium">教師</TableHead>
+                <TableHead className="h-6 text-[10px] px-2 py-1 font-medium">學生</TableHead>
+                <TableHead className="w-[70px] h-6 text-[10px] px-2 py-1 text-center font-medium">狀態</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {sortedRecords.map((record) => (
-                <TableRow key={record.id} className="h-9 hover:bg-gray-50 border-b border-gray-100">
+                <TableRow key={record.id} className="h-5 hover:bg-gray-50 border-b border-gray-100">
                   {/* 日期 */}
-                  <TableCell className="px-2 py-1.5 text-xs text-gray-600 w-[70px]">
+                  <TableCell className="px-2 py-0.5 text-[11px] text-gray-600 w-[60px]">
                     {record.classDate && formatRelativeDate(record.classDate)}
                   </TableCell>
 
                   {/* 教師 */}
-                  <TableCell className="px-2 py-1.5 text-xs text-gray-700 w-[80px]">
+                  <TableCell className="px-2 py-0.5 text-[11px] text-gray-700 w-[65px]">
                     {record.teacherName || '未分配'}
                   </TableCell>
 
                   {/* 學生 */}
-                  <TableCell className="px-2 py-1.5 text-sm text-gray-900">
+                  <TableCell className="px-2 py-0.5 text-[11px] text-gray-900 font-medium">
                     {record.studentName || '未命名'}
                   </TableCell>
 
                   {/* 狀態 */}
-                  <TableCell className="px-2 py-1.5 w-[80px] text-center">
+                  <TableCell className="px-2 py-0.5 w-[70px] text-center">
                     {record.status ? (
                       <span
-                        className={`text-xs px-1.5 py-0.5 rounded-full inline-block ${
+                        className={`text-[10px] px-1.5 py-0.5 rounded inline-block ${
                           record.status === '已完成' || record.status === '出席'
                             ? 'bg-green-50 text-green-700'
                             : record.status === '缺席'
@@ -122,7 +122,7 @@ export function AttendanceLog({ classRecords, maxRecords = 20 }: AttendanceLogPr
                         {record.status}
                       </span>
                     ) : (
-                      <span className="text-xs text-gray-400">—</span>
+                      <span className="text-[10px] text-gray-400">—</span>
                     )}
                   </TableCell>
                 </TableRow>
@@ -133,8 +133,8 @@ export function AttendanceLog({ classRecords, maxRecords = 20 }: AttendanceLogPr
 
         {/* 總記錄數提示 */}
         {classRecords.length > maxRecords && (
-          <div className="mt-3 pt-3 border-t border-gray-100">
-            <p className="text-xs text-gray-500 text-center">
+          <div className="mt-2 pt-2 border-t border-gray-100">
+            <p className="text-[10px] text-gray-500 text-center">
               顯示最近 {maxRecords} 筆，共 {classRecords.length} 筆記錄
             </p>
           </div>
