@@ -1,6 +1,8 @@
 /**
  * Student Insights Component
  * Displays student data with status tracking and recommended actions
+ *
+ * Design System: Gray + Orange (Apple/Notion style)
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react';
@@ -40,10 +42,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { AttendanceLog } from './attendance-log';
+import type { TeacherClassRecord } from './teacher-insights';
 
 interface StudentInsightsProps {
   students: StudentInsight[];
   initialFilter?: string | 'all';
+  classRecords?: TeacherClassRecord[]; // 上課記錄（用於 AttendanceLog）
 }
 
 type StudentSortField =
@@ -369,7 +374,7 @@ function PriorityExplanationDialog() {
   );
 }
 
-export function StudentInsights({ students, initialFilter = 'all' }: StudentInsightsProps) {
+export function StudentInsights({ students, initialFilter = 'all', classRecords = [] }: StudentInsightsProps) {
   // 多欄位排序：支援疊加排序（Shift+Click）
   const [sortConfigs, setSortConfigs] = useState<SortConfig[]>([
     { field: 'priority', direction: 'asc' } // 預設按優先級排序
@@ -683,7 +688,11 @@ export function StudentInsights({ students, initialFilter = 'all' }: StudentInsi
 
   return (
     <div className="space-y-4">
-      {/* 待分配學生卡片（最優先顯示） */}
+      {/* 上課打卡記錄 - 新增組件 */}
+      <AttendanceLog classRecords={classRecords} maxRecords={20} />
+
+      {/* ARCHIVED: 待分配學生卡片 - 2025-10-23
+          理由：用戶要求移除此卡片以簡化視覺
       {unassignedStudents.total > 0 && (
         <Card
           className="border-orange-200 bg-orange-50/50 cursor-pointer hover:bg-orange-100/50 transition-colors"
@@ -732,8 +741,10 @@ export function StudentInsights({ students, initialFilter = 'all' }: StudentInsi
           </CardContent>
         </Card>
       )}
+      */}
 
-      {/* 老師行動追蹤指標 */}
+      {/* ARCHIVED: 老師行動追蹤指標 - 2025-10-23
+          理由：用戶要求移除此卡片以簡化視覺
       {Object.keys(teacherActionStats).length > 0 && (
         <Card>
           <CardHeader className="pb-3">
@@ -790,6 +801,7 @@ export function StudentInsights({ students, initialFilter = 'all' }: StudentInsi
           </CardContent>
         </Card>
       )}
+      */}
 
       {/* 主表格 */}
       <Card ref={tableRef}>

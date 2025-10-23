@@ -257,6 +257,7 @@ export default function DashboardTrialReport() {
               <StudentInsights
                 students={reportData.studentInsights}
                 initialFilter={studentFilter}
+                classRecords={teacherClassRecords}
               />
             </TabsContent>
           </Tabs>
