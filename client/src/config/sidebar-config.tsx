@@ -42,25 +42,122 @@ export interface SidebarSection {
 }
 
 export const sidebarConfig: SidebarSection[] = [
+  // ==================== 教師系統 ====================
   {
-    title: '主要功能',
+    title: '教師系統',
+    items: [
+      {
+        label: '我的體驗課報表',
+        href: '/reports/trial-report',
+        icon: FileText,
+        requiredRoles: ['teacher'],
+      },
+      {
+        label: '教學品質分析',
+        href: '/teaching-quality',
+        icon: GraduationCap,
+        requiredRoles: ['teacher'],
+      },
+      {
+        label: '完課率報表',
+        href: '/reports/completion-rate',
+        icon: Target,
+        badge: '即將推出',
+        requiredRoles: ['teacher'],
+      },
+      {
+        label: '滿意度報表',
+        href: '/reports/satisfaction',
+        icon: Smile,
+        badge: '即將推出',
+        requiredRoles: ['teacher'],
+      },
+      {
+        label: '表單填寫',
+        href: '/forms',
+        icon: PenTool,
+        requiredRoles: ['teacher'],
+      },
+    ],
+  },
+
+  // ==================== 電訪系統 ====================
+  {
+    title: '電訪系統',
+    items: [
+      {
+        label: '學生跟進',
+        href: '/telemarketing/student-follow-up',
+        icon: UserCog,
+        requiredRoles: ['setter'],
+      },
+      {
+        label: '廣告名單',
+        href: '/telemarketing/ad-leads',
+        icon: Phone,
+        requiredRoles: ['setter'],
+      },
+      {
+        label: '電訪記錄',
+        href: '/telemarketing/call-records',
+        icon: PhoneCall,
+        requiredRoles: ['setter'],
+      },
+      {
+        label: 'GoHighLevel 聯絡人',
+        href: '/leads/gohighlevel',
+        icon: Users,
+        requiredRoles: ['setter'],
+      },
+      {
+        label: '表單填寫',
+        href: '/forms',
+        icon: PenTool,
+        requiredRoles: ['setter'],
+      },
+    ],
+  },
+
+  // ==================== 諮詢師系統 ====================
+  {
+    title: '諮詢師系統',
+    items: [
+      {
+        label: '諮詢師報表',
+        href: '/reports/consultants',
+        icon: Users,
+        requiredRoles: ['consultant'],
+      },
+      {
+        label: '我的體驗課報表',
+        href: '/reports/trial-report',
+        icon: FileText,
+        requiredRoles: ['consultant'],
+      },
+      {
+        label: '表單填寫',
+        href: '/forms',
+        icon: PenTool,
+        requiredRoles: ['consultant'],
+      },
+    ],
+  },
+
+  // ==================== 管理系統 ====================
+  {
+    title: '管理系統',
     items: [
       {
         label: '儀表板總覽',
         href: '/',
         icon: LayoutDashboard,
-        requiredRoles: ['admin', 'manager', 'teacher', 'consultant', 'setter', 'user'],
+        requiredRoles: ['admin', 'manager'],
       },
-    ],
-  },
-  {
-    title: '報表分析',
-    items: [
       {
         label: '體驗課報表',
         href: '/reports/trial-report',
         icon: FileText,
-        requiredRoles: ['admin', 'manager', 'teacher', 'consultant'],
+        requiredRoles: ['admin', 'manager'],
       },
       {
         label: '成本獲利報表',
@@ -84,45 +181,21 @@ export const sidebarConfig: SidebarSection[] = [
         label: '諮詢師報表',
         href: '/reports/consultants',
         icon: Users,
-        badge: '即將推出',
-        requiredRoles: ['admin', 'manager', 'consultant'],
+        requiredRoles: ['admin', 'manager'],
       },
       {
         label: '完課率報表',
         href: '/reports/completion-rate',
         icon: Target,
         badge: '即將推出',
-        requiredRoles: ['admin', 'manager', 'teacher'],
+        requiredRoles: ['admin', 'manager'],
       },
       {
         label: '滿意度報表',
         href: '/reports/satisfaction',
         icon: Smile,
         badge: '即將推出',
-        requiredRoles: ['admin', 'manager', 'teacher'],
-      },
-    ],
-  },
-  {
-    title: '電訪系統',
-    items: [
-      {
-        label: '學生跟進',
-        href: '/telemarketing/student-follow-up',
-        icon: UserCog,
-        requiredRoles: ['admin', 'manager', 'setter'],
-      },
-      {
-        label: '廣告名單',
-        href: '/telemarketing/ad-leads',
-        icon: Phone,
-        requiredRoles: ['admin', 'manager', 'setter'],
-      },
-      {
-        label: '電訪記錄',
-        href: '/telemarketing/call-records',
-        icon: PhoneCall,
-        requiredRoles: ['admin', 'manager', 'setter'],
+        requiredRoles: ['admin', 'manager'],
       },
       {
         label: '廣告成效',
@@ -134,24 +207,31 @@ export const sidebarConfig: SidebarSection[] = [
         label: 'GoHighLevel 聯絡人',
         href: '/leads/gohighlevel',
         icon: Users,
-        requiredRoles: ['admin', 'manager', 'setter'],
+        requiredRoles: ['admin', 'manager'],
       },
-    ],
-  },
-  {
-    title: '工具',
-    items: [
       {
-        label: '表單填寫',
-        href: '/forms',
-        icon: PenTool,
-        requiredRoles: ['admin', 'manager', 'teacher', 'consultant', 'setter', 'user'],
+        label: '學生跟進',
+        href: '/telemarketing/student-follow-up',
+        icon: UserCog,
+        requiredRoles: ['admin', 'manager'],
+      },
+      {
+        label: '廣告名單',
+        href: '/telemarketing/ad-leads',
+        icon: Phone,
+        requiredRoles: ['admin', 'manager'],
+      },
+      {
+        label: '電訪記錄',
+        href: '/telemarketing/call-records',
+        icon: PhoneCall,
+        requiredRoles: ['admin', 'manager'],
       },
       {
         label: '教學品質分析',
         href: '/teaching-quality',
         icon: GraduationCap,
-        requiredRoles: ['admin', 'manager', 'teacher'],
+        requiredRoles: ['admin', 'manager'],
       },
       {
         label: '資料庫瀏覽器',
@@ -177,11 +257,12 @@ export const sidebarConfig: SidebarSection[] = [
         icon: Sheet,
         requiredRoles: ['admin', 'manager'],
       },
-    ],
-  },
-  {
-    title: '設定',
-    items: [
+      {
+        label: '表單填寫',
+        href: '/forms',
+        icon: PenTool,
+        requiredRoles: ['admin', 'manager'],
+      },
       {
         label: '員工管理',
         href: '/settings/employees',

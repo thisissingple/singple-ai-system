@@ -18,15 +18,48 @@ export interface PermissionRule {
  * value: 權限規則
  */
 export const routePermissions: Record<string, PermissionRule> = {
-  // 主要功能 - 所有人可訪問
+  // 主要功能 - 管理者可訪問
   '/': {
     roles: ['admin', 'manager', 'teacher', 'consultant', 'setter', 'user'],
   },
 
-  // 報表分析
+  // 教師系統
   '/reports/trial-report': {
     roles: ['admin', 'manager', 'teacher', 'consultant'],
   },
+  '/teaching-quality': {
+    roles: ['admin', 'manager', 'teacher'],
+  },
+  '/reports/completion-rate': {
+    roles: ['admin', 'manager', 'teacher'],
+  },
+  '/reports/satisfaction': {
+    roles: ['admin', 'manager', 'teacher'],
+  },
+
+  // 電訪系統
+  '/telemarketing/student-follow-up': {
+    roles: ['admin', 'manager', 'setter'],
+  },
+  '/telemarketing/ad-leads': {
+    roles: ['admin', 'manager', 'setter'],
+  },
+  '/telemarketing/call-records': {
+    roles: ['admin', 'manager', 'setter'],
+  },
+  '/telemarketing/ad-performance': {
+    roles: ['admin', 'manager'],
+  },
+  '/leads/gohighlevel': {
+    roles: ['admin', 'manager', 'setter'],
+  },
+
+  // 諮詢師系統
+  '/reports/consultants': {
+    roles: ['admin', 'manager', 'consultant'],
+  },
+
+  // 管理系統 - 報表
   '/reports/cost-profit': {
     roles: ['admin', 'manager'],
   },
@@ -36,23 +69,8 @@ export const routePermissions: Record<string, PermissionRule> = {
   '/reports/income-expense': {
     roles: ['admin', 'manager'],
   },
-  '/reports/consultants': {
-    roles: ['admin', 'manager', 'consultant'],
-  },
-  '/reports/completion-rate': {
-    roles: ['admin', 'manager', 'teacher'],
-  },
-  '/reports/satisfaction': {
-    roles: ['admin', 'manager', 'teacher'],
-  },
 
-  // 工具
-  '/forms': {
-    roles: ['admin', 'manager', 'teacher', 'consultant', 'setter', 'user'],
-  },
-  '/teaching-quality': {
-    roles: ['admin', 'manager', 'teacher'],
-  },
+  // 管理系統 - 工具
   '/tools/database-browser': {
     roles: ['admin'],
   },
@@ -66,7 +84,12 @@ export const routePermissions: Record<string, PermissionRule> = {
     roles: ['admin', 'manager'],
   },
 
-  // 設定
+  // 通用功能 - 表單填寫
+  '/forms': {
+    roles: ['admin', 'manager', 'teacher', 'consultant', 'setter', 'user'],
+  },
+
+  // 管理系統 - 設定
   '/settings/employees': {
     roles: ['admin'],
   },
@@ -75,6 +98,9 @@ export const routePermissions: Record<string, PermissionRule> = {
   },
   '/settings/form-builder': {
     roles: ['admin', 'manager'],
+  },
+  '/settings/facebook': {
+    roles: ['admin'],
   },
   '/settings/system': {
     roles: ['admin'],
