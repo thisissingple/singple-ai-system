@@ -87,27 +87,27 @@ type PriorityLevel = 'high' | 'medium' | 'low';
 // 優先級配置
 const PRIORITY_CONFIG: Record<PriorityLevel, {
   label: string;
-  icon: string;
+  dotColor: string;
   color: string;
   textColor: string;
 }> = {
   high: {
     label: '高優先',
-    icon: '🔴',
-    color: 'border-red-500',
-    textColor: 'text-red-700',
+    dotColor: 'bg-orange-500',
+    color: 'border-orange-200',
+    textColor: 'text-gray-600',
   },
   medium: {
     label: '中優先',
-    icon: '🟡',
-    color: 'border-yellow-500',
-    textColor: 'text-yellow-700',
+    dotColor: 'bg-orange-300',
+    color: 'border-orange-100',
+    textColor: 'text-gray-600',
   },
   low: {
     label: '低優先',
-    icon: '🟢',
-    color: 'border-green-500',
-    textColor: 'text-green-700',
+    dotColor: 'bg-gray-300',
+    color: 'border-gray-100',
+    textColor: 'text-gray-600',
   },
 };
 
@@ -835,24 +835,28 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
 
             {/* 狀態篩選 */}
             <div className="flex flex-wrap gap-1">
-              <Button
-                size="sm"
-                variant={statusFilter === 'all' ? 'default' : 'outline'}
+              <button
                 onClick={() => setStatusFilter('all')}
-                className="h-8 text-xs"
+                className={`h-8 px-3 text-xs rounded-md border transition-colors ${
+                  statusFilter === 'all'
+                    ? 'border-orange-400 bg-orange-50 text-orange-700'
+                    : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                }`}
               >
                 全部 ({statusCounts.all})
-              </Button>
+              </button>
               {(['未開始', '體驗中', '已轉高', '未轉高'] as const).map((status) => (
-                <Button
+                <button
                   key={status}
-                  size="sm"
-                  variant={statusFilter === status ? 'default' : 'outline'}
                   onClick={() => setStatusFilter(status)}
-                  className="h-8 text-xs"
+                  className={`h-8 px-3 text-xs rounded-md border transition-colors ${
+                    statusFilter === status
+                      ? 'border-orange-400 bg-orange-50 text-orange-700'
+                      : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
                 >
                   {status} ({statusCounts[status]})
-                </Button>
+                </button>
               ))}
             </div>
 
@@ -860,24 +864,28 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
 
             {/* 教師篩選 - 按鈕群組 */}
             <div className="flex flex-wrap gap-1">
-              <Button
-                size="sm"
-                variant={teacherFilter === 'all' ? 'default' : 'outline'}
+              <button
                 onClick={() => setTeacherFilter('all')}
-                className="h-8 text-xs"
+                className={`h-8 px-3 text-xs rounded-md border transition-colors ${
+                  teacherFilter === 'all'
+                    ? 'border-orange-400 bg-orange-50 text-orange-700'
+                    : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                }`}
               >
                 全部老師 ({statusCounts.all})
-              </Button>
+              </button>
               {teacherCounts.map(([teacherName, count]) => (
-                <Button
+                <button
                   key={teacherName}
-                  size="sm"
-                  variant={teacherFilter === teacherName ? 'default' : 'ghost'}
                   onClick={() => setTeacherFilter(teacherName)}
-                  className={`h-8 text-xs ${teacherFilter === teacherName ? '' : 'border border-border'}`}
+                  className={`h-8 px-3 text-xs rounded-md border transition-colors ${
+                    teacherFilter === teacherName
+                      ? 'border-orange-400 bg-orange-50 text-orange-700'
+                      : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
                 >
                   {teacherName} ({count})
-                </Button>
+                </button>
               ))}
             </div>
 
@@ -914,12 +922,12 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
         <div className="overflow-x-auto">
           {/* 排序說明提示 */}
           {sortConfigs.length > 0 && (
-            <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground bg-blue-50 p-2 rounded border border-blue-200">
-              <span className="font-medium text-blue-700">📊 當前排序：</span>
+            <div className="mb-2 flex items-center gap-2 text-xs bg-gray-50 p-2 rounded border border-gray-200">
+              <span className="font-medium text-gray-700">當前排序：</span>
               {sortConfigs.map((config, index) => (
                 <span key={config.field} className="flex items-center gap-1">
-                  {index > 0 && <span className="text-blue-400">→</span>}
-                  <span className="font-medium text-blue-600">
+                  {index > 0 && <span className="text-gray-400">→</span>}
+                  <span className="font-medium text-gray-900">
                     {config.field === 'priority' && '優先級'}
                     {config.field === 'studentName' && '學生姓名'}
                     {config.field === 'purchaseDate' && '購買日期'}
@@ -930,12 +938,12 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
                     {config.field === 'currentStatus' && '狀態'}
                     {config.field === 'dealAmount' && '累積金額'}
                   </span>
-                  <span className="text-blue-500">
+                  <span className="text-orange-500">
                     {config.direction === 'asc' ? '↑' : '↓'}
                   </span>
                 </span>
               ))}
-              <span className="ml-auto text-blue-600">💡 Shift+點擊可疊加排序</span>
+              <span className="ml-auto text-gray-600">Shift+點擊可疊加排序</span>
             </div>
           )}
           <Table>
@@ -1010,13 +1018,13 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
                 return (
                 <TableRow
                   key={student.studentId}
-                  className={`hover:bg-muted/30 border-l-4 ${priorityConfig.color}`}
+                  className="hover:bg-gray-50 transition-colors border-l-2 border-gray-100"
                 >
                   {/* 優先級 */}
                   <TableCell>
-                    <div className="flex flex-col items-center gap-0.5">
-                      <span className="text-xl">{priorityConfig.icon}</span>
-                      <span className={`text-[10px] font-medium ${priorityConfig.textColor}`}>
+                    <div className="flex items-center gap-1.5">
+                      <div className={`w-2 h-2 rounded-full ${priorityConfig.dotColor}`}></div>
+                      <span className={`text-xs ${priorityConfig.textColor}`}>
                         {priorityConfig.label}
                       </span>
                     </div>
@@ -1084,7 +1092,7 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
 
                   {/* 已上堂數 */}
                   <TableCell className="text-center">
-                    <span className="text-sm font-medium text-blue-600">
+                    <span className="text-sm font-medium text-gray-700">
                       {student.attendedClasses || 0}
                     </span>
                   </TableCell>
@@ -1093,10 +1101,8 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
                   <TableCell className="text-center">
                     <span className={`text-sm font-semibold ${
                       (student.remainingTrialClasses || 0) <= 1
-                        ? 'text-red-600'
-                        : (student.remainingTrialClasses || 0) <= 2
                         ? 'text-orange-600'
-                        : 'text-green-600'
+                        : 'text-gray-700'
                     }`}>
                       {student.remainingTrialClasses || 0}
                     </span>
@@ -1112,10 +1118,15 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
 
                   {/* 狀態 */}
                   <TableCell>
-                    {student.currentStatus && STATUS_CONFIG[student.currentStatus as ActualStatus] ? (
-                      <Badge variant={STATUS_CONFIG[student.currentStatus as ActualStatus].variant}>
+                    {student.currentStatus ? (
+                      <span className={`px-2 py-1 text-xs rounded-full ${
+                        student.currentStatus === '已轉高' ? 'bg-green-50 text-green-700' :
+                        student.currentStatus === '未轉高' ? 'bg-red-50 text-red-700' :
+                        student.currentStatus === '體驗中' ? 'bg-blue-50 text-blue-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>
                         {student.currentStatus}
-                      </Badge>
+                      </span>
                     ) : (
                       <span className="text-xs text-muted-foreground">—</span>
                     )}
@@ -1124,11 +1135,11 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
                   {/* 累積金額 */}
                   <TableCell>
                     {student.dealAmount ? (
-                      <span className="text-sm font-semibold text-green-600">
+                      <span className="text-sm font-semibold text-gray-900">
                         NT$ {student.dealAmount.toLocaleString()}
                       </span>
                     ) : (
-                      <span className="text-xs text-muted-foreground">NT$ 0</span>
+                      <span className="text-xs text-gray-400">NT$ 0</span>
                     )}
                   </TableCell>
                 </TableRow>
