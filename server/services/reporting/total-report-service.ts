@@ -1274,7 +1274,8 @@ export class TotalReportService {
       }
 
       // 取得使用者資訊（包含業務身份）
-      const userResult = await queryDatabase('SELECT id, role FROM users WHERE id = $1', [userId]);
+      const pool = createPool();
+      const userResult = await queryDatabase(pool, 'SELECT id, roles FROM users WHERE id = $1', [userId]);
 
       if (userResult.rows.length === 0) {
         console.warn(`User not found: ${userId}`);
@@ -1282,16 +1283,19 @@ export class TotalReportService {
       }
 
       const user = userResult.rows[0];
-      const userRole = user.role;
+      const userRoles: string[] = user.roles || [];
 
-      // 如果是 admin，看所有資料
-      if (userRole === 'admin' || userRole === 'super_admin') {
-        console.log(`[Permission Filter] Admin user ${userId} - no filtering`);
+      // 如果是 admin 或 manager，看所有資料
+      if (userRoles.includes('admin') || userRoles.includes('super_admin') || userRoles.includes('manager')) {
+        console.log(`[Permission Filter] Admin/Manager user ${userId} - no filtering`);
         return data;
       }
 
+      // 取得主要角色（用於過濾邏輯）
+      const primaryRole = userRoles.find(r => ['teacher', 'consultant', 'setter'].includes(r)) || userRoles[0];
+
       // 取得業務身份
-      const identitiesResult = await queryDatabase(`
+      const identitiesResult = await queryDatabase(pool, `
         SELECT identity_type, identity_code
         FROM business_identities
         WHERE user_id = $1 AND is_active = true
@@ -1306,7 +1310,7 @@ export class TotalReportService {
         identities[type].push(row.identity_code);
       });
 
-      console.log(`[Permission Filter] User ${userId} role=${userRole}, identities:`, identities);
+      console.log(`[Permission Filter] User ${userId} primaryRole=${primaryRole}, roles=${userRoles.join(',')}, identities:`, identities);
 
       // 根據資料表類型進行過濾（需要 await，因為 matchTrialClassAttendance 是 async）
       const filteredData: any[] = [];
@@ -1316,15 +1320,15 @@ export class TotalReportService {
 
         switch (tableName) {
           case 'trial_class_attendance':
-            matches = await this.matchTrialClassAttendance(itemData, userRole, identities, userId);
+            matches = await this.matchTrialClassAttendance(itemData, primaryRole, userRoles, identities, userId, pool);
             break;
 
           case 'trial_class_purchases':
-            matches = this.matchTrialClassPurchases(itemData, userRole, identities, userId);
+            matches = await this.matchTrialClassPurchases(itemData, primaryRole, userRoles, identities, userId, pool);
             break;
 
           case 'telemarketing_calls':
-            matches = this.matchTelemarketingCalls(itemData, userRole, identities, userId);
+            matches = this.matchTelemarketingCalls(itemData, primaryRole, userRoles, identities, userId);
             break;
 
           default:
@@ -1350,18 +1354,18 @@ export class TotalReportService {
   /**
    * 檢查體驗課出席記錄是否符合權限
    */
-  private async matchTrialClassAttendance(item: any, role: string, identities: any, userId: string): Promise<boolean> {
+  private async matchTrialClassAttendance(item: any, primaryRole: string, allRoles: string[], identities: any, userId: string, pool: any): Promise<boolean> {
     // Manager 看所有
-    if (role === 'manager') {
+    if (allRoles.includes('manager')) {
       return true;
     }
 
     // Teacher 看自己的課
-    if (role === 'teacher' && identities.teacher) {
+    if (allRoles.includes('teacher')) {
       const teacherCode = item.teacher_code || item.teacherCode || item.raw_data?.teacher_code;
 
       // 如果有 teacher_code，比對 teacher_code
-      if (teacherCode && identities.teacher.includes(teacherCode)) {
+      if (teacherCode && identities.teacher && identities.teacher.includes(teacherCode)) {
         return true;
       }
 
@@ -1369,7 +1373,7 @@ export class TotalReportService {
       const teacherName = item.teacher_name || item.teacherName || item.raw_data?.teacher_name || item.raw_data?.授課老師;
       if (teacherName) {
         // 取得該 teacher_name 對應的使用者
-        const userResult = await queryDatabase('SELECT id, first_name FROM users WHERE id = $1', [userId]);
+        const userResult = await queryDatabase(pool, 'SELECT id, first_name FROM users WHERE id = $1', [userId]);
         if (userResult.rows.length > 0) {
           const userName = userResult.rows[0].first_name;
           if (teacherName.includes(userName)) {
@@ -1380,9 +1384,11 @@ export class TotalReportService {
     }
 
     // Consultant 看自己的學生
-    if (role === 'consultant' && identities.consultant) {
+    if (allRoles.includes('consultant')) {
       const consultantCode = item.consultant_code || item.consultantCode || item.raw_data?.consultant_code;
-      return identities.consultant.includes(consultantCode);
+      if (consultantCode && identities.consultant && identities.consultant.includes(consultantCode)) {
+        return true;
+      }
     }
 
     return false;
@@ -1391,17 +1397,51 @@ export class TotalReportService {
   /**
    * 檢查購買記錄是否符合權限
    */
-  private matchTrialClassPurchases(item: any, role: string, identities: any, userId: string): boolean {
+  private async matchTrialClassPurchases(item: any, primaryRole: string, allRoles: string[], identities: any, userId: string, pool: any): Promise<boolean> {
     // Manager 看所有
-    if (role === 'manager') {
+    if (allRoles.includes('manager')) {
       return true;
     }
 
-    // 這裡需要關聯到出席記錄來找到 teacher/consultant
-    // 簡化版本：目前購買記錄沒有直接的 teacher_code，先開放給所有人
-    // TODO: 需要 JOIN trial_class_attendance 來精確過濾
-    if (role === 'teacher' || role === 'consultant') {
-      return true;
+    // 檢查購買記錄中的教師/諮詢師資訊
+    const teacherCode = item.teacher_code || item.teacherCode || item.raw_data?.teacher_code;
+    const consultantCode = item.consultant_code || item.consultantCode || item.raw_data?.consultant_code;
+    const studentName = item.student_name || item.studentName || item.raw_data?.student_name || item.raw_data?.學員姓名;
+
+    // Teacher 看自己相關的購買記錄
+    if (allRoles.includes('teacher')) {
+      // 方法1: 通過 teacher_code 過濾
+      if (teacherCode && identities.teacher && identities.teacher.includes(teacherCode)) {
+        return true;
+      }
+
+      // 方法2: 如果沒有 teacher_code，嘗試通過學生姓名關聯到出席記錄
+      if (studentName) {
+        try {
+          const attendanceResult = await queryDatabase(pool, `
+            SELECT teacher_code, teacher_name
+            FROM trial_class_attendance
+            WHERE student_name = $1
+            LIMIT 1
+          `, [studentName]);
+
+          if (attendanceResult.rows.length > 0) {
+            const attendanceTeacherCode = attendanceResult.rows[0].teacher_code;
+            if (attendanceTeacherCode && identities.teacher && identities.teacher.includes(attendanceTeacherCode)) {
+              return true;
+            }
+          }
+        } catch (error) {
+          console.error('Error querying attendance for purchase filtering:', error);
+        }
+      }
+    }
+
+    // Consultant 看自己相關的購買記錄
+    if (allRoles.includes('consultant')) {
+      if (consultantCode && identities.consultant && identities.consultant.includes(consultantCode)) {
+        return true;
+      }
     }
 
     return false;
@@ -1410,22 +1450,26 @@ export class TotalReportService {
   /**
    * 檢查電訪記錄是否符合權限
    */
-  private matchTelemarketingCalls(item: any, role: string, identities: any, userId: string): boolean {
+  private matchTelemarketingCalls(item: any, primaryRole: string, allRoles: string[], identities: any, userId: string): boolean {
     // Manager 看所有
-    if (role === 'manager') {
+    if (allRoles.includes('manager')) {
       return true;
     }
 
     // Consultant 看自己的電訪
-    if (role === 'consultant' && identities.consultant) {
+    if (allRoles.includes('consultant')) {
       const consultantCode = item.closer_code || item.closerCode;
-      return identities.consultant.includes(consultantCode);
+      if (consultantCode && identities.consultant && identities.consultant.includes(consultantCode)) {
+        return true;
+      }
     }
 
     // Setter 看自己的電訪
-    if (role === 'setter' && identities.setter) {
+    if (allRoles.includes('setter')) {
       const setterCode = item.setter_code || item.setterCode;
-      return identities.setter.includes(setterCode);
+      if (setterCode && identities.setter && identities.setter.includes(setterCode)) {
+        return true;
+      }
     }
 
     return false;
