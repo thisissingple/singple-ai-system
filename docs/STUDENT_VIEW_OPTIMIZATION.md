@@ -227,9 +227,113 @@
 1. ✅ 部署到 Zeabur (已觸發 - Commit 36ae2a3)
 2. ✅ 執行 Phase 1 組件重構
 3. ✅ 執行 Phase 2 表格視覺優化
-4. ⏳ 驗證 AttendanceLog 和新設計顯示正確
-5. ⏳ 取得用戶反饋
-6. ⏳ 根據反饋調整細節
+4. ✅ 取得用戶反饋（2025-10-23）
+5. ✅ 根據反饋調整細節（Commit aaa20f9）
+6. ⏳ 用戶最終驗收測試
+
+---
+
+## Phase 3: 用戶反饋優化 (2025-10-23)
+
+### 用戶反饋要點
+
+**優點**：
+- ✅ 整體配色不錯（Gray + Orange 獲得認可）
+
+**需改進**：
+1. **AttendanceLog**：空間浪費、設計過度簡陋、排版不佳
+2. **學生表格**：
+   - 排版沒有明顯改變
+   - 優先級文字被擠到第二行 → 應只用顏色辨別
+   - 方案欄位應用 Badge 樣式
+   - 篩選區域需要整體調整
+
+### 實施方案
+
+#### 1. AttendanceLog 改為表格式
+```tsx
+// 移除：時間軸設計 (decorative dots, card-based)
+// 改為：簡潔 4 欄表格
+<Table>
+  <TableHeader>
+    <TableRow className="h-10">
+      <TableHead className="w-[80px] text-xs">日期</TableHead>
+      <TableHead className="w-[100px] text-xs">教師</TableHead>
+      <TableHead className="text-xs">學生</TableHead>
+      <TableHead className="w-[100px] text-xs">狀態</TableHead>
+    </TableRow>
+  </TableHeader>
+  {/* ... */}
+</Table>
+```
+
+#### 2. 優先級圓點 + Tooltip
+```tsx
+<TooltipProvider>
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <div className="flex items-center justify-center cursor-help">
+        <div className="w-2.5 h-2.5 rounded-full bg-orange-500"></div>
+      </div>
+    </TooltipTrigger>
+    <TooltipContent side="right">
+      <p className="text-xs">高優先</p>
+    </TooltipContent>
+  </Tooltip>
+</TooltipProvider>
+```
+
+#### 3. 方案 Badge
+```tsx
+<span className="inline-flex px-2 py-1 text-xs rounded-full bg-orange-50 text-orange-700 border border-orange-200">
+  {student.packageName}
+</span>
+```
+
+#### 4. 篩選區域下拉選單
+```tsx
+// 移除：Button 組（一字排開）
+// 改為：Select 下拉選單
+<Select value={statusFilter} onValueChange={setStatusFilter}>
+  <SelectTrigger className="w-[160px] h-9 text-sm">
+    <SelectValue placeholder="篩選狀態" />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value="all">
+      <span className="flex items-center justify-between w-full">
+        全部
+        <span className="ml-3 text-gray-400 text-xs">({statusCounts.all})</span>
+      </span>
+    </SelectItem>
+    {/* ... */}
+  </SelectContent>
+</Select>
+```
+
+#### 5. 表格整體優化
+- **行高增加**：h-12 → h-14（更透氣）
+- **表頭統一**：h-10 + text-xs
+- **欄位寬度精調**：
+  - 優先級：60px → 50px（只顯示圓點）
+  - 學生資訊：220px → 200px
+  - 購買日期：100px → 90px
+  - 教師：100px → 90px
+  - 總堂/已上/剩餘：60px → 55px
+  - 最後上課：100px → 90px
+  - 累積金額：120px → 110px（右對齊）
+
+### Git Commits (Phase 3)
+
+| Commit | 說明 |
+|--------|------|
+| `aaa20f9` | feat: Complete student view UI/UX optimization based on user feedback |
+
+### 變更檔案統計
+```
+client/src/components/trial-report/attendance-log.tsx    | 180 lines changed
+client/src/components/trial-report/student-insights.tsx  | 248 lines changed
+Total: 2 files changed, 217 insertions(+), 211 deletions(-)
+```
 
 ---
 
