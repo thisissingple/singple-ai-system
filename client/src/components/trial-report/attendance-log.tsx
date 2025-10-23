@@ -174,45 +174,73 @@ export function AttendanceLog({ classRecords, maxRecords = 40 }: AttendanceLogPr
               {/* 卡片網格 */}
               {!isCollapsed && (
                 <div className="grid grid-cols-2 gap-3 pl-6">
-                  {group.records.map((record) => (
-                    <div
-                      key={record.id}
-                      className="border border-gray-200 rounded-lg p-3 hover:shadow-sm hover:border-gray-300 transition-all bg-white"
-                    >
-                      {/* 教師名稱 */}
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-                        <span className="text-xs font-medium text-gray-900">
-                          {record.teacherName || '未分配'}
-                        </span>
-                      </div>
+                  {group.records.map((record) => {
+                    // 格式化完整日期時間
+                    const fullDateTime = record.classDate
+                      ? format(parseISO(record.classDate), 'yyyy/MM/dd HH:mm', { locale: zhTW })
+                      : '';
 
-                      {/* 學生名稱 */}
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <span className="text-gray-400">→</span>
-                        <span className="text-sm text-gray-700">
-                          {record.studentName || '未命名'}
-                        </span>
-                      </div>
+                    return (
+                      <div
+                        key={record.id}
+                        className="border border-gray-200 rounded-lg p-3 hover:shadow-sm hover:border-gray-300 transition-all bg-white"
+                      >
+                        {/* 頂部：日期時間 */}
+                        {fullDateTime && (
+                          <div className="flex items-center gap-1.5 mb-2 pb-2 border-b border-gray-100">
+                            <span className="text-[10px] text-gray-500 font-mono">
+                              📅 {fullDateTime}
+                            </span>
+                          </div>
+                        )}
 
-                      {/* 狀態標籤 */}
-                      {record.status && (
-                        <div className="mt-2">
-                          <span
-                            className={`text-xs px-2 py-0.5 rounded-full inline-block ${
-                              record.status === '已完成' || record.status === '出席'
-                                ? 'bg-green-50 text-green-700 border border-green-200'
-                                : record.status === '缺席'
-                                ? 'bg-red-50 text-red-700 border border-red-200'
-                                : 'bg-gray-100 text-gray-700 border border-gray-200'
-                            }`}
-                          >
-                            ✓ {record.status}
+                        {/* 教師名稱 */}
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                          <span className="text-xs font-medium text-gray-900">
+                            {record.teacherName || '未分配'}
                           </span>
                         </div>
-                      )}
-                    </div>
-                  ))}
+
+                        {/* 學生名稱 */}
+                        <div className="flex items-center gap-1.5 mb-3">
+                          <span className="text-gray-400">→</span>
+                          <span className="text-sm font-medium text-gray-900">
+                            {record.studentName || '未命名'}
+                          </span>
+                        </div>
+
+                        {/* 底部資訊區 */}
+                        <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                          {/* 狀態標籤 */}
+                          {record.status && (
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full inline-block font-medium ${
+                                record.status === '已完成' || record.status === '出席'
+                                  ? 'bg-green-50 text-green-700 border border-green-200'
+                                  : record.status === '缺席' || record.status === '放鳥'
+                                  ? 'bg-red-50 text-red-700 border border-red-200'
+                                  : record.status === '未開始'
+                                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                  : 'bg-gray-100 text-gray-700 border border-gray-200'
+                              }`}
+                            >
+                              {record.status === '已完成' || record.status === '出席' ? '✓' :
+                               record.status === '缺席' || record.status === '放鳥' ? '✗' :
+                               record.status === '未開始' ? '○' : '•'} {record.status}
+                            </span>
+                          )}
+
+                          {/* 課程主題（如果有） */}
+                          {record.topic && (
+                            <span className="text-[10px] text-gray-500 truncate max-w-[100px]" title={record.topic}>
+                              {record.topic}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
