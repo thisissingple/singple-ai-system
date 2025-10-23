@@ -41,6 +41,7 @@ import AdLeadsList from "@/pages/telemarketing/ad-leads-list";
 import AdPerformanceReport from "@/pages/telemarketing/ad-performance-report";
 import CallRecordsList from "@/pages/telemarketing/call-records-list";
 import StudentFollowUp from "@/pages/telemarketing/student-follow-up";
+import GoHighLevelContacts from "@/pages/leads/gohighlevel-contacts";
 
 function Router() {
   return (
@@ -107,6 +108,11 @@ function Router() {
       </Route>
       <Route path="/telemarketing/ad-performance">
         <ProtectedRoute><AdPerformanceReport /></ProtectedRoute>
+      </Route>
+
+      {/* GoHighLevel 聯絡人 */}
+      <Route path="/leads/gohighlevel">
+        <ProtectedRoute><GoHighLevelContacts /></ProtectedRoute>
       </Route>
 
       {/* 教學品質路由 */}

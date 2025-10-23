@@ -130,6 +130,12 @@ export const sidebarConfig: SidebarSection[] = [
         icon: BarChart3,
         requiredRoles: ['admin', 'manager'],
       },
+      {
+        label: 'GoHighLevel 聯絡人',
+        href: '/leads/gohighlevel',
+        icon: Users,
+        requiredRoles: ['admin', 'manager', 'setter'],
+      },
     ],
   },
   {

@@ -7644,5 +7644,273 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ========================================
+  // GoHighLevel Webhook Integration
+  // ========================================
+
+  // Webhook - 接收 GoHighLevel Contact 資料
+  app.post('/api/webhooks/gohighlevel', async (req, res) => {
+    try {
+      console.log('📨 收到 GoHighLevel webhook:', JSON.stringify(req.body, null, 2));
+
+      const contactData = req.body;
+
+      // 驗證必要欄位
+      if (!contactData.id && !contactData.contactId) {
+        console.warn('⚠️  GoHighLevel webhook 缺少 contact ID');
+        return res.status(400).json({ error: 'Missing contact ID' });
+      }
+
+      const pool = createPool();
+
+      // 提取關鍵欄位
+      const contactId = contactData.id || contactData.contactId;
+      const firstName = contactData.firstName || contactData.first_name || '';
+      const lastName = contactData.lastName || contactData.last_name || '';
+      const name = contactData.name || contactData.fullName || `${firstName} ${lastName}`.trim();
+      const email = contactData.email || '';
+      const phone = contactData.phone || contactData.phoneNumber || '';
+      const tags = contactData.tags || [];
+      const source = contactData.source || contactData.leadSource || '';
+      const locationId = contactData.locationId || contactData.location_id || '';
+      const companyName = contactData.companyName || contactData.company || '';
+      const address = contactData.address || '';
+      const city = contactData.city || '';
+      const state = contactData.state || '';
+      const postalCode = contactData.postalCode || contactData.postal_code || '';
+      const country = contactData.country || '';
+
+      // 提取自訂欄位
+      const customFields = contactData.customFields || contactData.customField || {};
+
+      // 檢查是否已存在（防止重複）
+      const existingContact = await queryDatabase(
+        pool,
+        'SELECT id FROM gohighlevel_contacts WHERE contact_id = $1',
+        [contactId]
+      );
+
+      let result;
+
+      if (existingContact.rows.length > 0) {
+        // 更新現有聯絡人
+        console.log(`ℹ️  更新現有聯絡人: ${contactId}`);
+        result = await queryDatabase(
+          pool,
+          `UPDATE gohighlevel_contacts
+           SET name = $1, first_name = $2, last_name = $3, email = $4, phone = $5,
+               tags = $6, source = $7, location_id = $8, company_name = $9,
+               address = $10, city = $11, state = $12, postal_code = $13, country = $14,
+               custom_fields = $15, raw_data = $16, updated_at = NOW()
+           WHERE contact_id = $17
+           RETURNING *`,
+          [
+            name, firstName, lastName, email, phone,
+            tags, source, locationId, companyName,
+            address, city, state, postalCode, country,
+            JSON.stringify(customFields), JSON.stringify(contactData), contactId
+          ]
+        );
+      } else {
+        // 新增聯絡人
+        console.log(`✨ 新增聯絡人: ${contactId}`);
+        result = await queryDatabase(
+          pool,
+          `INSERT INTO gohighlevel_contacts
+           (contact_id, name, first_name, last_name, email, phone, tags, source,
+            location_id, company_name, address, city, state, postal_code, country,
+            custom_fields, raw_data)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+           RETURNING *`,
+          [
+            contactId, name, firstName, lastName, email, phone, tags, source,
+            locationId, companyName, address, city, state, postalCode, country,
+            JSON.stringify(customFields), JSON.stringify(contactData)
+          ]
+        );
+      }
+
+      await pool.end();
+
+      console.log('✅ GoHighLevel contact 已儲存:', contactId);
+
+      res.json({
+        success: true,
+        message: 'Contact received and stored',
+        contactId: contactId,
+      });
+
+    } catch (error: any) {
+      console.error('❌ GoHighLevel webhook 處理失敗:', error);
+      res.status(500).json({
+        error: 'Internal server error',
+        message: error.message,
+      });
+    }
+  });
+
+  // GET - 查詢 GoHighLevel Contacts 列表
+  app.get('/api/gohighlevel/contacts', isAuthenticated, async (req, res) => {
+    try {
+      const {
+        search,
+        source,
+        start_date,
+        end_date,
+        page = '1',
+        limit = '20',
+      } = req.query;
+
+      const pool = createPool();
+
+      // 建立查詢條件
+      const conditions: string[] = ['1=1'];
+      const params: any[] = [];
+      let paramIndex = 1;
+
+      // 搜尋條件（姓名、電話、Email）
+      if (search && typeof search === 'string') {
+        conditions.push(`(name ILIKE $${paramIndex} OR phone ILIKE $${paramIndex} OR email ILIKE $${paramIndex})`);
+        params.push(`%${search}%`);
+        paramIndex++;
+      }
+
+      // 來源篩選
+      if (source && typeof source === 'string') {
+        conditions.push(`source = $${paramIndex}`);
+        params.push(source);
+        paramIndex++;
+      }
+
+      // 日期範圍
+      if (start_date && typeof start_date === 'string') {
+        conditions.push(`created_at >= $${paramIndex}`);
+        params.push(start_date);
+        paramIndex++;
+      }
+
+      if (end_date && typeof end_date === 'string') {
+        conditions.push(`created_at <= $${paramIndex}`);
+        params.push(end_date);
+        paramIndex++;
+      }
+
+      // 計算總數
+      const countQuery = `SELECT COUNT(*) FROM gohighlevel_contacts WHERE ${conditions.join(' AND ')}`;
+      const countResult = await queryDatabase(pool, countQuery, params);
+      const total = parseInt(countResult.rows[0].count);
+
+      // 分頁
+      const pageNum = parseInt(page as string);
+      const limitNum = parseInt(limit as string);
+      const offset = (pageNum - 1) * limitNum;
+
+      // 查詢資料
+      const dataQuery = `
+        SELECT * FROM gohighlevel_contacts
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY created_at DESC
+        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+      `;
+      const dataResult = await queryDatabase(pool, dataQuery, [...params, limitNum, offset]);
+
+      await pool.end();
+
+      res.json({
+        success: true,
+        data: dataResult.rows,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          totalPages: Math.ceil(total / limitNum),
+        },
+      });
+
+    } catch (error: any) {
+      console.error('查詢 GoHighLevel contacts 失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GET - 取得單一 Contact 詳情
+  app.get('/api/gohighlevel/contacts/:id', isAuthenticated, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const pool = createPool();
+
+      const result = await queryDatabase(
+        pool,
+        'SELECT * FROM gohighlevel_contacts WHERE id = $1',
+        [id]
+      );
+
+      await pool.end();
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: '找不到此聯絡人' });
+      }
+
+      res.json({ success: true, data: result.rows[0] });
+
+    } catch (error: any) {
+      console.error('查詢 contact 詳情失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GET - 統計資料
+  app.get('/api/gohighlevel/stats', isAuthenticated, async (req, res) => {
+    try {
+      const pool = createPool();
+
+      // 總聯絡人數
+      const totalResult = await queryDatabase(pool, 'SELECT COUNT(*) FROM gohighlevel_contacts');
+      const total = parseInt(totalResult.rows[0].count);
+
+      // 今日新增
+      const todayResult = await queryDatabase(
+        pool,
+        `SELECT COUNT(*) FROM gohighlevel_contacts
+         WHERE created_at >= CURRENT_DATE`
+      );
+      const today = parseInt(todayResult.rows[0].count);
+
+      // 本週新增
+      const weekResult = await queryDatabase(
+        pool,
+        `SELECT COUNT(*) FROM gohighlevel_contacts
+         WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'`
+      );
+      const week = parseInt(weekResult.rows[0].count);
+
+      // 依來源分組
+      const sourceResult = await queryDatabase(
+        pool,
+        `SELECT source, COUNT(*) as count
+         FROM gohighlevel_contacts
+         WHERE source IS NOT NULL AND source != ''
+         GROUP BY source
+         ORDER BY count DESC`
+      );
+
+      await pool.end();
+
+      res.json({
+        success: true,
+        data: {
+          total,
+          today,
+          week,
+          bySources: sourceResult.rows,
+        },
+      });
+
+    } catch (error: any) {
+      console.error('查詢統計資料失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return httpServer;
 }
