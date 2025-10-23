@@ -8,7 +8,7 @@
 
 ## 變更摘要
 
-### ✅ 已完成 (Phase 1)
+### ✅ 已完成 (Phase 1 - 組件重構)
 
 1. **新增組件**
    - `AttendanceLog` (attendance-log.tsx)
@@ -24,6 +24,39 @@
 3. **Props 傳遞**
    - StudentInsights 現在接收 `classRecords` prop
    - Dashboard 正確傳遞 `teacherClassRecords`
+
+### ✅ 已完成 (Phase 2 - 視覺統一)
+
+1. **優先級顯示** → 小圓點 + 灰字
+   - 高優先: `bg-orange-500` 圓點
+   - 中優先: `bg-orange-300` 圓點
+   - 低優先: `bg-gray-300` 圓點
+   - 文字統一: `text-gray-600`
+
+2. **狀態 Badge** → rounded-full 淡色背景
+   - 已轉高: `bg-green-50 text-green-700`
+   - 未轉高: `bg-red-50 text-red-700`
+   - 體驗中: `bg-blue-50 text-blue-700`
+   - 未開始: `bg-gray-100 text-gray-700`
+
+3. **表格行樣式** → 統一灰色
+   - 移除彩色左邊框 (red-500/yellow-500/green-500)
+   - 改用: `border-l-2 border-gray-100`
+   - Hover: `hover:bg-gray-50 transition-colors`
+
+4. **篩選按鈕** → 灰色 + 橘色 active
+   - 未選中: `border-gray-200 bg-white text-gray-700`
+   - 選中: `border-orange-400 bg-orange-50 text-orange-700`
+   - Hover: `hover:bg-gray-50`
+
+5. **數字顯示** → 簡化配色
+   - 總堂/已上/剩餘: `text-gray-700`（除非剩餘 ≤1 則 `text-orange-600`）
+   - 累積金額: `text-gray-900`（有金額）/ `text-gray-400`（無金額）
+
+6. **排序提示框** → 灰色調
+   - 背景: `bg-gray-50` + `border-gray-200`
+   - 文字: `text-gray-700/900`
+   - 箭頭: `text-orange-500`（橘色強調）
 
 ---
 
@@ -90,65 +123,9 @@
 
 ---
 
-## 待完成工作 (Phase 2)
+## ~~待完成工作 (Phase 2)~~ ✅ 已完成
 
-### 主表格視覺優化
-
-#### 1. 卡片樣式統一
-```tsx
-// Current (多種顏色)
-<Card className="border-orange-200 bg-orange-50/50">
-
-// Target (統一灰色)
-<Card className="border border-gray-200 shadow-sm bg-white">
-```
-
-#### 2. 優先級欄位重構
-**位置**: student-insights.tsx (表格內的 priority 顯示)
-
-**Current**:
-```tsx
-{student.priority === '高優先' && (
-  <span className="text-2xl">🔴</span>
-  <span className="font-bold text-red-700">高優先</span>
-)}
-```
-
-**Target**:
-```tsx
-<div className="flex items-center gap-2">
-  <div className={`w-2 h-2 rounded-full ${
-    student.priority === '高優先' ? 'bg-orange-500' :
-    student.priority === '中優先' ? 'bg-orange-300' :
-    'bg-gray-300'
-  }`}></div>
-  <span className="text-sm text-gray-600">{student.priority}</span>
-</div>
-```
-
-#### 3. 狀態 Badge 統一化
-**位置**: student-insights.tsx (currentStatus 顯示)
-
-**Target**:
-```tsx
-<span className={`px-2 py-1 text-xs rounded-full ${
-  status === '已轉高' || status === '出席' ? 'bg-green-50 text-green-700' :
-  status === '缺席' || status === '未轉高' ? 'bg-red-50 text-red-700' :
-  'bg-gray-100 text-gray-700'
-}`}>
-  {status}
-</span>
-```
-
-#### 4. 移除彩色高亮行
-**Current**: 表格行有 red/yellow/green 背景色
-
-**Target**: 統一 white 背景 + gray-50 hover
-
-#### 5. 簡化篩選按鈕
-**Current**: 多種顏色的 Badge 按鈕
-
-**Target**: 統一灰色 + active 時橘色邊框
+所有視覺優化已完成！ 🎉
 
 ---
 
@@ -207,10 +184,21 @@
 
 ## Git Commits
 
-### Commit 1: feat: Optimize student view with timeline attendance log
+### Commit 1: feat: Optimize student view with timeline attendance log (bdc978a)
 - 新增 AttendanceLog 組件
 - 封存冗餘卡片
 - 整合新組件到 StudentInsights
+
+### Commit 2: docs: Add student view optimization documentation (caaf589)
+- 建立 STUDENT_VIEW_OPTIMIZATION.md
+- 記錄設計系統規範
+
+### Commit 3: feat: Complete Phase 2 visual optimization (36ae2a3)
+- 優先級改為小圓點 + 灰字
+- 狀態 Badge 統一 rounded-full 樣式
+- 表格行移除彩色邊框，改用灰色 hover
+- 篩選按鈕統一灰色 + 橘色 active 狀態
+- 簡化所有數字和提示框配色
 
 ---
 
@@ -236,11 +224,12 @@
 
 ## 下一步行動
 
-1. ✅ 部署到 Zeabur (已觸發)
-2. ⏳ 驗證 AttendanceLog 顯示正確
-3. ⏳ 執行 Phase 2 表格優化
-4. ⏳ 取得用戶反饋
-5. ⏳ 調整細節
+1. ✅ 部署到 Zeabur (已觸發 - Commit 36ae2a3)
+2. ✅ 執行 Phase 1 組件重構
+3. ✅ 執行 Phase 2 表格視覺優化
+4. ⏳ 驗證 AttendanceLog 和新設計顯示正確
+5. ⏳ 取得用戶反饋
+6. ⏳ 根據反饋調整細節
 
 ---
 
