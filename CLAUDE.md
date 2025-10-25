@@ -144,9 +144,16 @@ The Form Builder allows admins to create custom forms without coding.
 
 ## Environment Configuration
 
-**Deployment**: Replit (development/production)
-- Port: 5000 (auto-assigned by Replit, do NOT hardcode)
-- Environment variables set in Replit Secrets
+**Deployment Workflow**: Local → GitHub → Zeabur
+1. **Local Development**: Test on local machine (localhost:5000)
+2. **Version Control**: Push to GitHub repository
+3. **Production Deployment**: Auto-deploy to Zeabur via GitHub integration
+
+**IMPORTANT**:
+- ⚠️ This project is NO LONGER deployed on Replit
+- ✅ Production environment: Zeabur (zeabur.com)
+- ✅ Local testing required before pushing to GitHub
+- Port: 5000 (local development)
 
 **Required Variables**:
 ```env
