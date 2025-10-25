@@ -37,8 +37,10 @@ import { cn } from '@/lib/utils';
 import { PainPointsSection } from '@/components/teaching-quality/pain-points-section';
 import { SalesScriptsSection } from '@/components/teaching-quality/sales-scripts-section';
 import { SalesScoreCard } from '@/components/teaching-quality/sales-score-card';
+import { TeachingScoreCard } from '@/components/teaching-quality/teaching-score-card';
 import { FloatingAIChat } from '@/components/teaching-quality/floating-ai-chat';
 import { parseTeachingAnalysisMarkdown } from '@/lib/parse-teaching-analysis';
+import { calculateOverallScore, getGradeColor } from '@/lib/calculate-overall-score';
 
 type ConversionSuggestionMarkdown = {
   markdownOutput: string;
@@ -602,10 +604,35 @@ export default function TeachingQualityDetail() {
         {/* 顯示基本資訊卡片（即使沒有 AI 分析也顯示） */}
         <Card className="border-2 border-primary/20 shadow-lg">
           <CardHeader className="space-y-4 bg-gradient-to-r from-primary/5 to-primary/10">
-            <CardTitle className="flex items-center gap-2 text-2xl font-bold text-foreground">
-              <span>🏆</span>
-              推課戰績報告
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-2xl font-bold text-foreground">
+                <span>🏆</span>
+                推課戰績報告
+              </CardTitle>
+
+              {/* 整體評分顯示（右上角） */}
+              {newParsedAnalysis && newParsedAnalysis.teachingTotalScore > 0 && newParsedAnalysis.salesTotalScore > 0 && newParsedAnalysis.probability > 0 && (() => {
+                const overallScore = calculateOverallScore(
+                  newParsedAnalysis.teachingTotalScore,
+                  newParsedAnalysis.salesTotalScore,
+                  newParsedAnalysis.probability
+                );
+                return (
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <div className="text-sm text-muted-foreground">整體評分</div>
+                      <div className="text-3xl font-bold text-foreground">
+                        {overallScore.score}
+                        <span className="text-lg text-muted-foreground">/100</span>
+                      </div>
+                    </div>
+                    <Badge className={cn("h-12 px-4 text-lg font-bold", getGradeColor(overallScore.grade))}>
+                      {overallScore.grade}
+                    </Badge>
+                  </div>
+                );
+              })()}
+            </div>
             <div className="flex flex-wrap gap-2">
               <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300 px-3 py-1">
                 👤 學員：{analysis.student_name}
@@ -620,32 +647,31 @@ export default function TeachingQualityDetail() {
           </CardHeader>
           <CardContent className="pt-6">
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-              {/* 1. 教學評分 */}
-              <div className="rounded-lg border-2 border-green-200 bg-gradient-to-br from-green-50 to-white p-5 shadow-md">
-                <div className="text-xs font-semibold uppercase tracking-wide text-green-700">
-                  教學評分
+              {/* 1. 教學評分（使用新的 TeachingScoreCard 組件） */}
+              {newParsedAnalysis && newParsedAnalysis.teachingMetrics && newParsedAnalysis.teachingMetrics.length > 0 ? (
+                <TeachingScoreCard
+                  metrics={newParsedAnalysis.teachingMetrics}
+                  totalScore={newParsedAnalysis.teachingTotalScore}
+                  maxScore={newParsedAnalysis.teachingMaxScore}
+                  onTimestampClick={handleTimestampClick}
+                />
+              ) : (
+                <div className="rounded-lg border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5 shadow-md">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+                    教學評分
+                  </div>
+                  <div className="mt-3 flex items-center justify-center">
+                    <span className="text-sm text-muted-foreground">尚無評分資料</span>
+                  </div>
                 </div>
-                <div className="mt-3 flex items-baseline gap-2">
-                  <span className="text-5xl font-bold text-green-600">
-                    {analysis.overall_score}
-                  </span>
-                  <span className="text-lg text-muted-foreground">/10</span>
-                </div>
-                <div className="mt-2 text-lg font-medium text-green-700">
-                  {'★'.repeat(Math.round(analysis.overall_score / 2))}
-                  {'☆'.repeat(5 - Math.round(analysis.overall_score / 2))}
-                </div>
-                <div className="mt-2 text-sm font-semibold text-green-800">
-                  等級：{analysis.overall_score >= 9 ? 'S' : analysis.overall_score >= 7 ? 'A' : analysis.overall_score >= 5 ? 'B' : 'C'}
-                </div>
-              </div>
+              )}
 
               {/* 2. 推課評分（使用新的 SalesScoreCard 組件） */}
-              {newParsedAnalysis && newParsedAnalysis.scoreMetrics && newParsedAnalysis.scoreMetrics.length > 0 ? (
+              {newParsedAnalysis && newParsedAnalysis.salesMetrics && newParsedAnalysis.salesMetrics.length > 0 ? (
                 <SalesScoreCard
-                  totalScore={newParsedAnalysis.totalScore}
-                  maxTotalScore={newParsedAnalysis.maxTotalScore}
-                  metrics={newParsedAnalysis.scoreMetrics}
+                  totalScore={newParsedAnalysis.salesTotalScore}
+                  maxTotalScore={newParsedAnalysis.salesMaxScore}
+                  metrics={newParsedAnalysis.salesMetrics}
                   summary={newParsedAnalysis.scoreSummary}
                   onTimestampClick={handleTimestampClick}
                 />
