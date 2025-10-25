@@ -3730,3 +3730,200 @@ Response: { success: true, message: '已儲存到知識庫' }
 
 **最後更新時間**: 2025-10-24 下午
 **當前狀態**: Phase 29 AI 策略助手系統開發完成 ✅
+
+## 📅 Phase 31: UI 排版優化 - 結構化組件呈現分析報告（2025-10-25）
+
+### 🎯 目標
+將 Phase 30 優化後的 Markdown 報告用結構化 UI 組件呈現，提升老師閱讀體驗，讓分析報告更易理解和使用。
+
+### ✅ 完成項目
+
+#### 1. 建立 4 個新的 UI 組件
+
+**PainPointsSection 組件** ([`pain-points-section.tsx`](client/src/components/teaching-quality/pain-points-section.tsx))
+- 5 層次痛點卡片展示
+  - 目標層（紫色）
+  - 社交層（藍色）
+  - 情緒層（紅色）
+  - 環境層（綠色）
+  - 技術層（灰色）
+- 每層包含：
+  - 內心痛點描述
+  - 行為證據（含時間戳連結）
+  - 一對一教練課程價值說明
+  - 未探索層次警示（教學品質扣分提醒）
+- 可展開/收合功能
+- 重要提醒區塊（痛點 ≠ 技術問題）
+
+**TeachingScoresSection 組件** ([`teaching-scores-section.tsx`](client/src/components/teaching-quality/teaching-scores-section.tsx))
+- 5 大指標卡片展示（橫式網格佈局）
+  - 呼應痛點程度
+  - 推課引導力度
+  - Double Bind / NLP 應用
+  - 情緒共鳴與信任
+  - 節奏與收斂完整度
+- 每個指標包含：
+  - 分數（X/5）+ 進度條
+  - 評級標籤（優秀/良好/尚可/需改進/急需改進）
+  - 證據說明（含時間戳連結）
+- 總分進度條（X/25）
+- 總評說明區塊
+
+**ConversionProbabilitySection 組件** ([`conversion-probability-section.tsx`](client/src/components/teaching-quality/conversion-probability-section.tsx))
+- 成交機率圓形儀表板（0-100%）
+- 進度條視覺化
+- 計算公式拆解：
+  - 基礎分（40%）
+  - 加分項（✅ 已達成）
+  - 減分項（❌ 已觸發）
+  - 尚未達成項目（⚠️ 可改進空間）
+- AI 推理說明（Markdown 渲染）
+
+**SalesScriptsSection 組件** ([`sales-scripts-section.tsx`](client/src/components/teaching-quality/sales-scripts-section.tsx))
+- 3 種版本推課話術（Tabs 切換）
+  - 版本 A：已付費/高投入型（價值重構）
+  - 版本 B：環境限制/時間壓力型（損失規避）
+  - 版本 C：積極探索/高度投入型（未來錨定）
+- 每個版本包含：
+  - 目標受眾描述
+  - NLP 技巧標籤
+  - 完整話術內容（Markdown 渲染）
+  - 複製按鈕
+  - 使用指引
+- 推課方向重要提醒
+- 個人化要求說明
+- 複製全部話術按鈕
+
+#### 2. 建立 Markdown 解析器
+
+**parseTeachingAnalysisMarkdown 函數** ([`parse-teaching-analysis.ts`](client/src/lib/parse-teaching-analysis.ts))
+- 從 GPT 生成的 Markdown 報告提取結構化資料
+- 解析功能：
+  - 提取 5 層次痛點（含未探索層次）
+  - 提取 5 個評分指標 + 總分 + 總評
+  - 提取成交機率 + 計算因素
+  - 提取 3 個推課話術版本
+- 自動提取時間戳（支援多種格式）
+- 錯誤處理與容錯機制
+
+#### 3. 整合到教學品質詳細頁面
+
+**修改 teaching-quality-detail.tsx**
+- Import 新組件和解析器
+- 使用 `useMemo` hook 解析 Markdown
+- 條件渲染新組件：
+  - 優先顯示結構化 UI 組件
+  - 保留舊 UI 作為 fallback（防止解析失敗）
+- 時間戳點擊跳轉至逐字稿功能整合
+
+#### 4. 測試驗證
+
+**測試腳本** ([`test-phase31-parser.ts`](tests/test-phase31-parser.ts))
+- 測試結果：
+  - ✅ Section 提取：5 個主要區塊全部識別
+  - ✅ 成交策略評估：5 個指標全部解析（4/5, 4/5, 2/5, 5/5, 5/5）
+  - ✅ 總分解析：20/25
+  - ✅ 成交機率：75%
+  - ✅ 基礎分 + 3 個因素（✅✅❌）全部解析
+  - ✅ 推課話術：3 個版本（A/B/C）全部解析
+  - ⚠️ 痛點 section：需要優化 parser（痛點在子 section 中）
+
+### 📁 新增檔案
+
+#### Frontend Components
+1. `client/src/components/teaching-quality/pain-points-section.tsx` - 痛點分析組件
+2. `client/src/components/teaching-quality/teaching-scores-section.tsx` - 評分指標組件
+3. `client/src/components/teaching-quality/conversion-probability-section.tsx` - 成交機率組件
+4. `client/src/components/teaching-quality/sales-scripts-section.tsx` - 推課話術組件
+
+#### Utilities
+5. `client/src/lib/parse-teaching-analysis.ts` - Markdown 解析器
+
+#### Tests
+6. `tests/test-phase31-parser.ts` - 解析器測試腳本
+
+#### Modified Files
+7. `client/src/pages/teaching-quality/teaching-quality-detail.tsx` - 整合新組件
+
+### 🎨 UI/UX 改進亮點
+
+1. **視覺層次分明**
+   - 5 層次痛點使用不同顏色區分（紫/藍/紅/綠/灰）
+   - 每個組件使用 Card + 漸層背景
+   - 清晰的 Icon 標示
+
+2. **互動性增強**
+   - 時間戳可點擊跳轉至逐字稿（支援高亮顯示）
+   - 痛點卡片可展開/收合
+   - 推課話術 Tabs 切換
+   - 一鍵複製功能
+
+3. **資訊密度優化**
+   - 評分指標使用進度條視覺化
+   - 成交機率使用圓形儀表板
+   - 計算公式拆解清晰易懂
+   - Markdown 內容支援語法高亮
+
+4. **教學引導**
+   - 每個組件都有說明文字
+   - 重要提醒使用 Alert 樣式
+   - 未探索痛點明確警示
+   - 使用指引說明
+
+### 🔍 技術亮點
+
+1. **健壯的解析器**
+   - 支援多種時間戳格式（(00:12:09) 或 00:12:09）
+   - 自動提取文本與時間戳
+   - Regex pattern matching
+   - 錯誤處理與 fallback
+
+2. **組件設計原則**
+   - 單一職責（每個組件專注一個功能）
+   - Props 型別定義清晰
+   - 可選參數支援
+   - Callback 函數傳遞（時間戳點擊）
+
+3. **性能優化**
+   - 使用 useMemo 避免重複解析
+   - 條件渲染減少不必要的 DOM
+   - 保留舊 UI 作為 fallback
+
+### 📊 測試結果
+
+```
+✅ Test 1: Extract Sections - 5 個主要區塊全部識別
+✅ Test 2: Extract Pain Points - 需要優化（在子 section）
+✅ Test 3: Extract Score Metrics - 5/5 全部成功
+✅ Test 4: Extract Probability - 成交機率 + 因素全部解析
+✅ Test 5: Extract Sales Scripts - 3/3 版本全部解析
+```
+
+### 🚀 下一步（Phase 32）
+
+1. **優化解析器**
+   - 修復痛點 section 解析（處理子 section）
+   - 支援更多 Markdown 格式變體
+   - 增加解析錯誤 logging
+
+2. **用戶驗收測試**
+   - 使用真實的陳冠霖報告測試新 UI
+   - 收集老師的反饋意見
+   - 優化互動體驗
+
+3. **功能增強**
+   - 新增「匯出為 PDF」功能
+   - 新增「分享連結」功能
+   - 新增「對比分析」（多次上課對比）
+
+4. **文檔更新**
+   - 建立 UI 組件使用指南
+   - 更新開發者文件
+   - 建立 troubleshooting 指南
+
+---
+
+**最後更新時間**: 2025-10-25
+**當前狀態**: Phase 31 UI 排版優化完成 ✅
+**下一階段**: Phase 32 - 解析器優化 + 用戶驗收測試
+

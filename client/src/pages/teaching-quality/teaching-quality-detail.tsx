@@ -45,6 +45,11 @@ import {
 } from '@/types/teaching-quality';
 import { cn } from '@/lib/utils';
 import { AIChatBox } from '@/components/teaching-quality/ai-chat-box';
+import { PainPointsSection } from '@/components/teaching-quality/pain-points-section';
+import { TeachingScoresSection } from '@/components/teaching-quality/teaching-scores-section';
+import { ConversionProbabilitySection } from '@/components/teaching-quality/conversion-probability-section';
+import { SalesScriptsSection } from '@/components/teaching-quality/sales-scripts-section';
+import { parseTeachingAnalysisMarkdown } from '@/lib/parse-teaching-analysis';
 
 type ConversionSuggestionMarkdown = {
   markdownOutput: string;
@@ -478,6 +483,11 @@ export default function TeachingQualityDetail() {
     [markdownOutput]
   );
 
+  const newParsedAnalysis = useMemo(
+    () => (markdownOutput ? parseTeachingAnalysisMarkdown(markdownOutput) : null),
+    [markdownOutput]
+  );
+
   const rawPlanText = useMemo(() => {
     if (parsedAnalysis) return parsedAnalysis.rawMarkdown;
     if (!analysis) return '尚無分析結果';
@@ -742,6 +752,50 @@ export default function TeachingQualityDetail() {
           </Card>
         ) : parsedAnalysis ? (
           <>
+            {/* ========== 新的結構化 UI 組件 ========== */}
+            {newParsedAnalysis && (
+              <>
+                {/* 深層痛點分析（5 層次） */}
+                {newParsedAnalysis.painPoints && newParsedAnalysis.painPoints.length > 0 && (
+                  <PainPointsSection
+                    painPoints={newParsedAnalysis.painPoints}
+                    onTimestampClick={handleTimestampClick}
+                  />
+                )}
+
+                {/* 成交策略評估（5 大指標） */}
+                {newParsedAnalysis.scoreMetrics && newParsedAnalysis.scoreMetrics.length > 0 && (
+                  <TeachingScoresSection
+                    metrics={newParsedAnalysis.scoreMetrics}
+                    totalScore={newParsedAnalysis.totalScore}
+                    maxTotalScore={newParsedAnalysis.maxTotalScore}
+                    summary={newParsedAnalysis.scoreSummary}
+                    onTimestampClick={handleTimestampClick}
+                  />
+                )}
+
+                {/* 預估成交機率（量化指標計算） */}
+                {newParsedAnalysis.probability > 0 && (
+                  <ConversionProbabilitySection
+                    probability={newParsedAnalysis.probability}
+                    factors={newParsedAnalysis.probabilityFactors}
+                    reasoning={newParsedAnalysis.probabilityReasoning}
+                    onTimestampClick={handleTimestampClick}
+                  />
+                )}
+
+                {/* 完整成交話術總結 */}
+                {newParsedAnalysis.salesScripts && newParsedAnalysis.salesScripts.length > 0 && (
+                  <SalesScriptsSection
+                    scripts={newParsedAnalysis.salesScripts}
+                    studentType={newParsedAnalysis.studentType}
+                  />
+                )}
+              </>
+            )}
+
+            {/* ========== 以下是舊的 UI（保留以防解析失敗） ========== */}
+
             {/* 成交機率解析 - 可展開區域（僅在有 AI 分析時顯示） */}
             {showProbabilityDetail && probabilityBody && (
               <Card className="shadow-sm">
