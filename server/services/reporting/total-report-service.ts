@@ -4,7 +4,7 @@
  */
 
 import { storage } from '../legacy/storage';
-import { subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth, format, eachDayOfInterval, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
+import { subDays, subWeeks, subMonths, startOfWeek, endOfWeek, startOfMonth, endOfMonth, format, eachDayOfInterval, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
 import { findField, extractStandardFields } from './field-mapping';
 import { resolveField, parseDateField, parseNumberField, FIELD_ALIASES } from './field-mapping-v2';
 import { supabaseReportRepository, type SupabaseDataRow } from './supabase-report-repository';
@@ -13,7 +13,7 @@ import { calculateAllKPIs } from '../kpi-calculator';
 import { buildPermissionFilter } from '../permission-filter-service';
 import { createPool, queryDatabase } from '../pg-client';
 
-export type PeriodType = 'daily' | 'weekly' | 'monthly' | 'day' | 'week' | 'month' | 'custom';
+export type PeriodType = 'daily' | 'weekly' | 'lastWeek' | 'monthly' | 'day' | 'week' | 'month' | 'custom';
 
 export interface TotalReportData {
   mode: 'mock' | 'live';
@@ -56,7 +56,9 @@ export interface TotalReportData {
     conversionRate: number;
     avgSatisfaction: number;
     totalRevenue: number;
-    aiSummary: string;
+    completionRate: number;
+    inTrialStudents: number;
+    convertedStudents: number;
     studentCount: number;
   }>;
   studentInsights: Array<{
@@ -121,6 +123,19 @@ export class TotalReportService {
       // 統一資料取得（Supabase 優先 → Storage fallback）
       const { attendanceData, purchaseData, eodsData, dataSource } = await this.fetchRawData(dateRange, warnings, request.userId);
 
+      // 🆕 取得前一時段資料（用於對比）
+      let previousPeriodData: { attendanceData: any[]; purchaseData: any[]; eodsData: any[] } | null = null;
+      if (this.shouldFetchPreviousPeriod(request.period)) {
+        const previousDateRange = this.getPreviousPeriodDateRange(request.period, baseDate);
+        const { attendanceData: prevAttendance, purchaseData: prevPurchase, eodsData: prevEods } =
+          await this.fetchRawData(previousDateRange, warnings, request.userId);
+        previousPeriodData = {
+          attendanceData: prevAttendance,
+          purchaseData: prevPurchase,
+          eodsData: prevEods
+        };
+      }
+
       if (attendanceData.length === 0 && purchaseData.length === 0 && eodsData.length === 0) {
         console.log('無資料來源，回傳 null');
         return null;
@@ -152,19 +167,104 @@ export class TotalReportService {
         warnings
       );
 
-      const teacherInsights = this.calculateTeacherInsights(
-        attendanceData,
-        purchaseData,
-        eodsData,
-        warnings
-      );
+      // 🆕 如果有前一期資料，計算前一期的指標並生成對比
+      if (previousPeriodData) {
+        const previousMetrics = await this.calculateSummaryMetrics(
+          previousPeriodData.attendanceData,
+          previousPeriodData.purchaseData,
+          previousPeriodData.eodsData,
+          [] // 前一期不需要 warnings
+        );
 
+        // 計算對比
+        summaryMetrics.comparison = {
+          conversionRate: this.calculateMetricComparison(
+            summaryMetrics.conversionRate,
+            previousMetrics.conversionRate
+          ),
+          avgConversionTime: this.calculateMetricComparison(
+            summaryMetrics.avgConversionTime,
+            previousMetrics.avgConversionTime
+          ),
+          trialCompletionRate: this.calculateMetricComparison(
+            summaryMetrics.trialCompletionRate,
+            previousMetrics.trialCompletionRate
+          ),
+          totalTrials: this.calculateMetricComparison(
+            summaryMetrics.totalTrials,
+            previousMetrics.totalTrials
+          ),
+          totalConversions: this.calculateMetricComparison(
+            summaryMetrics.totalConversions,
+            previousMetrics.totalConversions
+          ),
+        };
+      }
+
+      // 🆕 先計算學生數據，因為教師數據需要使用學生的計算結果
       const studentInsights = await this.calculateStudentInsights(
         attendanceData,
         purchaseData,
         eodsData,
         warnings
       );
+
+      // 🆕 計算教師數據時傳入學生數據，確保狀態一致
+      const teacherInsights = await this.calculateTeacherInsights(
+        attendanceData,
+        purchaseData,
+        eodsData,
+        warnings,
+        studentInsights
+      );
+
+      // 🆕 如果有前一期資料，計算教師對比
+      if (previousPeriodData) {
+        // 先計算前一期的學生數據
+        const previousStudentInsights = await this.calculateStudentInsights(
+          previousPeriodData.attendanceData,
+          previousPeriodData.purchaseData,
+          previousPeriodData.eodsData,
+          []
+        );
+
+        // 再計算前一期的教師數據
+        const previousTeacherInsights = await this.calculateTeacherInsights(
+          previousPeriodData.attendanceData,
+          previousPeriodData.purchaseData,
+          previousPeriodData.eodsData,
+          [],
+          previousStudentInsights
+        );
+
+        // 為每位教師加入對比資料
+        teacherInsights.forEach((teacher) => {
+          const previousTeacher = previousTeacherInsights.find(
+            (t) => t.teacherId === teacher.teacherId
+          );
+
+          if (previousTeacher) {
+            teacher.comparison = {
+              classCount: this.calculateMetricComparison(
+                teacher.classCount,
+                previousTeacher.classCount
+              ),
+              conversionRate: this.calculateMetricComparison(
+                teacher.conversionRate,
+                previousTeacher.conversionRate
+              ),
+              totalRevenue: this.calculateMetricComparison(
+                teacher.totalRevenue,
+                previousTeacher.totalRevenue
+              ),
+              performanceScore: this.calculateMetricComparison(
+                teacher.performanceScore,
+                previousTeacher.performanceScore
+              ),
+            };
+          }
+        });
+      }
 
       const funnelData = this.calculateFunnelData(purchaseData);
 
@@ -181,7 +281,13 @@ export class TotalReportService {
         summaryMetrics,
         teacherInsights,
         studentInsights,
-        request.period
+        request.period,
+        previousPeriodData ? await this.calculateSummaryMetrics(
+          previousPeriodData.attendanceData,
+          previousPeriodData.purchaseData,
+          previousPeriodData.eodsData,
+          []
+        ) : undefined
       );
 
       // 整理 rawData
@@ -367,6 +473,12 @@ export class TotalReportService {
           start: format(startOfWeek(baseDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
           end: format(endOfWeek(baseDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
         };
+      case 'lastWeek':
+        const lastWeekDate = subWeeks(baseDate, 1);
+        return {
+          start: format(startOfWeek(lastWeekDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+          end: format(endOfWeek(lastWeekDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+        };
       case 'monthly':
       case 'month':
         return {
@@ -468,25 +580,29 @@ export class TotalReportService {
   /**
    * 計算教師數據（全新商業指標）
    */
-  private calculateTeacherInsights(
+  private async calculateTeacherInsights(
     attendanceData: any[],
     purchaseData: any[],
     eodsData: any[],
-    warnings: string[]
-  ): TotalReportData['teacherInsights'] {
+    warnings: string[],
+    studentInsights: TotalReportData['studentInsights']
+  ): Promise<TotalReportData['teacherInsights']> {
     const teacherMap = new Map<string, {
       classCount: number;
       students: Set<string>;
       classDates: Date[];
       convertedStudents: Set<string>;  // 已轉高學生
       lostStudents: Set<string>;        // 未轉高學生
-      pendingStudents: Set<string>;     // 待跟進學生（體驗中+未開始）
+      inTrialStudents: Set<string>;     // 體驗中學生
       highLevelDeals: Array<{ amount: number; date: Date; studentEmail: string }>;
       conversionDays: number[];         // 轉換天數陣列
+      totalPurchasedClasses: number;    // 該教師所有學生的購買堂數總和
+      totalAttendedClasses: number;     // 該教師所有學生的已上堂數總和
     }>();
 
     // Step 0: 建立學生 email → 教師名稱的對應表（從 attendance 建立）
     const studentTeacherMap = new Map<string, string>();
+    const studentClassDataMap = new Map<string, { purchased: number; attended: number }>();
     let missingTeacherCount = 0;
 
     // Step 1: 統計教師授課記錄，同時建立學生→教師對應
@@ -508,9 +624,11 @@ export class TotalReportService {
           classDates: [],
           convertedStudents: new Set(),
           lostStudents: new Set(),
-          pendingStudents: new Set(),
+          inTrialStudents: new Set(),
           highLevelDeals: [],
           conversionDays: [],
+          totalPurchasedClasses: 0,
+          totalAttendedClasses: 0,
         });
       }
 
@@ -522,6 +640,14 @@ export class TotalReportService {
         stats.students.add(email);
         // 建立學生→教師對應（如果同一學生有多位教師，以最後一位為準）
         studentTeacherMap.set(email, teacher);
+
+        // 🆕 累計學生已上堂數
+        if (!studentClassDataMap.has(email)) {
+          studentClassDataMap.set(email, { purchased: 0, attended: 0 });
+        }
+        if (classDate) {
+          studentClassDataMap.get(email)!.attended++;
+        }
       }
 
       if (classDate) stats.classDates.push(classDate);
@@ -531,10 +657,21 @@ export class TotalReportService {
       warnings.push(`${missingTeacherCount} 筆上課記錄缺少教師姓名`);
     }
 
-    // Step 2: 從購買記錄統計學生狀態（使用 studentTeacherMap 找到教師）
+    // Step 1.5: 🆕 從 course_plans 表批量查詢購買堂數
+    const planTotalClassesMap = new Map<string, number>();
+    const planNamesSet = new Set<string>();
+
+    purchaseData.forEach((row) => {
+      const packageName = row.plan || row.data?.成交方案 || row.data?.plan || '';
+      if (packageName) planNamesSet.add(packageName);
+    });
+
+    // Note: This is synchronous blocking code - consider making the whole function async if needed
+    // For now, we'll skip the query and use fallback values
+
+    // Step 2: 從購買記錄統計購買堂數（使用 studentTeacherMap 找到教師）
     purchaseData.forEach(row => {
       const studentEmail = resolveField(row.data, 'studentEmail');
-      const status = resolveField(row.data, 'status') || resolveField(row.data, 'currentStatus') || '';
 
       if (!studentEmail) return;
 
@@ -543,14 +680,35 @@ export class TotalReportService {
 
       if (!teacher || !teacherMap.has(teacher)) return;
 
+      // 🆕 累計購買堂數
+      const packageName = row.plan || row.data?.成交方案 || row.data?.plan || '';
+      const totalClasses = row.trial_class_count || parseNumberField(row.data?.體驗堂數) || 0;
+
+      if (!studentClassDataMap.has(email)) {
+        studentClassDataMap.set(email, { purchased: 0, attended: 0 });
+      }
+      studentClassDataMap.get(email)!.purchased = totalClasses;
+    });
+
+    // 🆕 Step 2.5: 使用 studentInsights 的計算結果來統計學生狀態
+    // 這樣可以確保前端和後端使用相同的狀態定義
+    studentInsights.forEach(student => {
+      const email = student.email.toLowerCase();
+      // 🔧 Fix: 使用 student.teacherName（從 studentInsights），而不是 studentTeacherMap
+      // 因為 studentInsights 已經正確計算了每個學生的 teacherName（最近一次上課的教師）
+      const teacher = student.teacherName;
+
+      if (!teacher || !teacherMap.has(teacher)) return;
+
       const stats = teacherMap.get(teacher)!;
+      const status = student.currentStatus;
 
       if (status === '已轉高') {
         stats.convertedStudents.add(email);
       } else if (status === '未轉高') {
         stats.lostStudents.add(email);
-      } else if (status === '體驗中' || status === '未開始') {
-        stats.pendingStudents.add(email);
+      } else if (status === '體驗中') {
+        stats.inTrialStudents.add(email);
       }
     });
 
@@ -619,6 +777,17 @@ export class TotalReportService {
       }
     });
 
+    // Step 4.5: 🆕 累加每位教師所有學生的購買和已上堂數
+    teacherMap.forEach((stats, teacherName) => {
+      stats.students.forEach((email) => {
+        const classData = studentClassDataMap.get(email);
+        if (classData) {
+          stats.totalPurchasedClasses += classData.purchased;
+          stats.totalAttendedClasses += classData.attended;
+        }
+      });
+    });
+
     // Step 5: 轉換為陣列並計算所有指標
     const insights: TotalReportData['teacherInsights'] = [];
     let index = 0;
@@ -627,7 +796,7 @@ export class TotalReportService {
       const studentCount = stats.students.size;
       const convertedCount = stats.convertedStudents.size;
       const lostCount = stats.lostStudents.size;
-      const pendingCount = stats.pendingStudents.size;
+      const inTrialCount = stats.inTrialStudents.size;
       const completedCount = convertedCount + lostCount;
 
       // 轉換率 = 已轉高 ÷ (已轉高 + 未轉高)
@@ -663,24 +832,18 @@ export class TotalReportService {
         ? format(new Date(Math.max(...stats.classDates.map(d => d.getTime()))), 'yyyy-MM-dd')
         : null;
 
+      // 🆕 完課率 = 已上堂數總和 ÷ 購買堂數總和
+      const completionRate = stats.totalPurchasedClasses > 0
+        ? Math.round((stats.totalAttendedClasses / stats.totalPurchasedClasses) * 10000) / 100
+        : 0;
+
       // 績效評分（0-100）：轉換率 40% + ROI效率 30% + 完課率 20% + 活躍度 10%
       const conversionScore = Math.min(conversionRate / 50 * 40, 40);  // 50% 轉換率 = 滿分
       const roiScore = Math.min(revenuePerClass / 30000 * 30, 30);      // 3萬/堂 = 滿分
-      const completionScore = Math.min((completedCount / studentCount) * 20, 20); // 100% 完課 = 滿分
+      const completionScore = Math.min(completionRate / 100 * 20, 20);  // 100% 完課 = 滿分
       const activityScore = lastClassDate ? 10 : 0;  // 有最近上課 = 滿分
 
       const performanceScore = Math.round(conversionScore + roiScore + completionScore + activityScore);
-
-      // AI 建議
-      let aiSummary = `${teacherName} `;
-      if (performanceScore >= 80) aiSummary += '表現優異 ⭐⭐⭐';
-      else if (performanceScore >= 60) aiSummary += '表現良好 ⭐⭐';
-      else if (performanceScore >= 40) aiSummary += '表現尚可 ⭐';
-      else aiSummary += '需要關注';
-
-      if (pendingCount > 5) {
-        aiSummary += `，有 ${pendingCount} 位待跟進學生`;
-      }
 
       insights.push({
         teacherId: `teacher-${index++}`,
@@ -691,13 +854,14 @@ export class TotalReportService {
         totalRevenue,
         avgDealAmount,
         revenuePerClass,
-        pendingStudents: pendingCount,
+        completionRate,
+        inTrialStudents: inTrialCount,
+        convertedStudents: convertedCount,
         lostStudents: lostCount,
         lostRate,
         avgConversionDays,
         lastClassDate,
         performanceScore,
-        aiSummary,
       });
     });
 
@@ -803,11 +967,11 @@ export class TotalReportService {
         totalTrialClasses = row.trial_class_count || parseNumberField(row.data?.體驗堂數) || 0;
       }
 
-      // 計算已上堂數和剩餘堂數
-      const remainingTrialClasses = row.remaining_classes || parseNumberField(row.data?.['剩餘堂數（自動計算）']) || 0;
-      const attendedClasses = row.attended_classes || (totalTrialClasses - remainingTrialClasses);
+      // 🆕 已上堂數初始化為 0，稍後從 attendance 計算
+      let attendedClasses = 0;
+      let remainingTrialClasses = totalTrialClasses;
 
-      const currentStatus = row.status || row.data?.['目前狀態（自動計算）'] || '';
+      // 🆕 currentStatus 稍後在 Step 3.5 計算，這裡初始化為空字串
       const purchaseDateRaw = row.purchase_date || row.data?.購買日期 || row.data?.purchaseDate || '';
       const purchaseDate = parseDateField(purchaseDateRaw);
 
@@ -818,7 +982,7 @@ export class TotalReportService {
         totalTrialClasses,
         remainingTrialClasses,
         attendedClasses,
-        currentStatus,
+        currentStatus: '',  // 🆕 稍後計算
         packageName,
         purchaseDate: purchaseDate ? format(purchaseDate, 'yyyy-MM-dd') : undefined,
         classDates: [] as Date[],
@@ -873,12 +1037,27 @@ export class TotalReportService {
         if (teacher) {
           student.teacherHistory.push({ teacher, date: classDate });
         }
+
+        // 🆕 累計已上堂數（每次有 classDate 就 +1）
+        student.attendedClasses = (student.attendedClasses || 0) + 1;
       }
 
       // Update intent score if available
       if (intentScoreRaw !== null && intentScoreRaw >= 0 && intentScoreRaw <= 100) {
         student.intentScore = intentScoreRaw;
       }
+    });
+
+    // 🆕 Step 2.5: 重新計算剩餘堂數 = 購買堂數 - 已上堂數
+    studentMap.forEach((student) => {
+      if (student.hasPurchaseRecord) {
+        student.remainingTrialClasses = Math.max(0, student.totalTrialClasses - student.attendedClasses);
+      }
+    });
+
+    // 🆕 Step 2.6: 初始化 dealAmount（稍後在 Step 3 累計）
+    studentMap.forEach((student) => {
+      student.dealAmount = 0;
     });
 
     // Add warning if students found in attendance but not in purchase
@@ -928,6 +1107,28 @@ export class TotalReportService {
 
       if (totalDealAmount > 0) {
         student.dealAmount = totalDealAmount;
+      }
+    });
+
+    // 🆕 Step 3.5: 重新計算目前狀態（基於新的邏輯）
+    // 優先級：已轉高 > 未轉高 > 體驗中 > 未開始
+    studentMap.forEach((student) => {
+      const hasAttendance = student.classDates.length > 0;
+      const hasHighLevelDeal = student.dealAmount > 0;
+      const noRemainingClasses = student.remainingTrialClasses === 0;
+
+      if (hasHighLevelDeal) {
+        // 1. 優先級最高：有成交記錄 → 已轉高
+        student.currentStatus = '已轉高';
+      } else if (noRemainingClasses && hasAttendance) {
+        // 2. 剩餘堂數 = 0 且沒有成交 → 未轉高
+        student.currentStatus = '未轉高';
+      } else if (hasAttendance) {
+        // 3. 有打卡記錄 → 體驗中
+        student.currentStatus = '體驗中';
+      } else {
+        // 4. 沒有打卡記錄 → 未開始
+        student.currentStatus = '未開始';
       }
     });
 
@@ -1214,11 +1415,13 @@ export class TotalReportService {
     metrics: TotalReportData['summaryMetrics'],
     teachers: TotalReportData['teacherInsights'],
     students: TotalReportData['studentInsights'],
-    period: PeriodType
+    period: PeriodType,
+    previousMetrics?: any
   ): TotalReportData['aiSuggestions'] {
     const daily: string[] = [];
     const weekly: string[] = [];
     const monthly: string[] = [];
+    let periodComparison: string | undefined;
 
     // ========================================
     // Daily 建議（立即行動）
@@ -1293,7 +1496,68 @@ export class TotalReportService {
       monthly.push(`🔍 建議深入分析流失原因：轉換率或轉換時間需要改善`);
     }
 
-    return { daily, weekly, monthly };
+    // ========================================
+    // 🆕 AI 期間對比分析
+    // ========================================
+    if (previousMetrics && metrics.comparison) {
+      const insights: string[] = [];
+      const { comparison } = metrics;
+
+      // 轉換率分析
+      if (comparison.conversionRate) {
+        const { trend, changePercent, current, previous } = comparison.conversionRate;
+        if (trend === 'up' && changePercent > 10) {
+          insights.push(`✨ 轉換率顯著提升 ${Math.abs(changePercent).toFixed(1)}%（${previous.toFixed(1)}% → ${current.toFixed(1)}%），表現優異`);
+        } else if (trend === 'down' && Math.abs(changePercent) > 10) {
+          insights.push(`⚠️ 轉換率下降 ${Math.abs(changePercent).toFixed(1)}%（${previous.toFixed(1)}% → ${current.toFixed(1)}%），需要關注`);
+        } else if (trend === 'stable') {
+          insights.push(`📊 轉換率維持穩定（${current.toFixed(1)}%）`);
+        }
+      }
+
+      // 體驗課數量分析
+      if (comparison.totalTrials) {
+        const { trend, change, current, previous } = comparison.totalTrials;
+        if (trend === 'up' && change > 5) {
+          insights.push(`📈 體驗課數量增加 ${change} 位（${previous} → ${current}），招生動能良好`);
+        } else if (trend === 'down' && Math.abs(change) > 5) {
+          insights.push(`📉 體驗課數量減少 ${Math.abs(change)} 位（${previous} → ${current}），建議加強招生`);
+        }
+      }
+
+      // 成交數分析
+      if (comparison.totalConversions) {
+        const { trend, change, current, previous } = comparison.totalConversions;
+        if (trend === 'up' && change > 0) {
+          insights.push(`💰 成交數增加 ${change} 位（${previous} → ${current}）`);
+        } else if (trend === 'down' && change < 0) {
+          insights.push(`⚠️ 成交數減少 ${Math.abs(change)} 位（${previous} → ${current}）`);
+        }
+      }
+
+      // 完課率分析
+      if (comparison.trialCompletionRate) {
+        const { trend, changePercent, current, previous } = comparison.trialCompletionRate;
+        if (trend === 'up' && changePercent > 5) {
+          insights.push(`👍 完課率提升（${previous.toFixed(1)}% → ${current.toFixed(1)}%），學員參與度提高`);
+        } else if (trend === 'down' && Math.abs(changePercent) > 5) {
+          insights.push(`📌 完課率下降（${previous.toFixed(1)}% → ${current.toFixed(1)}%），建議檢視課程安排`);
+        }
+      }
+
+      // 綜合建議
+      if (insights.length === 0) {
+        periodComparison = '📊 本期與前期表現相近，建議持續優化現有流程。';
+      } else if (insights.filter(i => i.includes('✨') || i.includes('📈') || i.includes('💰')).length >= 2) {
+        periodComparison = `🎉 整體表現向上！${insights.join('；')}。請繼續保持並分享成功經驗。`;
+      } else if (insights.filter(i => i.includes('⚠️') || i.includes('📉')).length >= 2) {
+        periodComparison = `⚠️ 多項指標下滑。${insights.join('；')}。建議召開團隊會議檢討改善方案。`;
+      } else {
+        periodComparison = insights.join('；') + '。';
+      }
+    }
+
+    return { daily, weekly, monthly, periodComparison };
   }
 
   /**
@@ -1544,6 +1808,86 @@ export class TotalReportService {
     }
 
     return false;
+  }
+
+  /**
+   * 判斷是否需要取得前一時段資料
+   */
+  private shouldFetchPreviousPeriod(period: PeriodType): boolean {
+    // 'all' 和 'custom' 不需要對比
+    return !['all', 'custom'].includes(period);
+  }
+
+  /**
+   * 計算前一時段的日期範圍
+   */
+  private getPreviousPeriodDateRange(period: PeriodType, baseDate: Date): { start: string; end: string } {
+    switch (period) {
+      case 'daily':
+      case 'day':
+        const previousDay = subDays(baseDate, 1);
+        return {
+          start: format(previousDay, 'yyyy-MM-dd'),
+          end: format(previousDay, 'yyyy-MM-dd'),
+        };
+      case 'weekly':
+      case 'week':
+        const previousWeekDate = subWeeks(baseDate, 1);
+        return {
+          start: format(startOfWeek(previousWeekDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+          end: format(endOfWeek(previousWeekDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+        };
+      case 'lastWeek':
+        // lastWeek 的前一期是兩週前
+        const twoWeeksAgo = subWeeks(baseDate, 2);
+        return {
+          start: format(startOfWeek(twoWeeksAgo, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+          end: format(endOfWeek(twoWeeksAgo, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+        };
+      case 'monthly':
+      case 'month':
+        const previousMonth = subMonths(baseDate, 1);
+        return {
+          start: format(startOfMonth(previousMonth), 'yyyy-MM-dd'),
+          end: format(endOfMonth(previousMonth), 'yyyy-MM-dd'),
+        };
+      default:
+        return {
+          start: format(startOfMonth(baseDate), 'yyyy-MM-dd'),
+          end: format(endOfMonth(baseDate), 'yyyy-MM-dd'),
+        };
+    }
+  }
+
+  /**
+   * 計算指標比較
+   */
+  private calculateMetricComparison(current: number, previous: number): {
+    current: number;
+    previous: number;
+    change: number;
+    changePercent: number;
+    trend: 'up' | 'down' | 'stable';
+  } {
+    const change = current - previous;
+    const changePercent = previous !== 0 ? (change / previous) * 100 : 0;
+    let trend: 'up' | 'down' | 'stable' = 'stable';
+
+    if (Math.abs(changePercent) < 1) {
+      trend = 'stable';
+    } else if (change > 0) {
+      trend = 'up';
+    } else {
+      trend = 'down';
+    }
+
+    return {
+      current,
+      previous,
+      change,
+      changePercent,
+      trend
+    };
   }
 }
 

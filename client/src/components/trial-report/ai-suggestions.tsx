@@ -78,6 +78,24 @@ export function AISuggestions({ suggestions, period }: AISuggestionsProps) {
 
       {/* Strategic Insights & Future Features */}
       <div className="space-y-6">
+        {/* AI Period Comparison */}
+        {suggestions.periodComparison && (
+          <Card className="border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-950/20 dark:to-amber-950/20">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-orange-600" />
+                AI 期間對比分析
+              </CardTitle>
+              <CardDescription>本期與前期表現對比</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="p-4 rounded-lg bg-white/50 dark:bg-black/20">
+                <p className="text-sm leading-relaxed">{suggestions.periodComparison}</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* High-level Strategy */}
         <Card>
           <CardHeader>

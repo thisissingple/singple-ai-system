@@ -55,13 +55,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { AttendanceLog } from './attendance-log';
-import type { TeacherClassRecord } from './teacher-insights';
-
 interface StudentInsightsProps {
   students: StudentInsight[];
   initialFilter?: string | 'all';
-  classRecords?: TeacherClassRecord[]; // 上課記錄（用於 AttendanceLog）
 }
 
 type StudentSortField =
@@ -387,7 +383,7 @@ function PriorityExplanationDialog() {
   );
 }
 
-export function StudentInsights({ students, initialFilter = 'all', classRecords = [] }: StudentInsightsProps) {
+export function StudentInsights({ students, initialFilter = 'all' }: StudentInsightsProps) {
   // 多欄位排序：支援疊加排序（Shift+Click）
   const [sortConfigs, setSortConfigs] = useState<SortConfig[]>([
     { field: 'priority', direction: 'asc' } // 預設按優先級排序
@@ -701,9 +697,6 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
 
   return (
     <div className="space-y-4">
-      {/* 上課打卡記錄 - 新增組件 */}
-      <AttendanceLog classRecords={classRecords} maxRecords={20} />
-
       {/* ARCHIVED: 待分配學生卡片 - 2025-10-23
           理由：用戶要求移除此卡片以簡化視覺
       {unassignedStudents.total > 0 && (
@@ -984,16 +977,16 @@ export function StudentInsights({ students, initialFilter = 'all', classRecords 
                   教師 {renderSortIcon('teacherName')}
                 </TableHead>
                 <TableHead
-                  className="text-center cursor-pointer hover:bg-muted/50 transition-colors w-[55px] text-xs"
+                  className="text-center cursor-pointer hover:bg-muted/50 transition-colors w-[60px] text-xs"
                   onClick={(e) => handleSort('remainingClasses', e)}
                 >
-                  總堂 {renderSortIcon('remainingClasses')}
+                  購買堂數 {renderSortIcon('remainingClasses')}
                 </TableHead>
-                <TableHead className="text-center w-[55px] text-xs">
-                  已上
+                <TableHead className="text-center w-[60px] text-xs">
+                  已上堂數
                 </TableHead>
-                <TableHead className="text-center w-[55px] text-xs">
-                  剩餘
+                <TableHead className="text-center w-[60px] text-xs">
+                  剩餘堂數
                 </TableHead>
                 <TableHead
                   className="w-[90px] cursor-pointer hover:bg-muted/50 transition-colors text-xs"

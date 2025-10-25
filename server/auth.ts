@@ -9,28 +9,33 @@ dotenv.config({ override: false }); // Don't override if already set
 
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
-
+  // 使用 PostgreSQL session store 以保持 session 在重啟後依然有效
   let sessionStore;
 
-  // In development, use memory store
-  // In production, use PostgreSQL session store
-  if (process.env.NODE_ENV === 'production' && process.env.SESSION_DB_URL) {
+  // 🆕 使用 PostgreSQL session store（開發和生產環境都用）
+  // 這樣 nodemon 重啟時 session 不會丟失
+  const dbUrl = process.env.SESSION_DB_URL || process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
+
+  if (dbUrl) {
     try {
       const pgStore = connectPg(session);
       sessionStore = new pgStore({
-        conString: process.env.SESSION_DB_URL,
+        conString: dbUrl,
         createTableIfMissing: true,  // Auto-create table if missing
         ttl: sessionTtl,
         tableName: "sessions",
       });
-      console.log("✓ Using PostgreSQL session store");
+      console.log("✓ Using PostgreSQL session store (persistent across restarts)");
     } catch (error) {
       console.error("⚠️  PostgreSQL session store error:", error);
       console.warn("⚠️  Falling back to memory session store");
+      console.warn("ℹ️  Session will be lost on server restart");
       // Fallback to memory store if PostgreSQL fails
     }
   } else {
     console.log("ℹ️  Using memory session store (development mode)");
+    console.warn("⚠️  Session will be lost on server restart");
+    console.warn("💡 Tip: Set DATABASE_URL to use persistent sessions");
   }
 
   return session({

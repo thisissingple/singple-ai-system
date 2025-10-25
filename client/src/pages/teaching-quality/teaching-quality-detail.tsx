@@ -44,6 +44,7 @@ import {
   getScoreBadgeColor,
 } from '@/types/teaching-quality';
 import { cn } from '@/lib/utils';
+import { AIChatBox } from '@/components/teaching-quality/ai-chat-box';
 
 type ConversionSuggestionMarkdown = {
   markdownOutput: string;
@@ -585,6 +586,9 @@ export default function TeachingQualityDetail() {
     parsedAnalysis?.probability?.value ?? probabilityFromData;
   const probabilityBody = parsedAnalysis?.probability?.body ?? '';
 
+  // 檢查是否有 AI 分析內容
+  const hasValidAnalysis = markdownOutput && markdownOutput.length > 0;
+
   return (
     <DashboardLayout sidebarSections={sidebarConfig}>
       <div className="mx-auto max-w-7xl space-y-6 pb-10">
@@ -601,128 +605,148 @@ export default function TeachingQualityDetail() {
           <h1 className="text-3xl font-bold">🎯 推課分析詳情</h1>
         </div>
 
-        {parsedAnalysis ? (
-          <>
-            {/* 戰績報告大屏 - 整合所有關鍵資訊 */}
-            <Card className="border-2 border-primary/20 shadow-lg">
-              <CardHeader className="space-y-4 bg-gradient-to-r from-primary/5 to-primary/10">
-                <CardTitle className="flex items-center gap-2 text-2xl font-bold text-foreground">
-                  <span>🏆</span>
-                  推課戰績報告
-                </CardTitle>
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300 px-3 py-1">
-                    👤 學員：{analysis.student_name}
-                  </Badge>
-                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300 px-3 py-1">
-                    👨‍🏫 教師：{analysis.teacher_name}
-                  </Badge>
-                  <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-300 px-3 py-1">
-                    📅 課程日期：{new Date(analysis.class_date).toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' })}
-                  </Badge>
+        {/* 顯示基本資訊卡片（即使沒有 AI 分析也顯示） */}
+        <Card className="border-2 border-primary/20 shadow-lg">
+          <CardHeader className="space-y-4 bg-gradient-to-r from-primary/5 to-primary/10">
+            <CardTitle className="flex items-center gap-2 text-2xl font-bold text-foreground">
+              <span>🏆</span>
+              推課戰績報告
+            </CardTitle>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-300 px-3 py-1">
+                👤 學員：{analysis.student_name}
+              </Badge>
+              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300 px-3 py-1">
+                👨‍🏫 教師：{analysis.teacher_name}
+              </Badge>
+              <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-300 px-3 py-1">
+                📅 課程日期：{new Date(analysis.class_date).toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' })}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <div className="grid gap-6 md:grid-cols-4">
+              {/* 教學評分 */}
+              <div className="rounded-lg border-2 border-green-200 bg-gradient-to-br from-green-50 to-white p-5 shadow-md">
+                <div className="text-xs font-semibold uppercase tracking-wide text-green-700">
+                  教學評分
                 </div>
-              </CardHeader>
-              <CardContent className="pt-6">
-                <div className="grid gap-6 md:grid-cols-4">
-                  {/* 教學評分 */}
-                  <div className="rounded-lg border-2 border-green-200 bg-gradient-to-br from-green-50 to-white p-5 shadow-md">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-green-700">
-                      教學評分
-                    </div>
-                    <div className="mt-3 flex items-baseline gap-2">
-                      <span className="text-5xl font-bold text-green-600">
-                        {analysis.overall_score}
-                      </span>
-                      <span className="text-lg text-muted-foreground">/10</span>
-                    </div>
-                    <div className="mt-2 text-lg font-medium text-green-700">
-                      {'★'.repeat(Math.round(analysis.overall_score / 2))}
-                      {'☆'.repeat(5 - Math.round(analysis.overall_score / 2))}
-                    </div>
-                    <div className="mt-2 text-sm font-semibold text-green-800">
-                      等級：{analysis.overall_score >= 9 ? 'S' : analysis.overall_score >= 7 ? 'A' : analysis.overall_score >= 5 ? 'B' : 'C'}
-                    </div>
-                  </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-5xl font-bold text-green-600">
+                    {analysis.overall_score}
+                  </span>
+                  <span className="text-lg text-muted-foreground">/10</span>
+                </div>
+                <div className="mt-2 text-lg font-medium text-green-700">
+                  {'★'.repeat(Math.round(analysis.overall_score / 2))}
+                  {'☆'.repeat(5 - Math.round(analysis.overall_score / 2))}
+                </div>
+                <div className="mt-2 text-sm font-semibold text-green-800">
+                  等級：{analysis.overall_score >= 9 ? 'S' : analysis.overall_score >= 7 ? 'A' : analysis.overall_score >= 5 ? 'B' : 'C'}
+                </div>
+              </div>
 
-                  {/* 成交機率 - 可點擊展開 */}
-                  <div
-                    className="cursor-pointer rounded-lg border-2 border-orange-200 bg-gradient-to-br from-orange-50 to-white p-5 shadow-md transition-all hover:shadow-lg"
-                    onClick={() => setShowProbabilityDetail(!showProbabilityDetail)}
+              {/* 成交機率 */}
+              <div className="rounded-lg border-2 border-orange-200 bg-gradient-to-br from-orange-50 to-white p-5 shadow-md">
+                <div className="text-xs font-semibold uppercase tracking-wide text-orange-700">
+                  成交機率
+                </div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-5xl font-bold text-orange-600">
+                    {probabilityValue !== undefined ? probabilityValue : '—'}
+                  </span>
+                  {probabilityValue !== undefined && (
+                    <span className="text-lg text-muted-foreground">%</span>
+                  )}
+                </div>
+              </div>
+
+              {/* 課程狀態 */}
+              <div className="rounded-lg border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5 shadow-md">
+                <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+                  課程狀態
+                </div>
+                <div className="mt-3">
+                  <Badge
+                    className={cn(
+                      getConversionStatusColor(analysis.conversion_status),
+                      'px-3 py-1 text-base font-semibold'
+                    )}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-orange-700">
-                        成交機率
-                      </div>
-                      {showProbabilityDetail ? (
-                        <ChevronUp className="h-4 w-4 text-orange-600" />
-                      ) : (
-                        <ChevronDown className="h-4 w-4 text-orange-600" />
-                      )}
-                    </div>
-                    <div className="mt-3 flex items-baseline gap-2">
-                      <span className="text-5xl font-bold text-orange-600">
-                        {probabilityValue !== undefined ? probabilityValue : '—'}
-                      </span>
-                      {probabilityValue !== undefined && (
-                        <span className="text-lg text-muted-foreground">%</span>
-                      )}
-                    </div>
-                    <div className="mt-2 text-lg font-medium text-orange-700">
-                      {probabilityValue && probabilityValue >= 75 ? '🔥🔥🔥🔥' : probabilityValue && probabilityValue >= 50 ? '🔥🔥🔥' : probabilityValue && probabilityValue >= 25 ? '🔥🔥' : '🔥'}
-                    </div>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      {probabilityValue && probabilityValue >= 75 ? '極高潛力' : probabilityValue && probabilityValue >= 50 ? '高潛力' : '中等潛力'}
-                    </div>
-                  </div>
+                    {getConversionStatusLabel(analysis.conversion_status)}
+                  </Badge>
+                </div>
+              </div>
 
-                  {/* 課程狀態 */}
-                  <div className="rounded-lg border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5 shadow-md">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
-                      課程狀態
-                    </div>
-                    <div className="mt-3">
-                      <Badge
-                        className={cn(
-                          getConversionStatusColor(analysis.conversion_status),
-                          'px-3 py-1 text-base font-semibold'
-                        )}
-                      >
-                        {getConversionStatusLabel(analysis.conversion_status)}
-                      </Badge>
-                    </div>
-                    <div className="mt-3 text-sm text-muted-foreground">
-                      🎵 體驗課完成
-                    </div>
-                    <div className="mt-1 text-sm font-medium text-blue-700">
-                      {analysis.conversion_status === 'pending' ? '建議立即跟進' : ''}
-                    </div>
+              {/* 購課資訊 */}
+              <div className="rounded-lg border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-white p-5 shadow-md">
+                <div className="text-xs font-semibold uppercase tracking-wide text-purple-700">
+                  購課資訊
+                </div>
+                <div className="mt-3 space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">方案：</span>
+                    <span className="font-medium">{analysis.purchased_package || '待確認'}</span>
                   </div>
-
-                  {/* 購課資訊 */}
-                  <div className="rounded-lg border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-white p-5 shadow-md">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-purple-700">
-                      購課資訊
-                    </div>
-                    <div className="mt-3 space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">方案：</span>
-                        <span className="font-medium">{analysis.purchased_package || '待確認'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">剩餘：</span>
-                        <span className="font-medium">
-                          {analysis.remaining_lessons !== null && analysis.remaining_lessons !== undefined
-                            ? `${analysis.remaining_lessons} 堂`
-                            : '—'}
-                        </span>
-                      </div>
-                    </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">剩餘：</span>
+                    <span className="font-medium">
+                      {analysis.remaining_lessons !== null && analysis.remaining_lessons !== undefined
+                        ? `${analysis.remaining_lessons} 堂`
+                        : '—'}
+                    </span>
                   </div>
                 </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-                {/* 成交機率解析 - 可展開區域 */}
-                {showProbabilityDetail && probabilityBody && (
-                  <div className="mt-6 rounded-lg border border-orange-200 bg-orange-50/50 p-4">
+        {/* AI 對話框 - 策略助手 */}
+        <AIChatBox
+          studentEmail={analysis.student_email || `${analysis.student_name}@example.com`}
+          studentName={analysis.student_name}
+          totalClasses={1}
+          totalConsultations={0}
+        />
+
+        {/* 如果沒有 AI 分析內容，顯示錯誤訊息 */}
+        {!hasValidAnalysis ? (
+          <Card className="border-2 border-yellow-300 bg-yellow-50 shadow-md">
+            <CardContent className="flex flex-col items-center justify-center gap-4 py-12">
+              <div className="text-6xl">⚠️</div>
+              <div className="text-center">
+                <h3 className="text-xl font-bold text-yellow-800 mb-2">AI 分析內容不完整</h3>
+                <p className="text-yellow-700 mb-4">
+                  這筆分析記錄的 AI 推課建議內容為空，可能是分析過程中發生錯誤。
+                </p>
+                <p className="text-sm text-yellow-600 mb-6">
+                  分析 ID: {analysis.id}
+                </p>
+                <div className="flex gap-4 justify-center">
+                  <Button
+                    onClick={() => navigate('/teaching-quality')}
+                    variant="outline"
+                  >
+                    <ArrowLeft className="mr-2 h-4 w-4" />
+                    返回列表
+                  </Button>
+                  <Button
+                    onClick={() => window.location.reload()}
+                  >
+                    重新載入
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : parsedAnalysis ? (
+          <>
+            {/* 成交機率解析 - 可展開區域（僅在有 AI 分析時顯示） */}
+            {showProbabilityDetail && probabilityBody && (
+              <Card className="shadow-sm">
+                <CardContent className="pt-6">
+                  <div className="rounded-lg border border-orange-200 bg-orange-50/50 p-4">
                     <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-orange-800">
                       <TrendingUp className="h-4 w-4" />
                       成交機率詳細分析
@@ -732,9 +756,9 @@ export default function TeachingQualityDetail() {
                       className="prose-sm leading-relaxed text-orange-900"
                     />
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
 
             {/* 關鍵指標解析 - 橫式排版 */}
             {metrics.length > 0 && (

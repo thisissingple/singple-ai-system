@@ -13,6 +13,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
     try {
       const supabase = getSupabaseClient();
       const teacherFilter = req.query.teacher as string;
+      const searchQuery = req.query.search as string; // 新增：搜尋關鍵字
 
       // Build query using Supabase Client
       let attendanceQuery = supabase
@@ -29,6 +30,11 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         `)
         .order('class_date', { ascending: false })
         .limit(200);
+
+      // 新增：搜尋功能（學員名稱或 email）
+      if (searchQuery && searchQuery.trim() !== '') {
+        attendanceQuery = attendanceQuery.or(`student_name.ilike.%${searchQuery}%,student_email.ilike.%${searchQuery}%`);
+      }
 
       // Permission check: teachers can only see their own classes
       if (req.user && req.user.role === 'teacher') {
@@ -68,9 +74,27 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         }
       }
 
-      // Get purchase data for students
+      // Get purchase data for students and calculate remaining classes dynamically
       const studentEmails = attendanceRecords?.map(r => r.student_email).filter(Boolean) || [];
       let purchaseMap = new Map();
+
+      // Get ALL attendance records for calculating "remaining classes at that time"
+      let allAttendanceByEmail = new Map<string, any[]>();
+      if (studentEmails.length > 0) {
+        const { data: allAttendance, error: allAttendanceError } = await supabase
+          .from('trial_class_attendance')
+          .select('student_email, class_date')
+          .in('student_email', studentEmails)
+          .order('class_date', { ascending: true });
+
+        if (!allAttendanceError && allAttendance) {
+          allAttendance.forEach((a: any) => {
+            const records = allAttendanceByEmail.get(a.student_email) || [];
+            records.push(a);
+            allAttendanceByEmail.set(a.student_email, records);
+          });
+        }
+      }
 
       if (studentEmails.length > 0) {
         const { data: purchaseData, error: purchaseError } = await supabase
@@ -79,7 +103,22 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
           .in('student_email', studentEmails);
 
         if (!purchaseError && purchaseData) {
-          purchaseData.forEach(p => purchaseMap.set(p.student_email, p));
+          purchaseData.forEach((p: any) => {
+            // 假設「初學專案」是 4 堂，「高音pro」是 2 堂，「高音終極方程式」是 1 堂
+            let totalLessons = 4; // 預設
+            if (p.package_name?.includes('pro')) {
+              totalLessons = 2;
+            } else if (p.package_name?.includes('終極')) {
+              totalLessons = 1;
+            } else if (p.package_name?.includes('12堂')) {
+              totalLessons = 12;
+            }
+
+            purchaseMap.set(p.student_email, {
+              ...p,
+              total_lessons: totalLessons
+            });
+          });
         }
       }
 
@@ -98,6 +137,21 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
           purchaseStatus = 'converted';
         } else if (row.no_conversion_reason && row.no_conversion_reason.trim() !== '') {
           purchaseStatus = 'not_converted';
+        }
+
+        // Calculate remaining classes AT THIS CLASS DATE
+        let calculatedRemaining = null;
+        if (purchase) {
+          const studentAttendance = allAttendanceByEmail.get(row.student_email) || [];
+          // Count classes BEFORE or ON this class date
+          const classesBeforeOrOn = studentAttendance.filter((a: any) => {
+            const aDate = new Date(a.class_date);
+            const rowDate = new Date(row.class_date);
+            return aDate <= rowDate;
+          }).length;
+
+          // Remaining = Total - Classes completed (including this one)
+          calculatedRemaining = Math.max(0, purchase.total_lessons - classesBeforeOrOn);
         }
 
         return {
@@ -120,9 +174,9 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
           suggestions: suggestions,
           class_summary: analysis?.class_summary || null,
 
-          // Purchase info
+          // Purchase info (使用動態計算的剩餘堂數 - 基於該上課日期)
           package_name: purchase?.package_name || null,
-          remaining_classes: purchase?.remaining_classes || null,
+          remaining_classes: calculatedRemaining !== null ? `${calculatedRemaining} 堂` : null,
           conversion_status: analysis?.conversion_status || purchaseStatus
         };
       }) || [];

@@ -11,10 +11,11 @@ import { sidebarConfig } from '@/config/sidebar-config';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, TrendingUp, TrendingDown, Target, Eye, RefreshCw, Wand2 } from 'lucide-react';
+import { Loader2, TrendingUp, TrendingDown, Target, Eye, RefreshCw, Wand2, Search } from 'lucide-react';
 
 interface StudentAnalysisRecord {
   id: string | null; // analysis ID (null if not analyzed yet)
@@ -54,12 +55,13 @@ export default function TeachingQualityList() {
   const [records, setRecords] = useState<StudentAnalysisRecord[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [selectedTeacher, setSelectedTeacher] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>(''); // 新增：搜尋關鍵字
   const [isLoading, setIsLoading] = useState(true);
   const [analyzingIds, setAnalyzingIds] = useState<string[]>([]);
 
   useEffect(() => {
     fetchData();
-  }, [selectedTeacher]);
+  }, [selectedTeacher, searchQuery]); // 新增：搜尋關鍵字變動時重新 fetch
 
   const fetchData = async (options: { showLoader?: boolean } = {}) => {
     if (options.showLoader !== false) {
@@ -70,6 +72,10 @@ export default function TeachingQualityList() {
       const params = new URLSearchParams();
       if (selectedTeacher !== 'all') {
         params.append('teacher', selectedTeacher);
+      }
+      // 新增：加入搜尋參數
+      if (searchQuery && searchQuery.trim() !== '') {
+        params.append('search', searchQuery.trim());
       }
 
       const response = await fetch(`/api/teaching-quality/student-records?${params}`);
@@ -196,6 +202,16 @@ export default function TeachingQualityList() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="搜尋學員名稱或 email..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
             </div>
             <div className="text-sm text-muted-foreground">
               共 {records.length} 筆記錄

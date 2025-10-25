@@ -192,7 +192,12 @@ export function TeacherInsights({ teachers, students, classRecords }: TeacherIns
     });
 
     map.forEach((studentList) => {
-      studentList.sort((a, b) => a.studentName.localeCompare(b.studentName, 'zh-TW'));
+      // 依照最近上課日期排序，最新的在最上面
+      studentList.sort((a, b) => {
+        const dateA = a.lastClassDate ? new Date(a.lastClassDate).getTime() : 0;
+        const dateB = b.lastClassDate ? new Date(b.lastClassDate).getTime() : 0;
+        return dateB - dateA; // 降序：最新的在前面
+      });
     });
 
     return map;
@@ -229,11 +234,11 @@ export function TeacherInsights({ teachers, students, classRecords }: TeacherIns
 
   type DetailModalState =
     | { open: false }
-    | { open: true; type: 'classes' | 'students'; teacher: TeacherInsight };
+    | { open: true; type: 'classes' | 'students' | 'inTrial' | 'converted'; teacher: TeacherInsight };
 
   const [detailModal, setDetailModal] = useState<DetailModalState>({ open: false });
 
-  const openDetailModal = (type: 'classes' | 'students', teacher: TeacherInsight) => {
+  const openDetailModal = (type: 'classes' | 'students' | 'inTrial' | 'converted', teacher: TeacherInsight) => {
     setDetailModal({ open: true, type, teacher });
   };
 
@@ -247,10 +252,22 @@ export function TeacherInsights({ teachers, students, classRecords }: TeacherIns
   }, [detailModal, teacherClassMap]);
 
   const studentRecordsForModal = useMemo(() => {
-    if (!detailModal.open || detailModal.type !== 'students') return [];
+    if (!detailModal.open) return [];
+    if (detailModal.type === 'classes') return [];
     if (!teacherStudentMap) return [];
+
     const key = normalizeTeacherName(detailModal.teacher.teacherName);
-    return teacherStudentMap.get(key) ?? [];
+    const allStudents = teacherStudentMap.get(key) ?? [];
+
+    // 根據類型篩選學生
+    if (detailModal.type === 'inTrial') {
+      return allStudents.filter(s => s.currentStatus === '體驗中' || s.currentStatus === '未開始');
+    } else if (detailModal.type === 'converted') {
+      return allStudents.filter(s => s.currentStatus === '已轉高');
+    }
+
+    // 'students' 類型顯示全部學生
+    return allStudents;
   }, [detailModal, teacherStudentMap]);
 
   const formatDateDisplay = (value?: string) => {
@@ -291,70 +308,119 @@ export function TeacherInsights({ teachers, students, classRecords }: TeacherIns
         {/* Top Teachers Summary Cards */}
         <div>
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Trophy className="h-5 w-5 text-yellow-500" />
+            <Trophy className="h-5 w-5 text-orange-400" />
             優秀教師榜
           </h3>
           <div className="grid gap-4 md:grid-cols-3">
-            {topTeachers.map((teacher, index) => (
-              <Card key={teacher.teacherId} className="relative overflow-hidden">
-                <div
-                  className={`absolute top-0 left-0 w-1 h-full ${
-                    index === 0
-                      ? 'bg-yellow-500'
-                      : index === 1
-                      ? 'bg-gray-400'
-                      : 'bg-orange-600'
-                  }`}
-                />
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center justify-between">
-                    <span>{teacher.teacherName}</span>
-                    <Badge variant={index === 0 ? 'default' : 'secondary'}>
-                      #{index + 1}
-                    </Badge>
-                  </CardTitle>
-                  <CardDescription className="text-xs">
-                    <MetricTooltip definition={KPI_DEFINITIONS.performanceScore}>
-                      績效評分: {teacher.performanceScore} 分
-                    </MetricTooltip>
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <MetricTooltip definition={KPI_DEFINITIONS.totalRevenue}>
-                      實收金額
-                    </MetricTooltip>
-                    <span className="font-bold text-green-600">
-                      NT$ {formatMoney(teacher.totalRevenue)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <MetricTooltip definition={KPI_DEFINITIONS.conversionRate}>
-                      轉換率
-                    </MetricTooltip>
-                    <span className="font-semibold text-blue-600">
-                      {teacher.conversionRate.toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <MetricTooltip definition={KPI_DEFINITIONS.revenuePerClass}>
-                      ROI效率
-                    </MetricTooltip>
-                    <span className="font-semibold">
-                      {formatMoney(teacher.revenuePerClass)}/堂
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <MetricTooltip definition={KPI_DEFINITIONS.pendingStudents}>
-                      待跟進
-                    </MetricTooltip>
-                    <span className={teacher.pendingStudents > 5 ? 'font-semibold text-orange-600' : ''}>
-                      {teacher.pendingStudents} 人
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+            {topTeachers.map((teacher, index) => {
+              // 計算獎牌：根據分數相同與否決定
+              let medal = '🥇';
+              let medalColor = 'text-yellow-600';
+
+              if (index === 0) {
+                medal = '🥇';
+                medalColor = 'text-yellow-600';
+              } else if (teacher.performanceScore === topTeachers[0].performanceScore) {
+                // 與第一名同分，也給金牌
+                medal = '🥇';
+                medalColor = 'text-yellow-600';
+              } else if (index === 1 || teacher.performanceScore === topTeachers[1]?.performanceScore) {
+                medal = '🥈';
+                medalColor = 'text-gray-400';
+              } else {
+                medal = '🥉';
+                medalColor = 'text-orange-700';
+              }
+
+              return (
+                <Card key={teacher.teacherId} className="relative overflow-hidden">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center justify-between">
+                      <span>{teacher.teacherName}</span>
+                      <span className={`text-2xl ${medalColor}`}>{medal}</span>
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      <MetricTooltip definition={KPI_DEFINITIONS.performanceScore}>
+                        績效評分: {teacher.performanceScore} 分
+                      </MetricTooltip>
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2.5">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">轉換率 40%</span>
+                        <span className="font-semibold">
+                          {teacher.conversionRate.toFixed(1)}%
+                          <span className="text-xs text-muted-foreground ml-1">
+                            ({Math.min(100, (teacher.conversionRate / 50 * 100)).toFixed(0)}分)
+                          </span>
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-1.5">
+                        <div
+                          className="bg-orange-400 h-1.5 rounded-full transition-all"
+                          style={{ width: `${Math.min(100, teacher.conversionRate / 50 * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">ROI效率 30%</span>
+                        <span className="font-semibold">
+                          {formatMoney(teacher.revenuePerClass)}/堂
+                          <span className="text-xs text-muted-foreground ml-1">
+                            ({Math.min(100, (teacher.revenuePerClass / 30000 * 100)).toFixed(0)}分)
+                          </span>
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-1.5">
+                        <div
+                          className="bg-orange-400 h-1.5 rounded-full transition-all"
+                          style={{ width: `${Math.min(100, teacher.revenuePerClass / 30000 * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">完課率 20%</span>
+                        <span className="font-semibold">
+                          {teacher.completionRate?.toFixed(1) || 0}%
+                          <span className="text-xs text-muted-foreground ml-1">
+                            ({Math.min(100, ((teacher.completionRate || 0) / 100 * 100)).toFixed(0)}分)
+                          </span>
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-1.5">
+                        <div
+                          className="bg-orange-400 h-1.5 rounded-full transition-all"
+                          style={{ width: `${Math.min(100, (teacher.completionRate || 0))}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">活躍度 10%</span>
+                        <span className="font-semibold">
+                          {teacher.lastClassDate ? '活躍' : '未活躍'}
+                          <span className="text-xs text-muted-foreground ml-1">
+                            ({teacher.lastClassDate ? '100' : '0'}分)
+                          </span>
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-1.5">
+                        <div
+                          className="bg-orange-400 h-1.5 rounded-full transition-all"
+                          style={{ width: teacher.lastClassDate ? '100%' : '0%' }}
+                        />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </div>
 
@@ -374,10 +440,12 @@ export function TeacherInsights({ teachers, students, classRecords }: TeacherIns
                     className="cursor-pointer hover:bg-muted/50 transition-colors"
                     onClick={(event) => handleSort(event, 'classCount')}
                   >
-                    <MetricTooltip definition={KPI_DEFINITIONS.classCount}>
-                      授課數
-                    </MetricTooltip>
-                    {renderSortIcon('classCount')}
+                    <div className="flex items-center gap-1">
+                      <MetricTooltip definition={KPI_DEFINITIONS.classCount}>
+                        授課數
+                      </MetricTooltip>
+                      {renderSortIcon('classCount')}
+                    </div>
                   </TableHead>
                   <TableHead
                     className="cursor-pointer hover:bg-muted/50 transition-colors"
@@ -388,6 +456,8 @@ export function TeacherInsights({ teachers, students, classRecords }: TeacherIns
                     </MetricTooltip>
                     {renderSortIcon('studentCount')}
                   </TableHead>
+                  <TableHead>體驗中學生數</TableHead>
+                  <TableHead>已成交學生數</TableHead>
                   <TableHead
                     className="cursor-pointer hover:bg-muted/50 transition-colors"
                     onClick={(event) => handleSort(event, 'conversionRate')}
@@ -425,11 +495,6 @@ export function TeacherInsights({ teachers, students, classRecords }: TeacherIns
                     {renderSortIcon('revenuePerClass')}
                   </TableHead>
                   <TableHead>
-                    <MetricTooltip definition={KPI_DEFINITIONS.pendingStudents}>
-                      待跟進
-                    </MetricTooltip>
-                  </TableHead>
-                  <TableHead>
                     <MetricTooltip definition={KPI_DEFINITIONS.lastClassDate}>
                       最近上課
                     </MetricTooltip>
@@ -443,11 +508,6 @@ export function TeacherInsights({ teachers, students, classRecords }: TeacherIns
                     </MetricTooltip>
                     {renderSortIcon('performanceScore')}
                   </TableHead>
-                  <TableHead className="min-w-[200px]">
-                    <MetricTooltip definition={KPI_DEFINITIONS.aiSummary}>
-                      AI 建議
-                    </MetricTooltip>
-                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -457,40 +517,98 @@ export function TeacherInsights({ teachers, students, classRecords }: TeacherIns
                       {teacher.teacherName}
                     </TableCell>
                     <TableCell>
-                      <button
-                        type="button"
-                        onClick={() => openDetailModal('classes', teacher)}
-                        className="text-sm font-semibold text-primary underline-offset-4 transition-colors hover:text-primary/80 hover:underline"
-                      >
-                        {teacher.classCount}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openDetailModal('classes', teacher)}
+                          className="text-sm font-semibold text-primary underline-offset-4 transition-colors hover:text-primary/80 hover:underline"
+                        >
+                          {teacher.classCount}
+                        </button>
+                        {teacher.comparison?.classCount && (
+                          <span className={`text-xs ${
+                            teacher.comparison.classCount.trend === 'up'
+                              ? 'text-green-600'
+                              : teacher.comparison.classCount.trend === 'down'
+                              ? 'text-red-600'
+                              : 'text-gray-500'
+                          }`}>
+                            {teacher.comparison.classCount.trend === 'up' && '↑'}
+                            {teacher.comparison.classCount.trend === 'down' && '↓'}
+                            {teacher.comparison.classCount.trend === 'stable' && '→'}
+                            {Math.abs(teacher.comparison.classCount.change)}
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <button
                         type="button"
                         onClick={() => openDetailModal('students', teacher)}
-                        className="text-sm font-semibold text-blue-600 underline-offset-4 transition-colors hover:text-blue-500 hover:underline"
+                        className="text-sm font-semibold text-primary underline-offset-4 transition-colors hover:text-primary/80 hover:underline"
                       >
                         {teacher.studentCount}
                       </button>
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant={
-                          teacher.conversionRate >= 50
-                            ? 'default'
-                            : teacher.conversionRate >= 30
-                            ? 'secondary'
-                            : 'outline'
-                        }
+                      <button
+                        type="button"
+                        onClick={() => openDetailModal('inTrial', teacher)}
+                        className="text-sm font-semibold text-primary underline-offset-4 transition-colors hover:text-primary/80 hover:underline"
                       >
-                        {teacher.conversionRate.toFixed(1)}%
-                      </Badge>
+                        {teacher.inTrialStudents || 0}
+                      </button>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1 text-sm font-semibold text-green-600">
-                        <DollarSign className="h-3 w-3" />
-                        {teacher.totalRevenue.toLocaleString()}
+                      <button
+                        type="button"
+                        onClick={() => openDetailModal('converted', teacher)}
+                        className="text-sm font-semibold text-primary underline-offset-4 transition-colors hover:text-primary/80 hover:underline"
+                      >
+                        {teacher.convertedStudents || 0}
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs">
+                          {teacher.conversionRate.toFixed(1)}%
+                        </Badge>
+                        {teacher.comparison?.conversionRate && (
+                          <span className={`text-xs ${
+                            teacher.comparison.conversionRate.trend === 'up'
+                              ? 'text-green-600'
+                              : teacher.comparison.conversionRate.trend === 'down'
+                              ? 'text-red-600'
+                              : 'text-gray-500'
+                          }`}>
+                            {teacher.comparison.conversionRate.trend === 'up' && '↑'}
+                            {teacher.comparison.conversionRate.trend === 'down' && '↓'}
+                            {teacher.comparison.conversionRate.trend === 'stable' && '→'}
+                            {Math.abs(teacher.comparison.conversionRate.change).toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1 text-sm font-semibold">
+                          <DollarSign className="h-3 w-3" />
+                          {teacher.totalRevenue.toLocaleString()}
+                        </div>
+                        {teacher.comparison?.totalRevenue && (
+                          <span className={`text-xs ${
+                            teacher.comparison.totalRevenue.trend === 'up'
+                              ? 'text-green-600'
+                              : teacher.comparison.totalRevenue.trend === 'down'
+                              ? 'text-red-600'
+                              : 'text-gray-500'
+                          }`}>
+                            {teacher.comparison.totalRevenue.trend === 'up' && '↑'}
+                            {teacher.comparison.totalRevenue.trend === 'down' && '↓'}
+                            {teacher.comparison.totalRevenue.trend === 'stable' && '→'}
+                            {formatMoney(Math.abs(teacher.comparison.totalRevenue.change))}
+                          </span>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -500,20 +618,8 @@ export function TeacherInsights({ teachers, students, classRecords }: TeacherIns
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1 text-sm">
-                        <TrendingUp className="h-3 w-3 text-blue-600" />
+                        <TrendingUp className="h-3 w-3" />
                         {formatMoney(teacher.revenuePerClass)}/堂
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        {teacher.pendingStudents > 5 ? (
-                          <AlertCircle className="h-3 w-3 text-orange-600" />
-                        ) : (
-                          <Target className="h-3 w-3 text-muted-foreground" />
-                        )}
-                        <span className={teacher.pendingStudents > 5 ? 'font-semibold text-orange-600' : ''}>
-                          {teacher.pendingStudents}
-                        </span>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -528,26 +634,29 @@ export function TeacherInsights({ teachers, students, classRecords }: TeacherIns
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <div className="w-16 bg-gray-200 rounded-full h-2">
-                          <div
-                            className={`h-2 rounded-full ${
-                              teacher.performanceScore >= 80
-                                ? 'bg-green-600'
-                                : teacher.performanceScore >= 60
-                                ? 'bg-blue-600'
-                                : teacher.performanceScore >= 40
-                                ? 'bg-yellow-600'
-                                : 'bg-red-600'
-                            }`}
-                            style={{ width: `${teacher.performanceScore}%` }}
-                          />
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 bg-gray-200 rounded-full h-2">
+                            <div
+                              className="h-2 rounded-full bg-orange-400"
+                              style={{ width: `${teacher.performanceScore}%` }}
+                            />
+                          </div>
+                          <span className="text-sm font-semibold">{teacher.performanceScore}</span>
                         </div>
-                        <span className="text-sm font-semibold">{teacher.performanceScore}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="text-xs text-muted-foreground">
-                        {teacher.aiSummary}
+                        {teacher.comparison?.performanceScore && (
+                          <span className={`text-xs ${
+                            teacher.comparison.performanceScore.trend === 'up'
+                              ? 'text-green-600'
+                              : teacher.comparison.performanceScore.trend === 'down'
+                              ? 'text-red-600'
+                              : 'text-gray-500'
+                          }`}>
+                            {teacher.comparison.performanceScore.trend === 'up' && '↑'}
+                            {teacher.comparison.performanceScore.trend === 'down' && '↓'}
+                            {teacher.comparison.performanceScore.trend === 'stable' && '→'}
+                            {Math.abs(teacher.comparison.performanceScore.change).toFixed(0)}
+                          </span>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -621,11 +730,14 @@ export function TeacherInsights({ teachers, students, classRecords }: TeacherIns
             </>
           )}
 
-          {detailModal.open && detailModal.type === 'students' && (
+          {detailModal.open && (detailModal.type === 'students' || detailModal.type === 'inTrial' || detailModal.type === 'converted') && (
             <>
               <DialogHeader>
                 <DialogTitle>
-                  {detailModal.teacher.teacherName} 的學生清單
+                  {detailModal.teacher.teacherName} 的
+                  {detailModal.type === 'inTrial' && '體驗中學生清單'}
+                  {detailModal.type === 'converted' && '已成交學生清單'}
+                  {detailModal.type === 'students' && '學生清單'}
                 </DialogTitle>
               </DialogHeader>
               <ScrollArea className="max-h-[480px] pr-2">

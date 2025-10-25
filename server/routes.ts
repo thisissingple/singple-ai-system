@@ -3577,14 +3577,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get trial class report data
   app.get('/api/reports/trial-class', isAuthenticated, async (req, res) => {
     try{
-      const period = (req.query.period as 'daily' | 'weekly' | 'monthly') || 'daily';
+      const period = (req.query.period as 'daily' | 'weekly' | 'lastWeek' | 'monthly') || 'daily';
       const baseDate = req.query.baseDate as string | undefined;
 
       // Validate period
-      if (!['daily', 'weekly', 'monthly', 'all'].includes(period)) {
+      if (!['daily', 'weekly', 'lastWeek', 'monthly', 'all'].includes(period)) {
         return res.status(400).json({
           success: false,
-          error: 'Invalid period. Must be one of: daily, weekly, monthly, all',
+          error: 'Invalid period. Must be one of: daily, weekly, lastWeek, monthly, all',
         });
       }
 
@@ -6211,13 +6211,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
            FROM suggestion_execution_log sel
            WHERE sel.analysis_id = tqa.id) as suggestion_logs,
           tcp.package_name as purchased_package,
-          CASE
-            WHEN tcp.remaining_classes IS NOT NULL THEN
-              CAST(NULLIF(regexp_replace(tcp.remaining_classes, '[^0-9]', '', 'g'), '') AS INTEGER)
-            ELSE NULL
-          END as remaining_lessons
+          tcp.student_email,
+          tca.student_email as attendance_email,
+          tca.student_email as student_email
         FROM teaching_quality_analysis tqa
-        LEFT JOIN trial_class_purchases tcp ON tqa.student_name = tcp.student_name
+        LEFT JOIN trial_class_attendance tca ON tqa.attendance_id = tca.id
+        LEFT JOIN trial_class_purchases tcp ON tcp.student_email = tca.student_email
         WHERE tqa.id = $1
       `, [id]);
 
@@ -6232,9 +6231,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: 'Permission denied' });
       }
 
+      // Calculate remaining lessons dynamically based on class date
+      let remaining_lessons = null;
+      if (analysis.purchased_package && analysis.attendance_email) {
+        // Determine total lessons from package name
+        let totalLessons = 4; // 預設初學專案
+        if (analysis.purchased_package.includes('pro')) {
+          totalLessons = 2;
+        } else if (analysis.purchased_package.includes('終極')) {
+          totalLessons = 1;
+        } else if (analysis.purchased_package.includes('12堂')) {
+          totalLessons = 12;
+        }
+
+        // Count classes BEFORE or ON this class date
+        const attendanceCountResult = await queryDatabase(`
+          SELECT COUNT(*) as count
+          FROM trial_class_attendance
+          WHERE student_email = $1
+            AND class_date <= $2
+        `, [analysis.attendance_email, analysis.class_date]);
+
+        const classesBeforeOrOn = parseInt(attendanceCountResult.rows[0]?.count || '0', 10);
+        remaining_lessons = Math.max(0, totalLessons - classesBeforeOrOn);
+      }
+
       // Parse JSONB fields
       const parsedAnalysis = {
         ...analysis,
+        remaining_lessons, // 使用動態計算的剩餘堂數
         strengths: typeof analysis.strengths === 'string' ? JSON.parse(analysis.strengths) : analysis.strengths,
         weaknesses: typeof analysis.weaknesses === 'string' ? JSON.parse(analysis.weaknesses) : analysis.weaknesses,
         suggestions: typeof analysis.suggestions === 'string' ? JSON.parse(analysis.suggestions) : analysis.suggestions,
@@ -7908,6 +7933,143 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     } catch (error: any) {
       console.error('查詢統計資料失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // Student Knowledge Base & AI Conversation API
+  // ============================================================================
+
+  // 1. Get student complete profile
+  app.get('/api/teaching-quality/student/:email/profile', isAuthenticated, async (req: any, res) => {
+    try {
+      const { email } = req.params;
+      const studentKnowledgeService = await import('./services/student-knowledge-service');
+
+      const context = await studentKnowledgeService.getStudentFullContext(email);
+
+      res.json({
+        success: true,
+        data: context
+      });
+    } catch (error: any) {
+      console.error('取得學員檔案失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 2. Ask AI preset question
+  app.post('/api/teaching-quality/student/:email/ask-preset', isAuthenticated, async (req: any, res) => {
+    try {
+      const { email } = req.params;
+      const { questionType } = req.body;
+      const teacherId = req.user.id;
+
+      if (!questionType) {
+        return res.status(400).json({ error: 'Missing questionType' });
+      }
+
+      const aiConversationService = await import('./services/ai-conversation-service');
+
+      const result = await aiConversationService.askPresetQuestion(teacherId, email, questionType);
+
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error: any) {
+      console.error('AI 預設問題查詢失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 3. Ask AI custom question
+  app.post('/api/teaching-quality/student/:email/ask-custom', isAuthenticated, async (req: any, res) => {
+    try {
+      const { email } = req.params;
+      const { question } = req.body;
+      const teacherId = req.user.id;
+
+      if (!question || question.trim() === '') {
+        return res.status(400).json({ error: 'Missing question' });
+      }
+
+      const aiConversationService = await import('./services/ai-conversation-service');
+
+      const result = await aiConversationService.askCustomQuestion(teacherId, email, question);
+
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error: any) {
+      console.error('AI 自訂問題查詢失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 4. Get conversation history
+  app.get('/api/teaching-quality/student/:email/conversations', isAuthenticated, async (req: any, res) => {
+    try {
+      const { email } = req.params;
+      const teacherId = req.user.id;
+      const limit = parseInt(req.query.limit as string) || 20;
+
+      const aiConversationService = await import('./services/ai-conversation-service');
+
+      const conversations = await aiConversationService.getConversationHistory(teacherId, email, limit);
+
+      res.json({
+        success: true,
+        data: conversations
+      });
+    } catch (error: any) {
+      console.error('取得對話歷史失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 5. Get preset questions list
+  app.get('/api/teaching-quality/preset-questions', isAuthenticated, async (req: any, res) => {
+    try {
+      const aiConversationService = await import('./services/ai-conversation-service');
+
+      res.json({
+        success: true,
+        data: aiConversationService.PRESET_QUESTIONS
+      });
+    } catch (error: any) {
+      console.error('取得預設問題清單失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 6. Save insight to knowledge base
+  app.post('/api/teaching-quality/student/:email/save-insight', isAuthenticated, async (req: any, res) => {
+    try {
+      const { email } = req.params;
+      const { conversationId, question, answer } = req.body;
+
+      if (!conversationId || !question || !answer) {
+        return res.status(400).json({ error: '缺少必要參數' });
+      }
+
+      const studentKnowledgeService = await import('./services/student-knowledge-service');
+
+      await studentKnowledgeService.saveInsightToKnowledgeBase(
+        email,
+        conversationId,
+        question,
+        answer
+      );
+
+      res.json({
+        success: true,
+        message: '已儲存到知識庫'
+      });
+    } catch (error: any) {
+      console.error('儲存到知識庫失敗:', error);
       res.status(500).json({ error: error.message });
     }
   });

@@ -61,6 +61,7 @@ export interface TeachingQualityAnalysis {
   teacher_id: string;
   teacher_name: string;
   student_name: string;
+  student_email?: string;
 
   // Class information
   class_date: string;

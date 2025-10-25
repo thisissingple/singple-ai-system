@@ -3,7 +3,7 @@
  * Designed for future integration with Google Sheets and AI audio analysis
  */
 
-export type PeriodType = 'daily' | 'weekly' | 'monthly' | 'all';
+export type PeriodType = 'daily' | 'weekly' | 'lastWeek' | 'monthly' | 'all';
 
 export type StudentStatus = 'pending' | 'contacted' | 'converted' | 'lost';
 
@@ -21,6 +21,24 @@ export interface SummaryMetrics {
   totalTrials: number;           // Total trial classes
   totalConversions: number;      // Total successful conversions
   totalStudents?: number;        // 總學生數 (from purchase records)
+}
+
+export interface MetricComparison {
+  current: number;               // 當前時段的值
+  previous: number;              // 前一時段的值
+  change: number;                // 差異值 (current - previous)
+  changePercent: number;         // 變化百分比 ((change / previous) * 100)
+  trend: 'up' | 'down' | 'stable'; // 趨勢方向
+}
+
+export interface SummaryMetricsWithComparison extends SummaryMetrics {
+  comparison?: {
+    conversionRate?: MetricComparison;
+    avgConversionTime?: MetricComparison;
+    trialCompletionRate?: MetricComparison;
+    totalTrials?: MetricComparison;
+    totalConversions?: MetricComparison;
+  };
 }
 
 export interface TrendDataPoint {
@@ -47,6 +65,13 @@ export interface TeacherInsight {
   lastClassDate: string | null;  // 最近一次上課日 - Last class date (ISO string)
   performanceScore: number;      // 績效評分 - Weighted performance score (0-100)
   aiSummary: string;             // AI建議 - AI-generated summary
+  // 🆕 期間對比資料
+  comparison?: {
+    classCount?: MetricComparison;
+    conversionRate?: MetricComparison;
+    totalRevenue?: MetricComparison;
+    performanceScore?: MetricComparison;
+  };
 }
 
 export interface StudentInsight {
@@ -90,6 +115,7 @@ export interface AISuggestions {
   weekly: string[];              // Weekly strategic suggestions
   monthly: string[];             // Monthly high-level insights
   audioInsights?: string[];      // Future: insights from audio analysis
+  periodComparison?: string;     // AI 對比分析：本期與前期的比較
 }
 
 export interface TotalReportData {
@@ -97,7 +123,7 @@ export interface TotalReportData {
   period: PeriodType;
   dateRange: DateRange;
   warnings?: string[];           // Data quality warnings
-  summaryMetrics: SummaryMetrics;
+  summaryMetrics: SummaryMetricsWithComparison;
   trendData: TrendDataPoint[];
   funnelData: FunnelDataPoint[];
   categoryBreakdown: CategoryBreakdown[];
