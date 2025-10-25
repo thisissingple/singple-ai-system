@@ -237,10 +237,22 @@ function parseTeachingMetrics(sectionBody: string): {
     }
   }
 
-  // Extract total score
-  const totalMatch = sectionBody.match(/\*\*教學品質總分[：:]\*\*\s*(\d+)\s*\/\s*(\d+)/);
+  // Extract total score (try multiple patterns)
   let totalScore = 0;
   let maxTotalScore = 25;
+
+  // Pattern 1: **教學品質總分：20/25**
+  let totalMatch = sectionBody.match(/\*\*教學品質總分[：:]\s*(\d+)\s*\/\s*(\d+)\*\*/);
+
+  if (!totalMatch) {
+    // Pattern 2: Without trailing **
+    totalMatch = sectionBody.match(/\*\*教學品質總分[：:]\*\*\s*(\d+)\s*\/\s*(\d+)/);
+  }
+
+  if (!totalMatch) {
+    // Pattern 3: More flexible - just find the numbers after 教學品質總分
+    totalMatch = sectionBody.match(/教學品質總分[^0-9]*(\d+)\s*\/\s*(\d+)/);
+  }
 
   if (totalMatch) {
     totalScore = parseInt(totalMatch[1], 10);
