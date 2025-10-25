@@ -20,7 +20,8 @@ interface ScoreMetric {
   value: number;
   maxValue: number;
   evidence: string;
-  timestamp?: string;
+  reasoning?: string;
+  timestamps?: string[];
   criteria?: string;
 }
 
@@ -42,9 +43,12 @@ interface SalesScript {
 
 interface ParsedTeachingAnalysis {
   painPoints: PainPoint[];
-  scoreMetrics: ScoreMetric[];
-  totalScore: number;
-  maxTotalScore: number;
+  teachingMetrics: ScoreMetric[];       // 教學品質評估 /25
+  teachingTotalScore: number;           // 教學品質總分
+  teachingMaxScore: number;             // 25
+  salesMetrics: ScoreMetric[];          // 成交策略評估 /25 (原 scoreMetrics)
+  salesTotalScore: number;              // 成交策略總分 (原 totalScore)
+  salesMaxScore: number;                // 25 (原 maxTotalScore)
   scoreSummary?: string;
   probability: number;
   probabilityFactors: ProbabilityFactor[];
@@ -68,6 +72,15 @@ function extractTextWithTimestamp(text: string): { text: string; timestamp?: str
     };
   }
   return { text: text.trim() };
+}
+
+/**
+ * Extract all timestamps from text
+ */
+function extractAllTimestamps(text: string): string[] {
+  const timestampRegex = /[（(]?(\d{2}:\d{2}:\d{2})[）)]?/g;
+  const matches = Array.from(text.matchAll(timestampRegex));
+  return matches.map(match => match[1]);
 }
 
 /**
@@ -170,7 +183,75 @@ function parsePainPoints(sectionBody: string): PainPoint[] {
 }
 
 /**
- * Parse score metrics from the section
+ * Parse teaching quality metrics from the section
+ */
+function parseTeachingMetrics(sectionBody: string): {
+  metrics: ScoreMetric[];
+  totalScore: number;
+  maxTotalScore: number;
+} {
+  const metrics: ScoreMetric[] = [];
+  const metricLabels = [
+    '教學目標清晰度',
+    '示範與講解品質',
+    '學員理解度與互動',
+    '即時回饋與調整',
+    '課程結構與時間掌控',
+  ];
+
+  for (const label of metricLabels) {
+    // Match the metric with number format (X/5)
+    const metricRegex = new RegExp(
+      `\\*\\*\\d+\\.\\s*${label}[：:]\\s*(\\d+)/(\\d+)\\*\\*([\\s\\S]*?)(?=\\n\\*\\*\\d+\\.|\\*\\*教學品質總分|$)`,
+      'i'
+    );
+    const match = sectionBody.match(metricRegex);
+
+    if (match) {
+      const value = parseInt(match[1], 10);
+      const maxValue = parseInt(match[2], 10);
+      const content = match[3].trim();
+
+      // Extract evidence
+      const evidenceMatch = content.match(/[-–—]\s*\*\*證據[：:]\*\*\s*([\s\S]*?)(?=\n-\s*\*\*理由|$)/);
+      const evidenceText = evidenceMatch ? evidenceMatch[1].trim() : '';
+
+      // Extract reasoning
+      const reasoningMatch = content.match(/[-–—]\s*\*\*理由[：:]\*\*\s*([\s\S]*?)(?=\n\*\*|$)/);
+      const reasoningText = reasoningMatch ? reasoningMatch[1].trim() : '';
+
+      // Extract all timestamps
+      const allTimestamps = [
+        ...extractAllTimestamps(evidenceText),
+        ...extractAllTimestamps(reasoningText)
+      ];
+
+      metrics.push({
+        label,
+        value,
+        maxValue,
+        evidence: evidenceText,
+        reasoning: reasoningText,
+        timestamps: allTimestamps.length > 0 ? allTimestamps : undefined,
+      });
+    }
+  }
+
+  // Extract total score
+  const totalMatch = sectionBody.match(/\*\*教學品質總分[：:]\*\*\s*(\d+)\s*\/\s*(\d+)/);
+  let totalScore = 0;
+  let maxTotalScore = 25;
+
+  if (totalMatch) {
+    totalScore = parseInt(totalMatch[1], 10);
+    maxTotalScore = parseInt(totalMatch[2], 10);
+  }
+
+  return { metrics, totalScore, maxTotalScore };
+}
+
+/**
+ * Parse sales strategy metrics from the section
  */
 function parseScoreMetrics(sectionBody: string): {
   metrics: ScoreMetric[];
@@ -188,8 +269,9 @@ function parseScoreMetrics(sectionBody: string): {
   ];
 
   for (const label of metricLabels) {
+    // Match the entire metric block including evidence and reasoning
     const metricRegex = new RegExp(
-      `\\*\\*${label}[：:]\\s*(\\d+)/(\\d+)\\*\\*([\\s\\S]*?)(?=\\*\\*[^*]+[：:]|$)`,
+      `\\*\\*${label}[：:]\\s*(\\d+)/(\\d+)\\*\\*([\\s\\S]*?)(?=\\n\\*\\*[^證理]+[：:]\\s*\\d+/\\d+|$)`,
       'i'
     );
     const match = sectionBody.match(metricRegex);
@@ -199,15 +281,27 @@ function parseScoreMetrics(sectionBody: string): {
       const maxValue = parseInt(match[2], 10);
       const content = match[3].trim();
 
-      // Extract evidence
-      const evidenceMatch = content.match(/[-–—]\s*證據[：:]\s*(.+?)(?=\n|$)/);
-      const evidence = evidenceMatch ? evidenceMatch[1].trim() : '';
+      // Extract evidence (with more flexible pattern to handle nested bullets)
+      const evidenceMatch = content.match(/[-–—]\s*\*\*證據[^*]*\*\*\s*([\s\S]*?)(?=\n-\s*\*\*理由|$)/);
+      const evidenceText = evidenceMatch ? evidenceMatch[1].trim() : '';
+
+      // Extract reasoning (with more flexible pattern)
+      const reasoningMatch = content.match(/[-–—]\s*\*\*理由[：:]\*\*\s*([\s\S]*?)(?=\n\*\*[^*]+[：:]|$)/);
+      const reasoningText = reasoningMatch ? reasoningMatch[1].trim() : '';
+
+      // Extract all timestamps from both evidence and reasoning
+      const allTimestamps = [
+        ...extractAllTimestamps(evidenceText),
+        ...extractAllTimestamps(reasoningText)
+      ];
 
       metrics.push({
         label,
         value,
         maxValue,
-        evidence,
+        evidence: evidenceText,
+        reasoning: reasoningText,
+        timestamps: allTimestamps.length > 0 ? allTimestamps : undefined,
       });
     }
   }
@@ -342,11 +436,22 @@ export function parseTeachingAnalysisMarkdown(markdown: string): ParsedTeachingA
       ? parsePainPoints(sections[painPointsTitle])
       : [];
 
-    // Find score metrics section
+    // Find teaching quality metrics section
+    const teachingTitle = Object.keys(sections).find(
+      (title) => title.includes('教學品質評估') || title.includes('📚')
+    );
+    const { metrics: teachingMetrics, totalScore: teachingTotalScore, maxTotalScore: teachingMaxScore } =
+      teachingTitle ? parseTeachingMetrics(sections[teachingTitle]) : {
+        metrics: [],
+        totalScore: 0,
+        maxTotalScore: 25,
+      };
+
+    // Find sales strategy metrics section
     const scoresTitle = Object.keys(sections).find(
       (title) => title.includes('成交策略評估') || title.includes('🧮')
     );
-    const { metrics: scoreMetrics, totalScore, maxTotalScore, summary: scoreSummary } =
+    const { metrics: salesMetrics, totalScore: salesTotalScore, maxTotalScore: salesMaxScore, summary: scoreSummary } =
       scoresTitle ? parseScoreMetrics(sections[scoresTitle]) : {
         metrics: [],
         totalScore: 0,
@@ -372,9 +477,12 @@ export function parseTeachingAnalysisMarkdown(markdown: string): ParsedTeachingA
 
     return {
       painPoints,
-      scoreMetrics,
-      totalScore,
-      maxTotalScore,
+      teachingMetrics,
+      teachingTotalScore,
+      teachingMaxScore,
+      salesMetrics,
+      salesTotalScore,
+      salesMaxScore,
       scoreSummary,
       probability,
       probabilityFactors,

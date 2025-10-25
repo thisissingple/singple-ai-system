@@ -17,23 +17,13 @@ import {
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '@/components/ui/tabs';
 import {
   ArrowLeft,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   ClipboardCopy,
   Copy,
   FileText,
   MessageSquare,
-  TrendingUp,
 } from 'lucide-react';
 
 import type { TeachingQualityAnalysisDetail } from '@/types/teaching-quality';
@@ -44,11 +34,10 @@ import {
   getScoreBadgeColor,
 } from '@/types/teaching-quality';
 import { cn } from '@/lib/utils';
-import { AIChatBox } from '@/components/teaching-quality/ai-chat-box';
 import { PainPointsSection } from '@/components/teaching-quality/pain-points-section';
-import { TeachingScoresSection } from '@/components/teaching-quality/teaching-scores-section';
-import { ConversionProbabilitySection } from '@/components/teaching-quality/conversion-probability-section';
 import { SalesScriptsSection } from '@/components/teaching-quality/sales-scripts-section';
+import { SalesScoreCard } from '@/components/teaching-quality/sales-score-card';
+import { FloatingAIChat } from '@/components/teaching-quality/floating-ai-chat';
 import { parseTeachingAnalysisMarkdown } from '@/lib/parse-teaching-analysis';
 
 type ConversionSuggestionMarkdown = {
@@ -446,7 +435,6 @@ export default function TeachingQualityDetail() {
   const [copiedProfile, setCopiedProfile] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
-  const [showProbabilityDetail, setShowProbabilityDetail] = useState(false);
   const [highlightedTimestamp, setHighlightedTimestamp] = useState<string | null>(null);
 
   useEffect(() => {
@@ -589,12 +577,8 @@ export default function TeachingQualityDetail() {
     );
   }
 
-  const metrics = parsedAnalysis?.metrics?.scoreItems ?? [];
-  const missions = parsedAnalysis?.missions ?? [];
-  const scripts = parsedAnalysis?.scripts ?? [];
   const probabilityValue =
     parsedAnalysis?.probability?.value ?? probabilityFromData;
-  const probabilityBody = parsedAnalysis?.probability?.body ?? '';
 
   // 檢查是否有 AI 分析內容
   const hasValidAnalysis = markdownOutput && markdownOutput.length > 0;
@@ -635,8 +619,8 @@ export default function TeachingQualityDetail() {
             </div>
           </CardHeader>
           <CardContent className="pt-6">
-            <div className="grid gap-6 md:grid-cols-4">
-              {/* 教學評分 */}
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+              {/* 1. 教學評分 */}
               <div className="rounded-lg border-2 border-green-200 bg-gradient-to-br from-green-50 to-white p-5 shadow-md">
                 <div className="text-xs font-semibold uppercase tracking-wide text-green-700">
                   教學評分
@@ -656,10 +640,30 @@ export default function TeachingQualityDetail() {
                 </div>
               </div>
 
-              {/* 成交機率 */}
+              {/* 2. 推課評分（使用新的 SalesScoreCard 組件） */}
+              {newParsedAnalysis && newParsedAnalysis.scoreMetrics && newParsedAnalysis.scoreMetrics.length > 0 ? (
+                <SalesScoreCard
+                  totalScore={newParsedAnalysis.totalScore}
+                  maxTotalScore={newParsedAnalysis.maxTotalScore}
+                  metrics={newParsedAnalysis.scoreMetrics}
+                  summary={newParsedAnalysis.scoreSummary}
+                  onTimestampClick={handleTimestampClick}
+                />
+              ) : (
+                <div className="rounded-lg border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-white p-5 shadow-md">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-purple-700">
+                    推課評分
+                  </div>
+                  <div className="mt-3 flex items-center justify-center">
+                    <span className="text-sm text-muted-foreground">尚無評分資料</span>
+                  </div>
+                </div>
+              )}
+
+              {/* 3. AI 預估成交率 */}
               <div className="rounded-lg border-2 border-orange-200 bg-gradient-to-br from-orange-50 to-white p-5 shadow-md">
                 <div className="text-xs font-semibold uppercase tracking-wide text-orange-700">
-                  成交機率
+                  AI 預估成交率
                 </div>
                 <div className="mt-3 flex items-baseline gap-2">
                   <span className="text-5xl font-bold text-orange-600">
@@ -669,29 +673,17 @@ export default function TeachingQualityDetail() {
                     <span className="text-lg text-muted-foreground">%</span>
                   )}
                 </div>
+                {probabilityValue !== undefined && (
+                  <div className="mt-2 text-sm font-semibold text-orange-800">
+                    等級：{probabilityValue >= 80 ? '極高' : probabilityValue >= 60 ? '高' : probabilityValue >= 40 ? '中等' : probabilityValue >= 20 ? '偏低' : '低'}
+                  </div>
+                )}
               </div>
 
-              {/* 課程狀態 */}
+              {/* 4. 課程資訊 */}
               <div className="rounded-lg border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5 shadow-md">
                 <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
-                  課程狀態
-                </div>
-                <div className="mt-3">
-                  <Badge
-                    className={cn(
-                      getConversionStatusColor(analysis.conversion_status),
-                      'px-3 py-1 text-base font-semibold'
-                    )}
-                  >
-                    {getConversionStatusLabel(analysis.conversion_status)}
-                  </Badge>
-                </div>
-              </div>
-
-              {/* 購課資訊 */}
-              <div className="rounded-lg border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-white p-5 shadow-md">
-                <div className="text-xs font-semibold uppercase tracking-wide text-purple-700">
-                  購課資訊
+                  課程資訊
                 </div>
                 <div className="mt-3 space-y-2 text-sm">
                   <div className="flex justify-between">
@@ -706,14 +698,25 @@ export default function TeachingQualityDetail() {
                         : '—'}
                     </span>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">轉換：</span>
+                    <Badge
+                      className={cn(
+                        getConversionStatusColor(analysis.conversion_status),
+                        'px-2 py-0.5 text-xs'
+                      )}
+                    >
+                      {getConversionStatusLabel(analysis.conversion_status)}
+                    </Badge>
+                  </div>
                 </div>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* AI 對話框 - 策略助手 */}
-        <AIChatBox
+        {/* 右下角浮動 AI 策略助手 */}
+        <FloatingAIChat
           studentEmail={analysis.student_email || `${analysis.student_name}@example.com`}
           studentName={analysis.student_name}
           totalClasses={1}
@@ -752,126 +755,7 @@ export default function TeachingQualityDetail() {
           </Card>
         ) : parsedAnalysis ? (
           <>
-            {/* ========== 新的結構化 UI 組件 ========== */}
-            {newParsedAnalysis && (
-              <>
-                {/* 深層痛點分析（5 層次） */}
-                {newParsedAnalysis.painPoints && newParsedAnalysis.painPoints.length > 0 && (
-                  <PainPointsSection
-                    painPoints={newParsedAnalysis.painPoints}
-                    onTimestampClick={handleTimestampClick}
-                  />
-                )}
 
-                {/* 成交策略評估（5 大指標） */}
-                {newParsedAnalysis.scoreMetrics && newParsedAnalysis.scoreMetrics.length > 0 && (
-                  <TeachingScoresSection
-                    metrics={newParsedAnalysis.scoreMetrics}
-                    totalScore={newParsedAnalysis.totalScore}
-                    maxTotalScore={newParsedAnalysis.maxTotalScore}
-                    summary={newParsedAnalysis.scoreSummary}
-                    onTimestampClick={handleTimestampClick}
-                  />
-                )}
-
-                {/* 預估成交機率（量化指標計算） */}
-                {newParsedAnalysis.probability > 0 && (
-                  <ConversionProbabilitySection
-                    probability={newParsedAnalysis.probability}
-                    factors={newParsedAnalysis.probabilityFactors}
-                    reasoning={newParsedAnalysis.probabilityReasoning}
-                    onTimestampClick={handleTimestampClick}
-                  />
-                )}
-
-                {/* 完整成交話術總結 */}
-                {newParsedAnalysis.salesScripts && newParsedAnalysis.salesScripts.length > 0 && (
-                  <SalesScriptsSection
-                    scripts={newParsedAnalysis.salesScripts}
-                    studentType={newParsedAnalysis.studentType}
-                  />
-                )}
-              </>
-            )}
-
-            {/* ========== 以下是舊的 UI（保留以防解析失敗） ========== */}
-
-            {/* 成交機率解析 - 可展開區域（僅在有 AI 分析時顯示） */}
-            {showProbabilityDetail && probabilityBody && (
-              <Card className="shadow-sm">
-                <CardContent className="pt-6">
-                  <div className="rounded-lg border border-orange-200 bg-orange-50/50 p-4">
-                    <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-orange-800">
-                      <TrendingUp className="h-4 w-4" />
-                      成交機率詳細分析
-                    </h4>
-                    <MarkdownView
-                      content={probabilityBody}
-                      className="prose-sm leading-relaxed text-orange-900"
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* 關鍵指標解析 - 橫式排版 */}
-            {metrics.length > 0 && (
-              <Card className="shadow-sm">
-                <CardHeader>
-                  <CardTitle className="text-lg font-semibold text-foreground">
-                    📊 關鍵指標解析（成交策略評估）
-                  </CardTitle>
-                  <p className="text-sm text-muted-foreground">
-                    分析 AI 回傳的量化指標與證據
-                  </p>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
-                    {metrics.map((metric) => (
-                      <div
-                        key={metric.label}
-                        className="rounded-lg border border-border/80 bg-background p-4 shadow-sm"
-                      >
-                        <div className="mb-2 text-sm font-semibold text-foreground">
-                          {metric.label.length > 4 ? metric.label.substring(0, 4) : metric.label}
-                        </div>
-                        <div className="mb-2 flex items-baseline gap-1">
-                          <span className="text-2xl font-bold text-primary">
-                            {metric.value}
-                          </span>
-                          <span className="text-sm text-muted-foreground">/5</span>
-                        </div>
-                        <Progress
-                          value={Math.min(100, (metric.value / 5) * 100)}
-                          className="mb-3 h-2"
-                        />
-                        <div className="text-xs leading-relaxed text-muted-foreground">
-                          <InfoWithTimestamp
-                            text={metric.evidence}
-                            timestamp={extractTextWithTimestamp(metric.evidence).timestamp}
-                            onTimestampClick={handleTimestampClick}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {parsedAnalysis.metrics?.summary && (
-                    <div className="mt-6 rounded-lg border-2 border-primary/20 bg-gradient-to-br from-primary/5 to-white p-6 shadow-sm">
-                      <div className="flex items-start gap-3">
-                        <span className="text-2xl">📝</span>
-                        <div className="flex-1">
-                          <strong className="block text-base font-bold text-foreground mb-2">總評：</strong>
-                          <p className="text-sm leading-relaxed text-foreground">
-                            {parsedAnalysis.metrics.summary}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
 
             {/* 學員檔案卡 - 完整結構化資訊 */}
             {parsedAnalysis?.studentProfile && (
@@ -1072,95 +956,20 @@ export default function TeachingQualityDetail() {
               </Card>
             )}
 
-            {/* 行動優先序 - 橫式一列排版 */}
-            {missions.length > 0 && (
-              <Card className="shadow-sm">
-                <CardHeader>
-                  <CardTitle className="text-lg font-semibold text-foreground">
-                    🚀 下一步行動優先序（攻擊方向）
-                  </CardTitle>
-                  <p className="text-sm text-muted-foreground">
-                    AI 建議的重點任務，按優先順序排列
-                  </p>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid gap-4 md:grid-cols-3">
-                    {missions.map((mission, index) => (
-                      <div
-                        key={index}
-                        className="flex gap-3 rounded-lg border-2 border-primary/20 bg-gradient-to-br from-primary/5 to-white p-4 shadow-sm"
-                      >
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
-                          {index + 1}
-                        </span>
-                        <div className="flex-1">
-                          <span className="block text-sm font-medium leading-relaxed text-foreground">
-                            {mission}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+            {/* 💔 深層痛點分析（5 層次） */}
+            {newParsedAnalysis && newParsedAnalysis.painPoints && newParsedAnalysis.painPoints.length > 0 && (
+              <PainPointsSection
+                painPoints={newParsedAnalysis.painPoints}
+                onTimestampClick={handleTimestampClick}
+              />
             )}
 
-            {/* 三階段成交話術 - 修正排版 */}
-            {scripts.length > 0 && (
-              <Card className="shadow-sm">
-                <CardHeader>
-                  <CardTitle className="text-lg font-semibold text-foreground">
-                    💬 完整成交話術總結（可照念）
-                  </CardTitle>
-                  <p className="text-sm text-muted-foreground">
-                    三種不同版本的推課話術，可根據情境靈活運用
-                  </p>
-                </CardHeader>
-                <CardContent>
-                  <Tabs defaultValue={scripts[0]?.id} className="space-y-4">
-                    <TabsList className="grid w-full grid-cols-3 gap-2 bg-transparent p-0">
-                      {scripts.map((script) => (
-                        <TabsTrigger
-                          key={script.id}
-                          value={script.id}
-                          className="rounded-lg border-2 border-border/80 bg-background px-4 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:border-primary data-[state=active]:bg-primary/10 data-[state=active]:text-foreground data-[state=active]:shadow-sm"
-                        >
-                          {script.title}
-                        </TabsTrigger>
-                      ))}
-                    </TabsList>
-                    {scripts.map((script) => (
-                      <TabsContent key={script.id} value={script.id} className="mt-4">
-                        <div className="rounded-lg border border-border/80 bg-muted/20 p-6 shadow-sm">
-                          <div className="prose prose-base max-w-none">
-                            <ReactMarkdown
-                              components={{
-                                p: ({ children }: { children?: React.ReactNode }) => (
-                                  <p className="mb-4 text-base leading-relaxed text-foreground font-normal">{children}</p>
-                                ),
-                                ul: ({ children }: { children?: React.ReactNode }) => (
-                                  <ul className="list-disc space-y-2 pl-6 mb-4">{children}</ul>
-                                ),
-                                li: ({ children }: { children?: React.ReactNode }) => (
-                                  <li className="text-base leading-relaxed text-foreground font-normal">{children}</li>
-                                ),
-                                strong: ({ children }: { children?: React.ReactNode }) => (
-                                  <strong className="font-semibold text-foreground">{children}</strong>
-                                ),
-                                blockquote: ({ children }: { children?: React.ReactNode }) => (
-                                  <blockquote className="border-l-4 border-primary pl-4 font-normal text-base leading-relaxed text-foreground">{children}</blockquote>
-                                ),
-                              }}
-                            >
-                              {script.body}
-                            </ReactMarkdown>
-                          </div>
-                        </div>
-                      </TabsContent>
-                    ))}
-                  </Tabs>
-                </CardContent>
-              </Card>
+            {/* 💬 完整成交話術總結 */}
+            {newParsedAnalysis && newParsedAnalysis.salesScripts && newParsedAnalysis.salesScripts.length > 0 && (
+              <SalesScriptsSection
+                scripts={newParsedAnalysis.salesScripts}
+                studentType={newParsedAnalysis.studentType}
+              />
             )}
 
             {/* 原始 Markdown 報告 */}

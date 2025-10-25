@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { queryDatabase } from '../server/services/pg-client';
 import { analyzeTeachingQuality } from '../server/services/teaching-quality-gpt-service';
 
