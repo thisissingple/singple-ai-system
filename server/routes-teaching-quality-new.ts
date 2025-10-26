@@ -7,6 +7,7 @@ import { createPool, queryDatabase, insertAndReturn } from './services/pg-client
 import { getSupabaseClient } from './services/supabase-client';
 import * as teachingQualityGPT from './services/teaching-quality-gpt-service';
 import { parseScoresFromMarkdown } from './services/parse-teaching-scores';
+import { getOrCreateStudentKB, addDataSourceRef } from './services/student-knowledge-service';
 
 export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
   // 0. Get student records with analysis status (for main list page)
@@ -322,6 +323,22 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
           suggestion_text: analysis.suggestions[i].suggestion,
           is_executed: false
         });
+      }
+
+      // Auto-save analysis to student knowledge base
+      try {
+        if (attendance.student_email) {
+          // Ensure student KB exists
+          await getOrCreateStudentKB(attendance.student_email, attendance.student_name);
+
+          // Add this analysis to data_sources.ai_analyses
+          await addDataSourceRef(attendance.student_email, 'ai_analyses', result.id);
+
+          console.log(`✅ Auto-saved analysis ${result.id} to knowledge base for ${attendance.student_name}`);
+        }
+      } catch (kbError) {
+        // Don't fail the whole request if KB save fails
+        console.error('⚠️ Failed to save to knowledge base:', kbError);
       }
 
       await pool.end();

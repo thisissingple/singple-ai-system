@@ -277,10 +277,11 @@ export async function addDataSourceRef(
   sourceType: 'trial_classes' | 'eods_records' | 'ai_analyses' | 'purchases',
   sourceId: string
 ): Promise<void> {
+  // Fix: Use template literal correctly - ${sourceType} must be outside quotes
   await queryDatabase(`
     UPDATE student_knowledge_base
     SET data_sources = jsonb_set(
-      data_sources,
+      COALESCE(data_sources, '{}'::jsonb),
       '{${sourceType}}',
       COALESCE(data_sources->'${sourceType}', '[]'::jsonb) || $1::jsonb,
       true
