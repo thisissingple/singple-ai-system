@@ -6,6 +6,7 @@
 import { createPool, queryDatabase, insertAndReturn } from './services/pg-client';
 import { getSupabaseClient } from './services/supabase-client';
 import * as teachingQualityGPT from './services/teaching-quality-gpt-service';
+import { parseScoresFromMarkdown } from './services/parse-teaching-scores';
 
 export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
   // 0. Get student records with analysis status (for main list page)
@@ -280,6 +281,9 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         null // No specific class topic
       );
 
+      // Parse scores from Markdown (Phase 32-33: Dual score system)
+      const parsedScores = parseScoresFromMarkdown(analysis.summary);
+
       // Save to database
       const result = await insertAndReturn('teaching_quality_analysis', {
         attendance_id: attendanceId,
@@ -290,7 +294,10 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         class_topic: null,
         transcript_text: attendance.class_transcript,
         transcript_file_url: null,
-        overall_score: analysis.overallScore,
+        overall_score: parsedScores.overallScore,        // 0-100 calculated score
+        teaching_score: parsedScores.teachingScore,      // 0-25
+        sales_score: parsedScores.salesScore,            // 0-25
+        conversion_probability: parsedScores.conversionProbability, // 0-100
         strengths: JSON.stringify(analysis.strengths),
         weaknesses: JSON.stringify(analysis.weaknesses),
         class_summary: analysis.summary,
