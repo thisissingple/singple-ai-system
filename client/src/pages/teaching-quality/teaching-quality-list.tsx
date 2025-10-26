@@ -266,27 +266,50 @@ export default function TeachingQualityList() {
                     <TableHead className="whitespace-nowrap">學員姓名</TableHead>
                     <TableHead className="whitespace-nowrap">諮詢師/老師</TableHead>
                     <TableHead className="whitespace-nowrap">體驗課日期</TableHead>
-                    <TableHead className="text-center whitespace-nowrap">成交機率</TableHead>
-                    <TableHead className="whitespace-nowrap">學員狀況</TableHead>
-                    <TableHead className="whitespace-nowrap">痛點分析</TableHead>
-                    <TableHead className="whitespace-nowrap">成交話術</TableHead>
+                    <TableHead className="text-center whitespace-nowrap">老師表現總評分</TableHead>
                     <TableHead className="whitespace-nowrap">方案名稱</TableHead>
                     <TableHead className="whitespace-nowrap">剩餘堂數</TableHead>
-                    <TableHead className="whitespace-nowrap">轉單狀態</TableHead>
+                    <TableHead className="text-center whitespace-nowrap">是否已轉高</TableHead>
                     <TableHead className="text-right whitespace-nowrap">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {records.map((record) => (
                     <TableRow key={record.attendance_id}>
+                      {/* 學員姓名 */}
                       <TableCell className="font-medium">{record.student_name}</TableCell>
+
+                      {/* 諮詢師/老師 */}
                       <TableCell>{record.teacher_name}</TableCell>
+
+                      {/* 體驗課日期 */}
                       <TableCell>{formatDate(record.class_date)}</TableCell>
+
+                      {/* 老師表現總評分 (overall_score /100) */}
                       <TableCell className="text-center">
-                        {record.id ? (
-                          <Badge className={getScoreBadgeColor(record.overall_score)}>
-                            {record.overall_score}/10
-                          </Badge>
+                        {record.id && record.overall_score !== null ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <div className="text-lg font-bold text-foreground">
+                              {record.overall_score}
+                              <span className="text-sm text-muted-foreground">/100</span>
+                            </div>
+                            <Badge
+                              variant="outline"
+                              className={
+                                record.overall_score >= 90 ? 'bg-green-50 text-green-700 border-green-300' :
+                                record.overall_score >= 80 ? 'bg-blue-50 text-blue-700 border-blue-300' :
+                                record.overall_score >= 70 ? 'bg-yellow-50 text-yellow-700 border-yellow-300' :
+                                record.overall_score >= 60 ? 'bg-orange-50 text-orange-700 border-orange-300' :
+                                'bg-red-50 text-red-700 border-red-300'
+                              }
+                            >
+                              {record.overall_score >= 90 ? 'SSS' :
+                               record.overall_score >= 80 ? 'A' :
+                               record.overall_score >= 70 ? 'B' :
+                               record.overall_score >= 60 ? 'C' :
+                               record.overall_score >= 50 ? 'D' : 'E'}
+                            </Badge>
+                          </div>
                         ) : record.has_transcript ? (
                           <Badge
                             variant="outline"
@@ -309,62 +332,43 @@ export default function TeachingQualityList() {
                           </Badge>
                         )}
                       </TableCell>
-                      <TableCell className="max-w-xs">
-                        {record.id && record.strengths_summary ? (
-                          <div className="text-xs text-green-700 truncate" title={record.strengths_summary}>
-                            {record.strengths_summary}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="max-w-xs">
-                        {record.id && record.weaknesses_summary ? (
-                          <div className="text-xs text-orange-700 truncate" title={record.weaknesses_summary}>
-                            {record.weaknesses_summary}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="max-w-xs">
-                        {record.id && record.suggestions_summary ? (
-                          <div className="text-xs text-blue-700 truncate" title={record.suggestions_summary}>
-                            {record.suggestions_summary}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
+
+                      {/* 方案名稱 */}
                       <TableCell>
                         {record.package_name ? (
-                          <span className="text-xs">{record.package_name}</span>
+                          <span className="text-sm font-medium">{record.package_name}</span>
                         ) : (
-                          <span className="text-xs text-muted-foreground">未購課</span>
+                          <span className="text-sm text-muted-foreground">未購課</span>
                         )}
                       </TableCell>
+
+                      {/* 剩餘堂數 */}
                       <TableCell>
-                        {record.package_name && record.remaining_classes ? (
-                          <Badge variant="outline" className="text-blue-600">
+                        {record.remaining_classes ? (
+                          <Badge variant="outline" className="text-blue-600 border-blue-300">
                             {record.remaining_classes}
                           </Badge>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+
+                      {/* 是否已轉高 */}
+                      <TableCell className="text-center">
+                        {record.package_name && !record.remaining_classes ? (
+                          <Badge className="bg-green-600 hover:bg-green-700">
+                            ✓ 已轉高
+                          </Badge>
                         ) : record.package_name ? (
-                          <Badge variant="default" className="bg-green-600">
-                            已轉高
+                          <Badge variant="outline" className="text-muted-foreground border-gray-300">
+                            尚未轉高
                           </Badge>
                         ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
+                          <span className="text-sm text-muted-foreground">-</span>
                         )}
                       </TableCell>
-                      <TableCell>
-                        {record.id ? (
-                          <Badge variant="outline" className="text-purple-600">
-                            85%
-                          </Badge>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
+
+                      {/* 操作 */}
                       <TableCell className="text-right">
                         {record.id ? (
                           <Button

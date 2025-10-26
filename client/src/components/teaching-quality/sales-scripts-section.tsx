@@ -17,6 +17,8 @@ import {
   TrendingUp,
   AlertTriangle,
   Target,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -156,6 +158,7 @@ function ScriptCard({ script }: { script: SalesScript }) {
 }
 
 export function SalesScriptsSection({ scripts, studentType }: SalesScriptsSectionProps) {
+  const [isExpanded, setIsExpanded] = useState(true); // 預設展開
   const [copiedAll, setCopiedAll] = useState(false);
 
   async function copyAllScripts() {
@@ -185,37 +188,57 @@ export function SalesScriptsSection({ scripts, studentType }: SalesScriptsSectio
               三種不同版本的推課話術，針對不同學員類型設計。每個版本都包含感官語言與 NLP 技巧，可根據情境靈活運用。
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={copyAllScripts}
-            className="gap-2 shrink-0"
-          >
-            {copiedAll ? (
-              <>
-                <CheckCircle2 className="h-4 w-4 text-green-600" />
-                已複製全部
-              </>
-            ) : (
-              <>
-                <Copy className="h-4 w-4" />
-                複製全部話術
-              </>
-            )}
-          </Button>
+          <div className="flex gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={copyAllScripts}
+              className="gap-2"
+            >
+              {copiedAll ? (
+                <>
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  已複製全部
+                </>
+              ) : (
+                <>
+                  <Copy className="h-4 w-4" />
+                  複製全部話術
+                </>
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsExpanded(!isExpanded)}
+            >
+              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </Button>
+          </div>
         </div>
       </CardHeader>
+      {isExpanded && (
       <CardContent className="space-y-6">
         {/* Important Notice */}
         <div className="rounded-lg border-2 border-orange-300 bg-gradient-to-r from-orange-50 to-white p-4">
           <div className="flex items-start gap-3">
             <AlertTriangle className="h-5 w-5 shrink-0 text-orange-600" />
-            <div>
-              <p className="font-semibold text-orange-800">⚠️ 推課方向</p>
-              <p className="mt-1 text-sm leading-relaxed text-orange-700">
-                必須推「<strong>升級到一對一教練課程</strong>」，不是推學員現有方案。<br />
-                核心價值：<strong>隨時隨地練習</strong> + <strong>即時指導</strong> + <strong>練習頻率提升</strong> + <strong>確保做對</strong>
-              </p>
+            <div className="flex-1">
+              <p className="font-semibold text-orange-800 mb-2">⚠️ 推課方向</p>
+              <div className="text-sm text-orange-700 space-y-2">
+                <p className="font-medium">
+                  必須推「<strong>升級到一對一教練課程</strong>」，不是推學員現有方案。
+                </p>
+                <div>
+                  <p className="font-medium mb-1">核心價值：</p>
+                  <ul className="list-disc list-inside space-y-0.5 ml-2">
+                    <li><strong>隨時隨地練習</strong></li>
+                    <li><strong>即時指導</strong></li>
+                    <li><strong>練習頻率提升</strong></li>
+                    <li><strong>確保做對</strong></li>
+                  </ul>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -230,7 +253,7 @@ export function SalesScriptsSection({ scripts, studentType }: SalesScriptsSectio
         )}
 
         {/* Scripts Tabs */}
-        <Tabs defaultValue={scripts[0]?.id} className="space-y-6">
+        <Tabs defaultValue={scripts[0]?.id} className="space-y-0">
           <TabsList className="grid w-full grid-cols-3 gap-2 bg-transparent p-0">
             {scripts.map((script, index) => {
               const versionLetter = script.id.includes('1') ? 'A' : script.id.includes('2') ? 'B' : 'C';
@@ -256,7 +279,7 @@ export function SalesScriptsSection({ scripts, studentType }: SalesScriptsSectio
           </TabsList>
 
           {scripts.map((script) => (
-            <TabsContent key={script.id} value={script.id} className="mt-6">
+            <TabsContent key={script.id} value={script.id} className="mt-8">
               <ScriptCard script={script} />
             </TabsContent>
           ))}
@@ -277,6 +300,7 @@ export function SalesScriptsSection({ scripts, studentType }: SalesScriptsSectio
           </div>
         </div>
       </CardContent>
+      )}
     </Card>
   );
 }

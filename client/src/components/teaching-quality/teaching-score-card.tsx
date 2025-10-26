@@ -38,6 +38,7 @@ interface TeachingScoreCardProps {
   totalScore: number;
   maxScore: number;
   onTimestampClick?: (timestamp: string) => void;
+  onClick?: () => void;
 }
 
 /**
@@ -144,6 +145,7 @@ export function TeachingScoreCard({
   totalScore,
   maxScore,
   onTimestampClick,
+  onClick,
 }: TeachingScoreCardProps) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -183,13 +185,24 @@ export function TeachingScoreCard({
         </div>
 
         {/* View Details Button */}
-        <Dialog open={isOpen} onOpenChange={setIsOpen}>
-          <DialogTrigger asChild>
-            <Button variant="ghost" size="sm" className="w-full gap-2">
-              <BarChart3 className="h-4 w-4" />
-              <span>查看 5 大指標詳情</span>
-            </Button>
-          </DialogTrigger>
+        {onClick ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full gap-2"
+            onClick={onClick}
+          >
+            <BarChart3 className="h-4 w-4" />
+            <span>查看 5 大指標詳情</span>
+          </Button>
+        ) : (
+          <Dialog open={isOpen} onOpenChange={setIsOpen}>
+            <DialogTrigger asChild>
+              <Button variant="ghost" size="sm" className="w-full gap-2">
+                <BarChart3 className="h-4 w-4" />
+                <span>查看 5 大指標詳情</span>
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -280,7 +293,8 @@ export function TeachingScoreCard({
               </Card>
             </div>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        )}
       </CardContent>
     </Card>
   );

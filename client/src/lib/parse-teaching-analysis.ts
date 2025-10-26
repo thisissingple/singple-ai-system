@@ -5,7 +5,7 @@
  * for the new UI components (PainPointsSection, TeachingScoresSection, etc.)
  */
 
-interface PainPoint {
+export interface PainPoint {
   level: string;
   painDescription: string;
   evidence?: string;
@@ -15,7 +15,7 @@ interface PainPoint {
   needsToAsk?: string;
 }
 
-interface ScoreMetric {
+export interface ScoreMetric {
   label: string;
   value: number;
   maxValue: number;
@@ -25,7 +25,7 @@ interface ScoreMetric {
   criteria?: string;
 }
 
-interface ProbabilityFactor {
+export interface ProbabilityFactor {
   type: 'add' | 'subtract' | 'base';
   label: string;
   value: number;
@@ -33,7 +33,7 @@ interface ProbabilityFactor {
   isApplied: boolean;
 }
 
-interface SalesScript {
+export interface SalesScript {
   id: string;
   title: string;
   body: string;
@@ -41,7 +41,20 @@ interface SalesScript {
   technique: string;
 }
 
-interface ParsedTeachingAnalysis {
+export interface StudentProfile {
+  lifestyle?: { text: string; timestamp?: string }[];
+  environment?: { text: string; timestamp?: string }[];
+  purchaseDecision?: { text: string; timestamp?: string }[];
+  pushNote?: string;
+  voiceStatus?: { text: string; timestamp?: string };
+  pastAttempts?: { text: string; timestamp?: string }[];
+  dreamVision?: { text: string; timestamp?: string };
+  motivation?: { text: string; timestamp?: string };
+  useCase?: { text: string; timestamp?: string };
+  needsToAsk?: string[];
+}
+
+export interface ParsedTeachingAnalysis {
   painPoints: PainPoint[];
   teachingMetrics: ScoreMetric[];       // 教學品質評估 /25
   teachingTotalScore: number;           // 教學品質總分
@@ -55,6 +68,7 @@ interface ParsedTeachingAnalysis {
   probabilityReasoning?: string;
   salesScripts: SalesScript[];
   studentType?: string;
+  studentProfile?: StudentProfile;
 }
 
 /**
@@ -391,6 +405,124 @@ function parseProbability(sectionBody: string, sectionTitle?: string): {
 }
 
 /**
+ * Parse student profile section
+ */
+function parseStudentProfile(sectionBody: string): StudentProfile {
+  const profile: StudentProfile = {};
+
+  // Extract lifestyle (生活型態與時間結構)
+  const lifestyleMatch = sectionBody.match(/\*\*生活型態與時間結構[：:]\*\*\s*([\s\S]*?)(?=\n\s*\*\*練習環境|$)/);
+  if (lifestyleMatch) {
+    const lifestyleContent = lifestyleMatch[1].trim();
+    const items: { text: string; timestamp?: string }[] = [];
+
+    // Extract bullet points and timestamps
+    const bulletRegex = /[-–—]\s*([^\n]+)/g;
+    let match;
+    while ((match = bulletRegex.exec(lifestyleContent)) !== null) {
+      const { text, timestamp } = extractTextWithTimestamp(match[1]);
+      if (text) items.push({ text, timestamp });
+    }
+    if (items.length > 0) profile.lifestyle = items;
+  }
+
+  // Extract environment (練習環境與限制)
+  const envMatch = sectionBody.match(/\*\*練習環境與限制[：:]\*\*\s*([\s\S]*?)(?=\n\s*\*\*購課決策|$)/);
+  if (envMatch) {
+    const envContent = envMatch[1].trim();
+    const items: { text: string; timestamp?: string }[] = [];
+
+    const bulletRegex = /[-–—]\s*([^\n]+)/g;
+    let match;
+    while ((match = bulletRegex.exec(envContent)) !== null) {
+      const { text, timestamp } = extractTextWithTimestamp(match[1]);
+      if (text) items.push({ text, timestamp });
+    }
+    if (items.length > 0) profile.environment = items;
+  }
+
+  // Extract purchase decision (購課決策與付費指標)
+  const purchaseMatch = sectionBody.match(/\*\*購課決策與付費指標[：:]\*\*\s*([\s\S]*?)(?=\n\s*\*\*推斷說明|$)/);
+  if (purchaseMatch) {
+    const purchaseContent = purchaseMatch[1].trim();
+    const items: { text: string; timestamp?: string }[] = [];
+
+    const bulletRegex = /[-–—]\s*([^\n]+)/g;
+    let match;
+    while ((match = bulletRegex.exec(purchaseContent)) !== null) {
+      const { text, timestamp } = extractTextWithTimestamp(match[1]);
+      if (text) items.push({ text, timestamp });
+    }
+    if (items.length > 0) profile.purchaseDecision = items;
+  }
+
+  // Extract push note (推斷說明)
+  const pushNoteMatch = sectionBody.match(/\*\*推斷說明[：:]\*\*\s*([^\n]+)/);
+  if (pushNoteMatch) {
+    profile.pushNote = pushNoteMatch[1].trim();
+  }
+
+  // Extract voice status (🎤 聲音現況)
+  const voiceMatch = sectionBody.match(/[-–—]\s*\*\*🎤\s*聲音現況[^*]*\*\*\s*([^\n]+)/);
+  if (voiceMatch) {
+    const { text, timestamp } = extractTextWithTimestamp(voiceMatch[1]);
+    profile.voiceStatus = { text, timestamp };
+  }
+
+  // Extract past attempts (📚 過去嘗試過的方法或課程)
+  const pastAttemptsMatch = sectionBody.match(/[-–—]\s*\*\*📚\s*過去嘗試[^*]*\*\*\s*([\s\S]*?)(?=\n[-–—]\s*\*\*|需補問|$)/);
+  if (pastAttemptsMatch) {
+    const content = pastAttemptsMatch[1].trim();
+    const items: { text: string; timestamp?: string }[] = [];
+
+    const bulletRegex = /[-–—]\s*([^\n]+)/g;
+    let match;
+    while ((match = bulletRegex.exec(content)) !== null) {
+      const { text, timestamp } = extractTextWithTimestamp(match[1]);
+      if (text && !text.includes('需補問')) items.push({ text, timestamp });
+    }
+    if (items.length > 0) profile.pastAttempts = items;
+  }
+
+  // Extract dream vision (🏁 想成為什麼樣的自己)
+  const dreamMatch = sectionBody.match(/[-–—]\s*\*\*🏁\s*想成為[^*]*\*\*\s*([^\n]+)/);
+  if (dreamMatch && !dreamMatch[1].includes('需補問')) {
+    const { text, timestamp } = extractTextWithTimestamp(dreamMatch[1]);
+    profile.dreamVision = { text, timestamp };
+  }
+
+  // Extract motivation (🎯 為什麼現在特別想學)
+  const motivationMatch = sectionBody.match(/[-–—]\s*\*\*🎯\s*為什麼現在[^*]*\*\*\s*([^\n]+)/);
+  if (motivationMatch && !motivationMatch[1].includes('需補問')) {
+    const { text, timestamp } = extractTextWithTimestamp(motivationMatch[1]);
+    profile.motivation = { text, timestamp };
+  }
+
+  // Extract use case (🎬 想把聲音用在哪裡)
+  const useCaseMatch = sectionBody.match(/[-–—]\s*\*\*🎬\s*想把聲音用在[^*]*\*\*\s*([^\n]+)/);
+  if (useCaseMatch && !useCaseMatch[1].includes('需補問')) {
+    const { text, timestamp } = extractTextWithTimestamp(useCaseMatch[1]);
+    profile.useCase = { text, timestamp };
+  }
+
+  // Extract needs to ask (📝 仍需補問)
+  const needsMatch = sectionBody.match(/[-–—]\s*\*\*📝\s*仍需補問\*\*\s*([\s\S]*?)(?=\n---|\n#|$)/);
+  if (needsMatch) {
+    const needsContent = needsMatch[1].trim();
+    const items: string[] = [];
+    const bulletRegex = /[-–—]\s*([^\n]+)/g;
+    let match;
+    while ((match = bulletRegex.exec(needsContent)) !== null) {
+      const text = match[1].trim();
+      if (text) items.push(text);
+    }
+    if (items.length > 0) profile.needsToAsk = items;
+  }
+
+  return profile;
+}
+
+/**
  * Parse sales scripts section
  */
 function parseSalesScripts(sectionBody: string): SalesScript[] {
@@ -487,6 +619,14 @@ export function parseTeachingAnalysisMarkdown(markdown: string): ParsedTeachingA
       ? parseSalesScripts(sections[scriptsTitle])
       : [];
 
+    // Find student profile section
+    const profileTitle = Object.keys(sections).find(
+      (title) => title.includes('學員狀況掌握') || title.includes('🧑‍🏫')
+    );
+    const studentProfile = profileTitle
+      ? parseStudentProfile(sections[profileTitle])
+      : undefined;
+
     return {
       painPoints,
       teachingMetrics,
@@ -500,6 +640,7 @@ export function parseTeachingAnalysisMarkdown(markdown: string): ParsedTeachingA
       probabilityFactors,
       probabilityReasoning,
       salesScripts,
+      studentProfile,
     };
   } catch (error) {
     console.error('Error parsing teaching analysis markdown:', error);

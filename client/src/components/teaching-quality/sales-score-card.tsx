@@ -5,6 +5,12 @@
  * 推課評分卡片組件（彈出視窗顯示 5 大指標）
  */
 
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
@@ -42,6 +48,7 @@ interface SalesScoreCardProps {
   metrics: ScoreMetric[];
   summary?: string;
   onTimestampClick?: (timestamp: string) => void;
+  onClick?: () => void;
 }
 
 const METRIC_ICONS = {
@@ -157,6 +164,7 @@ export function SalesScoreCard({
   metrics,
   summary,
   onTimestampClick,
+  onClick,
 }: SalesScoreCardProps) {
   const [isOpen, setIsOpen] = useState(false);
   const percentage = (totalScore / maxTotalScore) * 100;
@@ -164,38 +172,59 @@ export function SalesScoreCard({
   const scoreLabel = getScoreLabel(totalScore, maxTotalScore);
 
   return (
-    <div className="rounded-lg border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-white p-5 shadow-md">
-      {/* Header */}
-      <div className="mb-3 flex items-center justify-between">
-        <div className="text-xs font-semibold uppercase tracking-wide text-purple-700">
+    <Card className="border-2 border-purple-500/30 bg-gradient-to-br from-purple-50 to-white">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <Target className="h-5 w-5 text-purple-600" />
           推課評分
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Total Score Display */}
+        <div className="flex items-baseline justify-between">
+          <div>
+            <div className="text-4xl font-bold text-purple-600">
+              {totalScore}
+              <span className="text-2xl text-muted-foreground">/{maxTotalScore}</span>
+            </div>
+            <Badge className="mt-2" variant="secondary">
+              {scoreLabel}
+            </Badge>
+          </div>
         </div>
-        <Badge variant="outline" className={cn('text-xs', scoreColor)}>
-          {scoreLabel}
-        </Badge>
-      </div>
 
-      {/* Score Display */}
-      <div className="mb-3 flex items-baseline gap-2">
-        <span className="text-5xl font-bold text-purple-600">{totalScore}</span>
-        <span className="text-lg text-muted-foreground">/{maxTotalScore}</span>
-      </div>
-
-      {/* Progress Bar */}
-      <Progress value={percentage} className="mb-4 h-3" />
+        {/* Progress Bar */}
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm text-muted-foreground">
+            <span>推課策略</span>
+            <span>{percentage.toFixed(0)}%</span>
+          </div>
+          <Progress value={percentage} className="h-2" />
+        </div>
 
       {/* Dialog Trigger Button */}
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full gap-2 text-sm font-medium text-purple-700 hover:bg-purple-100"
-          >
-            <BarChart3 className="h-4 w-4" />
-            <span>查看 5 大指標詳情</span>
-          </Button>
-        </DialogTrigger>
+      {onClick ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full gap-2 text-sm font-medium text-purple-700 hover:bg-purple-100"
+          onClick={onClick}
+        >
+          <BarChart3 className="h-4 w-4" />
+          <span>查看 5 大指標詳情</span>
+        </Button>
+      ) : (
+        <Dialog open={isOpen} onOpenChange={setIsOpen}>
+          <DialogTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full gap-2 text-sm font-medium text-purple-700 hover:bg-purple-100"
+            >
+              <BarChart3 className="h-4 w-4" />
+              <span>查看 5 大指標詳情</span>
+            </Button>
+          </DialogTrigger>
 
         {/* Dialog Content (Popup) */}
         <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
@@ -309,6 +338,8 @@ export function SalesScoreCard({
           )}
         </DialogContent>
       </Dialog>
-    </div>
+      )}
+      </CardContent>
+    </Card>
   );
 }

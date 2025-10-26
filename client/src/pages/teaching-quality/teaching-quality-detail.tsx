@@ -18,12 +18,20 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import {
   ArrowLeft,
   CheckCircle2,
   ClipboardCopy,
   Copy,
   FileText,
   MessageSquare,
+  Info,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 import type { TeachingQualityAnalysisDetail } from '@/types/teaching-quality';
@@ -38,6 +46,8 @@ import { PainPointsSection } from '@/components/teaching-quality/pain-points-sec
 import { SalesScriptsSection } from '@/components/teaching-quality/sales-scripts-section';
 import { SalesScoreCard } from '@/components/teaching-quality/sales-score-card';
 import { TeachingScoreCard } from '@/components/teaching-quality/teaching-score-card';
+import { TeachingScoresDetailSection } from '@/components/teaching-quality/teaching-scores-detail-section';
+import { SalesScoresDetailSection } from '@/components/teaching-quality/sales-scores-detail-section';
 import { FloatingAIChat } from '@/components/teaching-quality/floating-ai-chat';
 import { parseTeachingAnalysisMarkdown } from '@/lib/parse-teaching-analysis';
 import { calculateOverallScore, getGradeColor } from '@/lib/calculate-overall-score';
@@ -439,6 +449,12 @@ export default function TeachingQualityDetail() {
   const [showTranscript, setShowTranscript] = useState(false);
   const [highlightedTimestamp, setHighlightedTimestamp] = useState<string | null>(null);
 
+  // 收合狀態控制（預設：學員檔案卡、推課話術總結 展開；教學品質、成交策略 收合）
+  const [showStudentProfile, setShowStudentProfile] = useState(true);
+  const [showTeachingScoresDetail, setShowTeachingScoresDetail] = useState(false);
+  const [showSalesScoresDetail, setShowSalesScoresDetail] = useState(false);
+  const [showSalesScripts, setShowSalesScripts] = useState(true);
+
   useEffect(() => {
     if (analysisId) {
       void fetchAnalysisDetail();
@@ -621,9 +637,64 @@ export default function TeachingQualityDetail() {
                   <div className="flex items-center gap-3">
                     <div className="text-right">
                       <div className="text-sm text-muted-foreground">整體評分</div>
-                      <div className="text-3xl font-bold text-foreground">
-                        {overallScore.score}
-                        <span className="text-lg text-muted-foreground">/100</span>
+                      <div className="flex items-center gap-2">
+                        <div className="text-3xl font-bold text-foreground">
+                          {overallScore.score}
+                          <span className="text-lg text-muted-foreground">/100</span>
+                        </div>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                              <Info className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-80">
+                            <div className="space-y-3">
+                              <div className="font-semibold text-sm border-b pb-2">
+                                評分細項（總分 {overallScore.score}/100）
+                              </div>
+
+                              {/* 教學貢獻 */}
+                              <div className="space-y-1">
+                                <div className="flex justify-between items-center text-sm">
+                                  <span className="text-muted-foreground">📚 教學貢獻 (30%)</span>
+                                  <span className="font-bold text-blue-600">
+                                    {overallScore.breakdown.teaching.toFixed(1)}/30
+                                  </span>
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  來源：教學評分 {newParsedAnalysis.teachingTotalScore}/25
+                                </div>
+                              </div>
+
+                              {/* 推課貢獻 */}
+                              <div className="space-y-1">
+                                <div className="flex justify-between items-center text-sm">
+                                  <span className="text-muted-foreground">🎯 推課貢獻 (30%)</span>
+                                  <span className="font-bold text-purple-600">
+                                    {overallScore.breakdown.sales.toFixed(1)}/30
+                                  </span>
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  來源：推課評分 {newParsedAnalysis.salesTotalScore}/25
+                                </div>
+                              </div>
+
+                              {/* 成交貢獻 */}
+                              <div className="space-y-1">
+                                <div className="flex justify-between items-center text-sm">
+                                  <span className="text-muted-foreground">💰 成交貢獻 (40%)</span>
+                                  <span className="font-bold text-orange-600">
+                                    {overallScore.breakdown.conversion.toFixed(1)}/40
+                                  </span>
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  來源：AI 預估成交率 {newParsedAnalysis.probability}%
+                                </div>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                       </div>
                     </div>
                     <Badge className={cn("h-12 px-4 text-lg font-bold", getGradeColor(overallScore.grade))}>
@@ -654,6 +725,10 @@ export default function TeachingQualityDetail() {
                   totalScore={newParsedAnalysis.teachingTotalScore}
                   maxScore={newParsedAnalysis.teachingMaxScore}
                   onTimestampClick={handleTimestampClick}
+                  onClick={() => {
+                    const element = document.getElementById('teaching-scores-detail');
+                    element?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
                 />
               ) : (
                 <div className="rounded-lg border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5 shadow-md">
@@ -674,6 +749,10 @@ export default function TeachingQualityDetail() {
                   metrics={newParsedAnalysis.salesMetrics}
                   summary={newParsedAnalysis.scoreSummary}
                   onTimestampClick={handleTimestampClick}
+                  onClick={() => {
+                    const element = document.getElementById('sales-scores-detail');
+                    element?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
                 />
               ) : (
                 <div className="rounded-lg border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-white p-5 shadow-md">
@@ -686,57 +765,69 @@ export default function TeachingQualityDetail() {
                 </div>
               )}
 
-              {/* 3. AI 預估成交率 */}
-              <div className="rounded-lg border-2 border-orange-200 bg-gradient-to-br from-orange-50 to-white p-5 shadow-md">
-                <div className="text-xs font-semibold uppercase tracking-wide text-orange-700">
-                  AI 預估成交率
-                </div>
-                <div className="mt-3 flex items-baseline gap-2">
-                  <span className="text-5xl font-bold text-orange-600">
-                    {probabilityValue !== undefined ? probabilityValue : '—'}
-                  </span>
-                  {probabilityValue !== undefined && (
-                    <span className="text-lg text-muted-foreground">%</span>
-                  )}
-                </div>
-                {probabilityValue !== undefined && (
-                  <div className="mt-2 text-sm font-semibold text-orange-800">
-                    等級：{probabilityValue >= 80 ? '極高' : probabilityValue >= 60 ? '高' : probabilityValue >= 40 ? '中等' : probabilityValue >= 20 ? '偏低' : '低'}
-                  </div>
-                )}
-              </div>
-
-              {/* 4. 課程資訊 */}
-              <div className="rounded-lg border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5 shadow-md">
-                <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
-                  課程資訊
-                </div>
-                <div className="mt-3 space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">方案：</span>
-                    <span className="font-medium">{analysis.purchased_package || '待確認'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">剩餘：</span>
-                    <span className="font-medium">
-                      {analysis.remaining_lessons !== null && analysis.remaining_lessons !== undefined
-                        ? `${analysis.remaining_lessons} 堂`
-                        : '—'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">轉換：</span>
-                    <Badge
-                      className={cn(
-                        getConversionStatusColor(analysis.conversion_status),
-                        'px-2 py-0.5 text-xs'
+              {/* 3. AI 預估成交率（統一風格） */}
+              <Card className="border-2 border-orange-500/30 bg-gradient-to-br from-orange-50 to-white">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <span className="text-orange-600">📊</span>
+                    預估成交率
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-baseline justify-between">
+                    <div>
+                      <div className="text-4xl font-bold text-orange-600">
+                        {probabilityValue !== undefined ? probabilityValue : '—'}
+                        {probabilityValue !== undefined && (
+                          <span className="text-2xl text-muted-foreground">%</span>
+                        )}
+                      </div>
+                      {probabilityValue !== undefined && (
+                        <Badge className="mt-2" variant="secondary">
+                          {probabilityValue >= 80 ? '極高' : probabilityValue >= 60 ? '高' : probabilityValue >= 40 ? '中等' : probabilityValue >= 20 ? '偏低' : '低'}
+                        </Badge>
                       )}
-                    >
-                      {getConversionStatusLabel(analysis.conversion_status)}
-                    </Badge>
+                    </div>
                   </div>
-                </div>
-              </div>
+                </CardContent>
+              </Card>
+
+              {/* 4. 課程資訊（統一風格） */}
+              <Card className="border-2 border-green-500/30 bg-gradient-to-br from-green-50 to-white">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <span className="text-green-600">📚</span>
+                    課程資訊
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-3">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">方案：</span>
+                      <span className="font-semibold">{analysis.purchased_package || '待確認'}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">剩餘：</span>
+                      <span className="font-semibold">
+                        {analysis.remaining_lessons !== null && analysis.remaining_lessons !== undefined
+                          ? `${analysis.remaining_lessons} 堂`
+                          : '—'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">轉換：</span>
+                      <Badge
+                        className={cn(
+                          getConversionStatusColor(analysis.conversion_status),
+                          'px-2 py-0.5 text-xs'
+                        )}
+                      >
+                        {getConversionStatusLabel(analysis.conversion_status)}
+                      </Badge>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </CardContent>
         </Card>
@@ -783,83 +874,111 @@ export default function TeachingQualityDetail() {
           <>
 
 
-            {/* 學員檔案卡 - 完整結構化資訊 */}
-            {parsedAnalysis?.studentProfile && (
+            {/* 學員檔案卡 - 完整結構化資訊 (NEW FORMAT) */}
+            {newParsedAnalysis?.studentProfile && (
               <Card className="shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                  <div className="space-y-1.5">
                     <CardTitle className="text-lg font-semibold text-foreground">
                       👤 學員檔案卡（快速掌握對象）
                     </CardTitle>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      完整的學員背景、痛點、動機與夢想分析
+                    <p className="text-sm text-muted-foreground">
+                      從對話中推斷的生活型態、練習環境、購課決策與學習動機
                     </p>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const profile = parsedAnalysis.studentProfile;
-                      if (profile) {
-                        const text = `# 學員檔案 - ${analysis.student_name}\n\n## 基本資料\n${profile.basicInfo.ageGenderOccupation || '待補問'}\n決策權：${profile.basicInfo.decisionMaker?.text || '未提供'}\n付費能力：${profile.basicInfo.paymentCapacity?.text || '未提供'}\n\n## 聲音現況\n${profile.voiceStatus?.text || '未提供'}\n\n## 過去嘗試\n${profile.pastAttempts?.map(a => `- ${a.text}`).join('\n') || '未提供'}\n\n## 現在最卡\n${profile.currentPainPoints?.map(p => `- ${p.text}`).join('\n') || '未提供'}\n\n## 夢想目標\n${profile.dreamVision?.text || '未提供'}\n\n## 當下動機\n${profile.motivation?.text || '未提供'}\n\n## 應用場景\n${profile.useCase?.text || '未提供'}`;
-                        copyToClipboard(text, 'profile');
-                      }
-                    }}
-                    className="gap-2"
-                  >
-                    {copiedProfile ? (
-                      <>
-                        <CheckCircle2 className="h-4 w-4 text-green-600" />
-                        已複製
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="h-4 w-4" />
-                        複製檔案
-                      </>
-                    )}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const profile = newParsedAnalysis.studentProfile;
+                        if (profile) {
+                          const text = `# 學員檔案 - ${analysis.student_name}\n\n## 基本資料\n${profile.lifestyle?.map(l => `- ${l.text}`).join('\n') || '未提供'}\n\n## 練習環境\n${profile.environment?.map(e => `- ${e.text}`).join('\n') || '未提供'}\n\n## 購課決策\n${profile.purchaseDecision?.map(p => `- ${p.text}`).join('\n') || '未提供'}\n${profile.pushNote ? `\n推斷說明：${profile.pushNote}` : ''}\n\n## 聲音現況\n${profile.voiceStatus?.text || '未提供'}\n\n## 過去嘗試\n${profile.pastAttempts?.map(a => `- ${a.text}`).join('\n') || '未提供'}\n\n## 夢想目標\n${profile.dreamVision?.text || '未提供'}\n\n## 當下動機\n${profile.motivation?.text || '未提供'}\n\n## 應用場景\n${profile.useCase?.text || '未提供'}`;
+                          copyToClipboard(text, 'profile');
+                        }
+                      }}
+                      className="gap-2"
+                    >
+                      {copiedProfile ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4 text-green-600" />
+                          已複製
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-4 w-4" />
+                          複製檔案
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowStudentProfile(!showStudentProfile)}
+                    >
+                      {showStudentProfile ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </Button>
+                  </div>
                 </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* 基本資料 */}
+                {showStudentProfile && (
+                  <CardContent className="space-y-6">
+                  {/* 基本資料 (生活型態、練習環境、購課決策) */}
                   <div className="rounded-lg border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5">
                     <h3 className="mb-4 flex items-center gap-2 text-base font-bold text-foreground">
-                      <span>📇</span>基本資料
+                      <span>📇</span>基本資料（從對話中推斷生活型態）
                     </h3>
-                    <div className="space-y-3 text-sm">
-                      <div>
-                        <span className="font-medium text-muted-foreground">年齡 / 性別 / 職業：</span>
-                        <div className={cn(
-                          "mt-1 font-semibold",
-                          parsedAnalysis.studentProfile.basicInfo.ageGenderOccupation?.includes('待補問') || parsedAnalysis.studentProfile.basicInfo.ageGenderOccupation?.includes('未明確')
-                            ? "text-yellow-600"
-                            : "text-foreground"
-                        )}>
-                          {parsedAnalysis.studentProfile.basicInfo.ageGenderOccupation || '待補問'}
-                        </div>
-                      </div>
-                      {parsedAnalysis.studentProfile.basicInfo.decisionMaker && (
+                    <div className="space-y-4 text-sm">
+                      {newParsedAnalysis.studentProfile.lifestyle && newParsedAnalysis.studentProfile.lifestyle.length > 0 && (
                         <div>
-                          <span className="font-medium text-muted-foreground">🔑 決策權：</span>
-                          <div className="mt-1 font-semibold text-foreground">
-                            <InfoWithTimestamp
-                              text={parsedAnalysis.studentProfile.basicInfo.decisionMaker.text}
-                              timestamp={parsedAnalysis.studentProfile.basicInfo.decisionMaker.timestamp}
-                              onTimestampClick={handleTimestampClick}
-                            />
-                          </div>
+                          <span className="font-semibold text-blue-700">生活型態與時間結構：</span>
+                          <ul className="mt-2 space-y-1.5">
+                            {newParsedAnalysis.studentProfile.lifestyle.map((item, index) => (
+                              <li key={index} className="text-foreground">
+                                <InfoWithTimestamp
+                                  text={`• ${item.text}`}
+                                  timestamp={item.timestamp}
+                                  onTimestampClick={handleTimestampClick}
+                                />
+                              </li>
+                            ))}
+                          </ul>
                         </div>
                       )}
-                      {parsedAnalysis.studentProfile.basicInfo.paymentCapacity && (
+                      {newParsedAnalysis.studentProfile.environment && newParsedAnalysis.studentProfile.environment.length > 0 && (
                         <div>
-                          <span className="font-medium text-muted-foreground">💰 付費能力：</span>
-                          <div className="mt-1 font-semibold text-foreground">
-                            <InfoWithTimestamp
-                              text={parsedAnalysis.studentProfile.basicInfo.paymentCapacity.text}
-                              timestamp={parsedAnalysis.studentProfile.basicInfo.paymentCapacity.timestamp}
-                              onTimestampClick={handleTimestampClick}
-                            />
-                          </div>
+                          <span className="font-semibold text-blue-700">練習環境與限制：</span>
+                          <ul className="mt-2 space-y-1.5">
+                            {newParsedAnalysis.studentProfile.environment.map((item, index) => (
+                              <li key={index} className="text-foreground">
+                                <InfoWithTimestamp
+                                  text={`• ${item.text}`}
+                                  timestamp={item.timestamp}
+                                  onTimestampClick={handleTimestampClick}
+                                />
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {newParsedAnalysis.studentProfile.purchaseDecision && newParsedAnalysis.studentProfile.purchaseDecision.length > 0 && (
+                        <div>
+                          <span className="font-semibold text-blue-700">購課決策與付費指標：</span>
+                          <ul className="mt-2 space-y-1.5">
+                            {newParsedAnalysis.studentProfile.purchaseDecision.map((item, index) => (
+                              <li key={index} className="text-foreground">
+                                <InfoWithTimestamp
+                                  text={`• ${item.text}`}
+                                  timestamp={item.timestamp}
+                                  onTimestampClick={handleTimestampClick}
+                                />
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {newParsedAnalysis.studentProfile.pushNote && (
+                        <div className="mt-3 rounded-md bg-blue-100/50 p-3 text-sm italic text-blue-900">
+                          💡 推斷說明：{newParsedAnalysis.studentProfile.pushNote}
                         </div>
                       )}
                     </div>
@@ -871,39 +990,23 @@ export default function TeachingQualityDetail() {
                       <span>⛔️</span>痛點與問題
                     </h3>
                     <div className="space-y-4 text-sm">
-                      {parsedAnalysis.studentProfile.voiceStatus && (
+                      {newParsedAnalysis.studentProfile.voiceStatus && (
                         <div>
                           <span className="font-medium text-red-700">🎤 聲音現況：</span>
                           <div className="mt-1 font-semibold text-foreground">
                             <InfoWithTimestamp
-                              text={parsedAnalysis.studentProfile.voiceStatus.text}
-                              timestamp={parsedAnalysis.studentProfile.voiceStatus.timestamp}
+                              text={newParsedAnalysis.studentProfile.voiceStatus.text}
+                              timestamp={newParsedAnalysis.studentProfile.voiceStatus.timestamp}
                               onTimestampClick={handleTimestampClick}
                             />
                           </div>
                         </div>
                       )}
-                      {parsedAnalysis.studentProfile.currentPainPoints && parsedAnalysis.studentProfile.currentPainPoints.length > 0 && (
-                        <div>
-                          <span className="font-medium text-red-700">❌ 現在最卡：</span>
-                          <ul className="mt-2 space-y-2">
-                            {parsedAnalysis.studentProfile.currentPainPoints.map((pain, index) => (
-                              <li key={index} className="font-semibold text-foreground">
-                                <InfoWithTimestamp
-                                  text={`• ${pain.text}`}
-                                  timestamp={pain.timestamp}
-                                  onTimestampClick={handleTimestampClick}
-                                />
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      {parsedAnalysis.studentProfile.pastAttempts && parsedAnalysis.studentProfile.pastAttempts.length > 0 && (
+                      {newParsedAnalysis.studentProfile.pastAttempts && newParsedAnalysis.studentProfile.pastAttempts.length > 0 && (
                         <div>
                           <span className="font-medium text-muted-foreground">📚 過去嘗試：</span>
                           <ul className="mt-2 space-y-2">
-                            {parsedAnalysis.studentProfile.pastAttempts.map((attempt, index) => (
+                            {newParsedAnalysis.studentProfile.pastAttempts.map((attempt, index) => (
                               <li key={index} className="font-semibold text-foreground">
                                 <InfoWithTimestamp
                                   text={`• ${attempt.text}`}
@@ -924,39 +1027,39 @@ export default function TeachingQualityDetail() {
                       <span>🏁</span>夢想與動機
                     </h3>
                     <div className="space-y-4 text-sm">
-                      {parsedAnalysis.studentProfile.dreamVision && (
+                      {newParsedAnalysis.studentProfile.dreamVision && (
                         <div>
-                          <span className="font-medium text-purple-700">🌟 目標畫面：</span>
+                          <span className="font-medium text-purple-700">🌟 想成為什麼樣的自己：</span>
                           <div className="mt-2 rounded-md bg-white p-3 shadow-sm">
                             <div className="font-semibold italic text-foreground">
                               <InfoWithTimestamp
-                                text={`"${parsedAnalysis.studentProfile.dreamVision.text}"`}
-                                timestamp={parsedAnalysis.studentProfile.dreamVision.timestamp}
+                                text={`"${newParsedAnalysis.studentProfile.dreamVision.text}"`}
+                                timestamp={newParsedAnalysis.studentProfile.dreamVision.timestamp}
                                 onTimestampClick={handleTimestampClick}
                               />
                             </div>
                           </div>
                         </div>
                       )}
-                      {parsedAnalysis.studentProfile.motivation && (
+                      {newParsedAnalysis.studentProfile.motivation && (
                         <div>
-                          <span className="font-medium text-purple-700">💡 當下動機：</span>
+                          <span className="font-medium text-purple-700">💡 為什麼現在特別想學：</span>
                           <div className="mt-1 font-semibold text-foreground">
                             <InfoWithTimestamp
-                              text={parsedAnalysis.studentProfile.motivation.text}
-                              timestamp={parsedAnalysis.studentProfile.motivation.timestamp}
+                              text={newParsedAnalysis.studentProfile.motivation.text}
+                              timestamp={newParsedAnalysis.studentProfile.motivation.timestamp}
                               onTimestampClick={handleTimestampClick}
                             />
                           </div>
                         </div>
                       )}
-                      {parsedAnalysis.studentProfile.useCase && (
+                      {newParsedAnalysis.studentProfile.useCase && (
                         <div>
-                          <span className="font-medium text-purple-700">🎬 應用場景：</span>
+                          <span className="font-medium text-purple-700">🎬 想把聲音用在哪裡：</span>
                           <div className="mt-1 font-semibold text-foreground">
                             <InfoWithTimestamp
-                              text={parsedAnalysis.studentProfile.useCase.text}
-                              timestamp={parsedAnalysis.studentProfile.useCase.timestamp}
+                              text={newParsedAnalysis.studentProfile.useCase.text}
+                              timestamp={newParsedAnalysis.studentProfile.useCase.timestamp}
                               onTimestampClick={handleTimestampClick}
                             />
                           </div>
@@ -966,19 +1069,20 @@ export default function TeachingQualityDetail() {
                   </div>
 
                   {/* 仍需補問 */}
-                  {parsedAnalysis.studentProfile.needsToAsk && parsedAnalysis.studentProfile.needsToAsk.length > 0 && (
+                  {newParsedAnalysis.studentProfile.needsToAsk && newParsedAnalysis.studentProfile.needsToAsk.length > 0 && (
                     <div className="rounded-lg border-2 border-yellow-300 bg-yellow-50 p-4">
                       <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-yellow-800">
                         <span>⚠️</span>還需要補問的資訊：
                       </h3>
                       <ul className="list-inside list-disc space-y-1 text-sm text-yellow-700">
-                        {parsedAnalysis.studentProfile.needsToAsk.map((item, index) => (
+                        {newParsedAnalysis.studentProfile.needsToAsk.map((item, index) => (
                           <li key={index} className="font-medium">{item}</li>
                         ))}
                       </ul>
                     </div>
                   )}
                 </CardContent>
+                )}
               </Card>
             )}
 
@@ -986,6 +1090,26 @@ export default function TeachingQualityDetail() {
             {newParsedAnalysis && newParsedAnalysis.painPoints && newParsedAnalysis.painPoints.length > 0 && (
               <PainPointsSection
                 painPoints={newParsedAnalysis.painPoints}
+                onTimestampClick={handleTimestampClick}
+              />
+            )}
+
+            {/* 📚 教學品質評估 - 5 大指標詳情 */}
+            {newParsedAnalysis && newParsedAnalysis.teachingMetrics && newParsedAnalysis.teachingMetrics.length > 0 && (
+              <TeachingScoresDetailSection
+                metrics={newParsedAnalysis.teachingMetrics}
+                totalScore={newParsedAnalysis.teachingTotalScore}
+                maxScore={newParsedAnalysis.teachingMaxScore}
+                onTimestampClick={handleTimestampClick}
+              />
+            )}
+
+            {/* 🎯 成交策略評估 - 5 大指標詳情 */}
+            {newParsedAnalysis && newParsedAnalysis.salesMetrics && newParsedAnalysis.salesMetrics.length > 0 && (
+              <SalesScoresDetailSection
+                metrics={newParsedAnalysis.salesMetrics}
+                totalScore={newParsedAnalysis.salesTotalScore}
+                maxScore={newParsedAnalysis.salesMaxScore}
                 onTimestampClick={handleTimestampClick}
               />
             )}
