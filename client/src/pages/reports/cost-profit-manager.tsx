@@ -41,6 +41,7 @@ import {
   ArrowUp,
   ArrowDown,
   AlertTriangle,
+  Calculator,
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -175,6 +176,7 @@ export default function CostProfitManagerPage() {
   const [sortField, setSortField] = useState<SortField>('none');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [showDuplicates, setShowDuplicates] = useState(false);
+  const [taxRate, setTaxRate] = useState<number>(5); // 營業稅率（預設 5%）
   const [columnWidths, setColumnWidths] = useState({
     category: 150,
     item: 200,
@@ -345,6 +347,56 @@ export default function CostProfitManagerPage() {
         updatedAt: now,
       },
     ]);
+  };
+
+  const handleApplyTax = () => {
+    const now = new Date().toLocaleString('zh-TW');
+    const taxAmount = totals.businessTax;
+
+    // 檢查是否已經有營業稅項目
+    const existingTaxIndex = rows.findIndex(
+      (row) => row.category.trim() === '稅金費用' && row.item.trim() === '營業稅'
+    );
+
+    if (existingTaxIndex >= 0) {
+      // 更新現有的營業稅項目
+      setRows((prev) => {
+        const updated = [...prev];
+        updated[existingTaxIndex] = {
+          ...updated[existingTaxIndex],
+          amount: taxAmount.toFixed(2),
+          notes: `根據收入 ${formatCurrency(totals.revenue)} × ${taxRate}% 自動計算`,
+          updatedAt: now,
+        };
+        return updated;
+      });
+      toast({
+        title: '已更新營業稅',
+        description: `營業稅金額已更新為 ${formatCurrency(taxAmount)}`,
+      });
+    } else {
+      // 新增營業稅項目
+      setRows((prev) => [
+        ...prev,
+        {
+          category: '稅金費用',
+          item: '營業稅',
+          amount: taxAmount.toFixed(2),
+          notes: `根據收入 ${formatCurrency(totals.revenue)} × ${taxRate}% 自動計算`,
+          isConfirmed: true,
+          source: 'manual',
+          selected: false,
+          tempId: `tax-${Date.now()}`,
+          currency: 'TWD',
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+      toast({
+        title: '已套用營業稅',
+        description: `已新增營業稅項目：${formatCurrency(taxAmount)}`,
+      });
+    }
   };
 
   const handleAddRowAfter = (index: number) => {
@@ -624,6 +676,8 @@ export default function CostProfitManagerPage() {
       }
     });
 
+    // 營業稅計算（使用可調整的稅率）
+    const businessTax = revenue * (taxRate / 100);
     const profit = revenue - cost;
     const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
 
@@ -632,8 +686,9 @@ export default function CostProfitManagerPage() {
       cost,
       profit,
       margin,
+      businessTax,
     };
-  }, [rows, exchangeRates]);
+  }, [rows, exchangeRates, taxRate]);
 
   const validationErrors = useMemo(() => {
     const errors: string[] = [];
@@ -771,17 +826,43 @@ export default function CostProfitManagerPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>即時摘要</CardTitle>
-            <CardDescription>
-              金額單位為新台幣（已自動換算外幣）｜匯率：1 USD = {exchangeRates.USD} TWD, 1 RMB = {exchangeRates.RMB} TWD
-            </CardDescription>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <CardTitle>即時摘要</CardTitle>
+                <CardDescription>
+                  金額單位為新台幣（已自動換算外幣）｜匯率：1 USD = {exchangeRates.USD} TWD, 1 RMB = {exchangeRates.RMB} TWD
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-md border border-blue-200">
+                <label htmlFor="tax-rate" className="text-sm font-medium whitespace-nowrap">
+                  營業稅率：
+                </label>
+                <Input
+                  id="tax-rate"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                  value={taxRate}
+                  onChange={(e) => setTaxRate(Number(e.target.value))}
+                  className="w-20 h-8 text-center"
+                />
+                <span className="text-sm">%</span>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
               <div className="rounded-lg border p-4">
                 <div className="text-sm text-muted-foreground">收入總額</div>
                 <div className="text-2xl font-semibold mt-2">
                   {formatCurrency(totals.revenue)}
+                </div>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="text-sm text-muted-foreground">營業稅 ({taxRate}%)</div>
+                <div className="text-2xl font-semibold mt-2 text-orange-600">
+                  {formatCurrency(totals.businessTax)}
                 </div>
               </div>
               <div className="rounded-lg border p-4">
@@ -829,6 +910,15 @@ export default function CostProfitManagerPage() {
                   <Wand2 className="h-4 w-4 mr-2" />
                 )}
                 套用 AI 建議
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleApplyTax}
+                disabled={isLoading || totals.revenue === 0}
+                className="bg-orange-50 border-orange-200 hover:bg-orange-100"
+              >
+                <Calculator className="h-4 w-4 mr-2" />
+                套用營業稅
               </Button>
               <Button variant="outline" onClick={handleAddRow}>
                 <Plus className="h-4 w-4 mr-2" />
