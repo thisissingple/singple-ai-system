@@ -885,7 +885,7 @@ export default function CostProfitManagerPage() {
               </div>
             )}
 
-            <div className="overflow-x-auto">
+            <div className="w-full">
               <Table>
                 <TableHeader>
                   <TableRow>

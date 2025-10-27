@@ -441,6 +441,7 @@ export default function TeachingQualityDetail() {
     useState<TeachingQualityAnalysisDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reanalyzing, setReanalyzing] = useState(false);
 
   const [copiedPlan, setCopiedPlan] = useState(false);
   const [copiedTranscript, setCopiedTranscript] = useState(false);
@@ -476,6 +477,35 @@ export default function TeachingQualityDetail() {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleReanalyze() {
+    if (!analysis?.attendance_id) return;
+
+    const confirmed = window.confirm('確定要重新分析此記錄嗎？這將覆蓋現有的分析結果。');
+    if (!confirmed) return;
+
+    try {
+      setReanalyzing(true);
+      const response = await fetch(`/api/teaching-quality/reanalyze/${analysisId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || '重新分析失敗');
+      }
+
+      // 重新載入分析結果
+      await fetchAnalysisDetail();
+      alert('重新分析完成！');
+    } catch (err) {
+      console.error('Error reanalyzing:', err);
+      alert(err instanceof Error ? err.message : '重新分析失敗');
+    } finally {
+      setReanalyzing(false);
     }
   }
 
@@ -862,9 +892,10 @@ export default function TeachingQualityDetail() {
                     返回列表
                   </Button>
                   <Button
-                    onClick={() => window.location.reload()}
+                    onClick={handleReanalyze}
+                    disabled={reanalyzing}
                   >
-                    重新載入
+                    {reanalyzing ? '分析中...' : '重新分析'}
                   </Button>
                 </div>
               </div>

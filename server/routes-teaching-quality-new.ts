@@ -478,4 +478,99 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // 0.3. Re-analyze existing analysis record
+  app.post('/api/teaching-quality/reanalyze/:analysisId', isAuthenticated, async (req: any, res) => {
+    try {
+      const { analysisId } = req.params;
+      const pool = createPool('session');
+
+      // Get existing analysis record
+      const analysisResult = await pool.query(`
+        SELECT tqa.*, tca.class_transcript
+        FROM teaching_quality_analysis tqa
+        LEFT JOIN trial_class_attendance tca ON tqa.attendance_id = tca.id
+        WHERE tqa.id = $1
+      `, [analysisId]);
+
+      if (analysisResult.rows.length === 0) {
+        await pool.end();
+        return res.status(404).json({ error: 'Analysis record not found' });
+      }
+
+      const existingAnalysis = analysisResult.rows[0];
+
+      // Check if has transcript
+      if (!existingAnalysis.transcript_text && !existingAnalysis.class_transcript) {
+        await pool.end();
+        return res.status(400).json({ error: 'No transcript available for re-analysis' });
+      }
+
+      const transcriptText = existingAnalysis.transcript_text || existingAnalysis.class_transcript;
+
+      // Run AI analysis
+      const analysis = await teachingQualityGPT.analyzeTeachingQuality(
+        transcriptText,
+        existingAnalysis.student_name,
+        existingAnalysis.teacher_name || 'Unknown',
+        existingAnalysis.class_topic
+      );
+
+      // Parse scores from Markdown
+      const parsedScores = parseScoresFromMarkdown(analysis.summary);
+
+      // Update existing analysis record
+      await pool.query(`
+        UPDATE teaching_quality_analysis
+        SET overall_score = $1,
+            teaching_score = $2,
+            sales_score = $3,
+            conversion_probability = $4,
+            strengths = $5,
+            weaknesses = $6,
+            class_summary = $7,
+            suggestions = $8,
+            conversion_suggestions = $9,
+            updated_at = NOW()
+        WHERE id = $10
+      `, [
+        parsedScores.overallScore,
+        parsedScores.teachingScore,
+        parsedScores.salesScore,
+        parsedScores.conversionProbability,
+        JSON.stringify(analysis.strengths),
+        JSON.stringify(analysis.weaknesses),
+        analysis.summary,
+        JSON.stringify(analysis.suggestions),
+        analysis.conversionSuggestions ? JSON.stringify(analysis.conversionSuggestions) : null,
+        analysisId
+      ]);
+
+      // Delete old suggestion logs
+      await pool.query(`
+        DELETE FROM suggestion_execution_log
+        WHERE analysis_id = $1
+      `, [analysisId]);
+
+      // Create new suggestion logs
+      for (let i = 0; i < analysis.suggestions.length; i++) {
+        await insertAndReturn('suggestion_execution_log', {
+          analysis_id: analysisId,
+          suggestion_index: i,
+          suggestion_text: analysis.suggestions[i].suggestion,
+          is_executed: false
+        });
+      }
+
+      await pool.end();
+
+      res.json({
+        success: true,
+        message: 'Re-analysis completed successfully'
+      });
+    } catch (error: any) {
+      console.error('Re-analysis failed:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 }
