@@ -1,11 +1,11 @@
 # 📊 專案進度追蹤文檔
 
-> **最後更新**: 2025-10-25（凌晨）
+> **最後更新**: 2025-10-27
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ Phase 30 完成 - 痛點分析優化 + 推課邏輯重構 + NotebookLM 式知識庫
-> **當前階段**: 銷售導向 AI 分析 + 內心痛點挖掘 + 一對一教練課程推廣
-> **今日進度**: Phase 30 深層痛點分析（目標/社交/情緒/環境層 + 升級推課邏輯 + 儲存知識庫功能）
-> **整體進度**: 99% ███████████████████▓
+> **專案狀態**: ✅ Phase 36 完成 - 成本獲利管理系統增強（營業稅 + 多幣別 + Orange 帳號）
+> **當前階段**: 成本獲利管理最佳化 + 多幣別支援 + 營業稅自動計算
+> **今日進度**: Phase 36 完成表格優化、營業稅功能、多幣別儲存、匯率鎖定、頁面佈局優化、Orange 管理員帳號建立
+> **整體進度**: 99.5% ████████████████████
 
 ---
 
@@ -4433,3 +4433,370 @@ WHERE student_email = $2
 **當前狀態**: Phase 35 完成 - 自動儲存分析報告到學員知識庫 ✅
 **下一階段**: 資料庫瀏覽器新增紀錄功能
 
+
+## 📅 Phase 36: 成本獲利管理系統增強（2025-10-27）
+
+### 🎯 核心需求
+1. 移除表格滾動條
+2. 新增營業稅自動計算功能（5% 收入）
+3. 支援多幣別儲存（TWD/USD/RMB）與匯率鎖定
+4. 優化頁面佈局與按鈕排列
+5. 建立 Orange 管理員帳號
+
+### ✅ 解決方案
+
+#### 1. 移除表格滾動功能
+
+**檔案**: [`table.tsx`](client/src/components/ui/table.tsx)
+
+修改前：
+```tsx
+<div className="relative w-full overflow-auto">
+```
+
+修改後：
+```tsx
+<div className="relative w-full">
+```
+
+#### 2. 營業稅自動計算系統
+
+**檔案**: [`cost-profit-manager.tsx`](client/src/pages/reports/cost-profit-manager.tsx)
+
+**新增狀態**:
+```tsx
+const [taxRate, setTaxRate] = useState<number>(5); // 預設 5%
+```
+
+**更新總計算邏輯** (lines 657-700):
+```tsx
+const totals = useMemo(() => {
+  // ... 收入與成本計算 ...
+  
+  // 營業稅計算（使用可調整的稅率）
+  const businessTax = revenue * (taxRate / 100);
+  const profit = revenue - cost;
+  const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+
+  return { revenue, cost, profit, margin, businessTax };
+}, [rows, exchangeRates, taxRate]);
+```
+
+**新增營業稅套用功能** (lines 351-399):
+- 自動計算營業稅金額
+- 檢查是否已有營業稅項目
+- 存在則更新，不存在則新增
+- 自動生成計算公式備註
+
+**即時摘要顯示** (lines 776-816):
+```tsx
+<div className="rounded-lg border p-4">
+  <div className="text-sm text-muted-foreground">營業稅 ({taxRate}%)</div>
+  <div className="text-2xl font-semibold mt-2 text-orange-600">
+    {formatCurrency(totals.businessTax)}
+  </div>
+</div>
+```
+
+#### 3. 多幣別支援與匯率鎖定
+
+**資料庫遷移**: [`026_add_currency_columns_to_cost_profit.sql`](supabase/migrations/026_add_currency_columns_to_cost_profit.sql)
+
+新增欄位：
+- `currency TEXT` - 幣別 (TWD/USD/RMB)
+- `exchange_rate_used DECIMAL(10,4)` - 儲存時的匯率
+- `amount_in_twd DECIMAL(15,2)` - 換算後的 TWD 金額（鎖定值）
+
+**後端更新**: [`cost-profit-service.ts`](server/services/cost-profit-service.ts) (lines 189-233)
+
+更新介面與 SQL：
+```typescript
+records: Array<{
+  category_name: string;
+  item_name: string;
+  amount: number | null;
+  currency?: string;
+  exchange_rate_used?: number | null;
+  amount_in_twd?: number | null;
+  notes?: string | null;
+  is_confirmed?: boolean;
+}>
+
+// SQL INSERT 包含新欄位
+INSERT INTO cost_profit
+  (category_name, item_name, amount, currency, exchange_rate_used, amount_in_twd, notes, month, year, is_confirmed)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+```
+
+**API 路由更新**: [`routes.ts`](server/routes.ts) (lines 4664-4705)
+
+更新 recordSchema：
+```typescript
+const recordSchema = z.object({
+  category_name: z.string().min(1),
+  item_name: z.string().min(1),
+  amount: z.union([z.number(), z.string(), z.null()])
+    .transform((value) => {
+      if (value === null || value === '') return null;
+      const num = Number(value);
+      return Number.isFinite(num) ? num : null;
+    }),
+  currency: z.enum(['TWD', 'USD', 'RMB']).optional().default('TWD'),
+  exchange_rate_used: z.number().optional(),
+  amount_in_twd: z.number().optional(),
+  notes: z.union([z.string(), z.null()]).optional(),
+  is_confirmed: z.coerce.boolean().optional(),
+});
+```
+
+**前端實作**:
+- 每小時從 exchangerate-api.com 獲取最新匯率
+- 儲存時鎖定當下匯率到 exchange_rate_used
+- 計算並儲存 amount_in_twd，確保歷史資料不受匯率波動影響
+- 顯示即時換算金額與使用的匯率
+
+#### 4. 頁面佈局優化
+
+**檔案**: [`cost-profit-manager.tsx`](client/src/pages/reports/cost-profit-manager.tsx) (lines 899-987)
+
+**匯率顯示簡化**:
+```tsx
+<div className="text-xs text-blue-600 font-medium px-3 py-1.5 bg-blue-50 rounded-md whitespace-nowrap">
+  當前匯率：1 USD = {exchangeRates.USD.toFixed(2)} TWD（每小時更新）
+</div>
+```
+
+**按鈕重新排列**:
+```tsx
+<div className="flex flex-wrap items-center gap-2">
+  {/* AI 與稅金功能 */}
+  <Button variant="outline" onClick={handleGenerateAI} size="sm">
+    <Wand2 className="h-4 w-4 mr-2" />
+    套用 AI 建議
+  </Button>
+  <Button variant="outline" onClick={handleApplyTax} size="sm"
+          className="bg-orange-50 border-orange-200 hover:bg-orange-100">
+    <Calculator className="h-4 w-4 mr-2" />
+    套用營業稅
+  </Button>
+  
+  {/* 視覺分隔線 */}
+  <div className="h-4 w-px bg-gray-300"></div>
+  
+  {/* 新增與刪除 */}
+  <Button variant="outline" onClick={handleAddEmptyRow} size="sm">
+    <Plus className="h-4 w-4 mr-2" />
+    新增列
+  </Button>
+  <Button variant="outline" onClick={handleDeleteSelected} size="sm">
+    <Trash2 className="h-4 w-4 mr-2" />
+    刪除選取
+  </Button>
+  
+  <div className="h-4 w-px bg-gray-300"></div>
+  
+  {/* 顯示與篩選 */}
+  <Button variant={showOnlySelected ? 'default' : 'outline'} 
+          onClick={handleToggleSelectedView} size="sm">
+    <Filter className="h-4 w-4 mr-2" />
+    {showOnlySelected ? '顯示全部' : '只顯示已選'}
+  </Button>
+  <Button variant="outline" onClick={handleResetFilters} size="sm">
+    <RefreshCw className="h-4 w-4 mr-2" />
+    重設篩選
+  </Button>
+  
+  {/* 儲存按鈕（右對齊）*/}
+  <Button onClick={handleSaveAll} disabled={isSaving} 
+          className="ml-auto" size="sm">
+    <Save className="h-4 w-4 mr-2" />
+    {isSaving ? '儲存中...' : '儲存全部'}
+  </Button>
+</div>
+```
+
+#### 5. Orange 管理員帳號建立
+
+**密碼 Hash 生成**: [`generate-password-hash.ts`](scripts/generate-password-hash.ts)
+
+```typescript
+import bcrypt from 'bcryptjs';
+
+const password = process.argv[2] || 'Orange@2025';
+const saltRounds = 10;
+
+async function generateHash() {
+  const hash = await bcrypt.hash(password, saltRounds);
+  console.log('密碼:', password);
+  console.log('Hash:', hash);
+}
+```
+
+執行：
+```bash
+npx tsx scripts/generate-password-hash.ts orange@thisissingple.com
+# Hash: $2b$10$MbVH1/9e9UhiiPYVZu4ydO09WkjhpLXojgadNoZ5Ih/qFWsHFg5eu
+```
+
+**資料庫更新**: [`update-orange-final.sql`](scripts/update-orange-final.sql)
+
+```sql
+UPDATE users
+SET
+  email = 'orange@thisissingple.com',
+  password_hash = '$2b$10$MbVH1/9e9UhiiPYVZu4ydO09WkjhpLXojgadNoZ5Ih/qFWsHFg5eu',
+  roles = (SELECT roles FROM users WHERE email = 'xk4xk4563022@gmail.com'),
+  status = (SELECT COALESCE(status, 'active') FROM users WHERE email = 'xk4xk4563022@gmail.com'),
+  must_change_password = false,
+  failed_login_attempts = 0,
+  locked_until = NULL,
+  updated_at = NOW()
+WHERE first_name = 'Orange' OR email LIKE '%orange%';
+```
+
+結果：
+- Email: orange@thisissingple.com
+- Password: orange@thisissingple.com
+- Roles: {super_admin, admin, manager}
+- Status: active
+
+### 🐛 Bug 修復
+
+#### Bug 1: USD 幣別儲存後變回 TWD
+**原因**: API 路由與服務層未處理 currency 欄位  
+**修復**: 更新 recordSchema 與 saveMonthlyRecords 函數  
+**驗證**: ✅ USD 儲存後正確保留
+
+#### Bug 2: 儲存後頁面空白
+**原因**: 
+1. 資料庫缺少 currency 欄位，SQL INSERT 失敗
+2. Frontend exchangeRateUsed.toFixed() 對 undefined 值呼叫
+
+**修復**:
+1. 執行 Migration 026 新增欄位
+2. 改為 `Number(row.exchangeRateUsed).toFixed(2)`
+
+**驗證**: ✅ 頁面正常顯示，無錯誤
+
+#### Bug 3: 即時摘要顯示 NaN
+**原因**: `row.amountInTWD` 被當作字串處理  
+**修復**: 加入明確的數字轉換與驗證
+```typescript
+amountInTWD = Number(row.amountInTWD);
+if (!Number.isFinite(amountInTWD)) return;
+```
+**驗證**: ✅ 顯示正確的金額數字
+
+#### Bug 4: 舊資料 amount_in_twd 為 null
+**原因**: Migration 026 只新增欄位，未處理現有資料  
+**修復**: 執行 SQL 更新腳本
+```sql
+UPDATE cost_profit
+SET amount_in_twd = amount
+WHERE currency = 'TWD' AND amount_in_twd IS NULL;
+```
+**結果**: 400 筆資料已修復（共 401 筆，1 筆為新資料）
+
+#### Bug 5: 資料庫欄位名稱錯誤
+**原因**: 使用不存在的 is_active 欄位  
+**修復**: 改用正確的 status 欄位  
+**驗證**: ✅ SQL 執行成功
+
+### 📁 新增/修改檔案
+
+**Frontend**
+- [`client/src/components/ui/table.tsx`](client/src/components/ui/table.tsx) - 移除滾動條
+- [`client/src/pages/reports/cost-profit-manager.tsx`](client/src/pages/reports/cost-profit-manager.tsx) - 營業稅、多幣別、佈局優化
+
+**Backend**
+- [`server/routes.ts`](server/routes.ts) - 更新 recordSchema 支援幣別
+- [`server/services/cost-profit-service.ts`](server/services/cost-profit-service.ts) - saveMonthlyRecords 支援幣別
+
+**Database**
+- [`supabase/migrations/026_add_currency_columns_to_cost_profit.sql`](supabase/migrations/026_add_currency_columns_to_cost_profit.sql) - 新增
+- [`scripts/fix-null-amount-in-twd.sql`](scripts/fix-null-amount-in-twd.sql) - 新增
+- [`scripts/update-orange-final.sql`](scripts/update-orange-final.sql) - 新增
+- [`scripts/generate-password-hash.ts`](scripts/generate-password-hash.ts) - 新增
+
+**Other Scripts**
+- [`scripts/check-users-table.sql`](scripts/check-users-table.sql) - 檢查工具
+- [`scripts/update-orange-correct.sql`](scripts/update-orange-correct.sql) - 歷史版本
+- [`scripts/update-orange-user.sql`](scripts/update-orange-user.sql) - 歷史版本
+- [`scripts/create-orange-user-final.sql`](scripts/create-orange-user-final.sql) - 歷史版本
+
+### ✅ 測試驗證
+
+**營業稅功能**:
+- ✅ 稅率可調整（0-100%）
+- ✅ 即時摘要正確顯示稅額
+- ✅ 套用按鈕智能更新/新增稅金項目
+- ✅ 自動生成計算公式備註
+
+**多幣別功能**:
+- ✅ USD 儲存後正確保留幣別
+- ✅ 匯率每小時自動更新
+- ✅ 歷史資料使用鎖定匯率，不受當前匯率影響
+- ✅ 顯示實際使用的匯率（如：1 USD = 31.75 TWD）
+- ✅ 舊資料自動修復 amount_in_twd
+
+**Orange 帳號**:
+- ✅ Email: orange@thisissingple.com
+- ✅ Password: orange@thisissingple.com
+- ✅ Roles: {super_admin, admin, manager}
+- ✅ 可正常登入
+
+**UI 優化**:
+- ✅ 表格無滾動條
+- ✅ 匯率顯示簡潔（僅 USD）
+- ✅ 按鈕分組清晰（功能 | 編輯 | 篩選 | 儲存）
+- ✅ 按鈕尺寸統一（size="sm"）
+
+### 💡 技術亮點
+
+**匯率鎖定機制**:
+```
+即時匯率: 用於頁面顯示與新項目計算
+鎖定匯率: 儲存時記錄 exchange_rate_used
+歷史金額: 使用 amount_in_twd，不受匯率變動影響
+```
+
+**營業稅智能套用**:
+```
+檢查 → 已存在「稅金費用/營業稅」？
+  是 → 更新金額與備註
+  否 → 新增項目
+自動生成 → 「根據收入 $XXX × 5% 自動計算」
+```
+
+**容錯處理**:
+- `Number.isFinite()` 驗證所有數值
+- `COALESCE()` 處理 null 值
+- Try-catch 包裹所有資料庫操作
+- 友善的錯誤提示 toast
+
+### 🎯 使用場景
+
+**場景 1: 新增 USD 訂閱費**
+1. 幣別選擇 USD
+2. 輸入金額 99
+3. 系統顯示：99 USD ≈ 3,143 TWD (1 USD = 31.75 TWD)
+4. 儲存後鎖定匯率 31.75
+5. 之後匯率變動不影響此筆記錄
+
+**場景 2: 計算營業稅**
+1. 查看即時摘要：收入 $500,000，營業稅 (5%) $25,000
+2. 點擊「套用營業稅」
+3. 自動新增「稅金費用/營業稅」項目
+4. 備註顯示：根據收入 $500,000 × 5% 自動計算
+
+**場景 3: Orange 登入系統**
+1. 訪問登入頁面
+2. Email: orange@thisissingple.com
+3. Password: orange@thisissingple.com
+4. 登入後擁有完整管理員權限
+
+---
+
+**最後更新時間**: 2025-10-27
+**當前狀態**: Phase 36 完成 - 成本獲利管理系統增強 ✅
+**下一階段**: 待規劃
