@@ -646,7 +646,10 @@ function getOpenAIClient(): OpenAI {
     if (!apiKey) {
       throw new Error('OPENAI_API_KEY environment variable is not set');
     }
-    openaiClient = new OpenAI({ apiKey });
+    openaiClient = new OpenAI({
+      apiKey,
+      baseURL: 'https://api.openai.com/v1'  // Explicitly set to prevent environment variable conflicts
+    });
   }
   return openaiClient;
 }
