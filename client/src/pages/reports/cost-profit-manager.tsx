@@ -1240,7 +1240,7 @@ export default function CostProfitManagerPage() {
                             <div>{row.updatedAt || row.createdAt || '-'}</div>
                             {row.currency !== 'TWD' && row.exchangeRateUsed && row.amountInTWD && (
                               <div className="text-[10px] text-blue-600 font-medium">
-                                {row.amount} {row.currency} × {row.exchangeRateUsed.toFixed(2)} = {formatCurrency(row.amountInTWD)}
+                                {row.amount} {row.currency} × {Number(row.exchangeRateUsed).toFixed(2)} = {formatCurrency(row.amountInTWD)}
                               </div>
                             )}
                           </div>
