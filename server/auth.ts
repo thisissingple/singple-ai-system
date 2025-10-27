@@ -14,7 +14,8 @@ export function getSession() {
 
   // 🆕 使用 PostgreSQL session store（開發和生產環境都用）
   // 這樣 nodemon 重啟時 session 不會丟失
-  const dbUrl = process.env.SESSION_DB_URL || process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
+  // 優先使用 Session Pooler (port 6543) 避免長時間查詢被中斷
+  const dbUrl = process.env.SUPABASE_SESSION_DB_URL || process.env.SESSION_DB_URL || process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
 
   if (dbUrl) {
     try {
