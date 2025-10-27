@@ -51,6 +51,7 @@ import { SalesScoresDetailSection } from '@/components/teaching-quality/sales-sc
 import { FloatingAIChat } from '@/components/teaching-quality/floating-ai-chat';
 import { parseTeachingAnalysisMarkdown } from '@/lib/parse-teaching-analysis';
 import { calculateOverallScore, getGradeColor } from '@/lib/calculate-overall-score';
+import { useTeachingQuality } from '@/contexts/teaching-quality-context';
 
 type ConversionSuggestionMarkdown = {
   markdownOutput: string;
@@ -436,6 +437,7 @@ export default function TeachingQualityDetail() {
   const [, params] = useRoute('/teaching-quality/:id');
   const [, navigate] = useLocation();
   const analysisId = params?.id;
+  const { notifyAnalysisUpdated } = useTeachingQuality();
 
   const [analysis, setAnalysis] =
     useState<TeachingQualityAnalysisDetail | null>(null);
@@ -501,6 +503,12 @@ export default function TeachingQualityDetail() {
       // 重新分析成功，重新載入資料（不使用 window.location.reload）
       alert('重新分析完成！');
       await fetchAnalysisDetail();
+
+      // 通知全域狀態管理：分析已更新
+      if (analysisId) {
+        notifyAnalysisUpdated(analysisId);
+      }
+
       setReanalyzing(false);
     } catch (err) {
       console.error('Error reanalyzing:', err);

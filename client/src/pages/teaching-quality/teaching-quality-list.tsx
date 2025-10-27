@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, TrendingUp, TrendingDown, Target, Eye, RefreshCw, Wand2, Search } from 'lucide-react';
+import { useTeachingQuality } from '@/contexts/teaching-quality-context';
 
 interface StudentAnalysisRecord {
   id: string | null; // analysis ID (null if not analyzed yet)
@@ -51,6 +52,7 @@ interface Teacher {
 export default function TeachingQualityList() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const { lastUpdatedAnalysisId, clearNotification } = useTeachingQuality();
 
   const [records, setRecords] = useState<StudentAnalysisRecord[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -62,6 +64,15 @@ export default function TeachingQualityList() {
   useEffect(() => {
     fetchData();
   }, [selectedTeacher, searchQuery]); // 新增：搜尋關鍵字變動時重新 fetch
+
+  // 監聽全域狀態：當有分析更新時，重新載入資料
+  useEffect(() => {
+    if (lastUpdatedAnalysisId) {
+      console.log('📥 List page detected analysis update:', lastUpdatedAnalysisId);
+      fetchData({ showLoader: false }); // 靜默重新載入，不顯示 loading
+      clearNotification(); // 清除通知
+    }
+  }, [lastUpdatedAnalysisId]);
 
   const fetchData = async (options: { showLoader?: boolean } = {}) => {
     if (options.showLoader !== false) {
