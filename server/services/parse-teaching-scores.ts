@@ -62,8 +62,13 @@ function parseTeachingScore(markdown: string): number {
  * Parse sales score from Markdown (成交策略總分)
  */
 function parseSalesScore(markdown: string): number {
-  // Look for "總評（總分/25）" section
-  const totalMatch = markdown.match(/總評[（(]總分\/25[）)][：:]\s*(\d+)\/25/);
+  // Pattern 1: With bold markers and colon with space
+  let totalMatch = markdown.match(/\*\*總評[（(]總分\/25[）)][：:]\*\*\s*(\d+)\/25/);
+
+  if (!totalMatch) {
+    // Pattern 2: Without bold markers (original format)
+    totalMatch = markdown.match(/總評[（(]總分\/25[）)][：:]\s*(\d+)\/25/);
+  }
 
   if (totalMatch) {
     const score = parseInt(totalMatch[1], 10);
@@ -102,7 +107,7 @@ function parseSalesScore(markdown: string): number {
  * Parse conversion probability from Markdown (預估成交機率)
  */
 function parseConversionProbability(markdown: string): number {
-  // Pattern 1: Look for "預估成交機率：XX%"
+  // Pattern 1: Look for "預估成交機率：XX%" (with optional trailing text)
   let match = markdown.match(/# 📈 預估成交機率[：:]\s*(\d+)%/);
 
   if (match) {
@@ -112,8 +117,18 @@ function parseConversionProbability(markdown: string): number {
     }
   }
 
-  // Pattern 2: Look in calculation section
+  // Pattern 2: Look in calculation section for "總計：XX%"
   match = markdown.match(/總計[：:]\s*(\d+)%/);
+
+  if (match) {
+    const prob = parseInt(match[1], 10);
+    if (prob >= 0 && prob <= 100) {
+      return prob;
+    }
+  }
+
+  // Pattern 3: Look for "**總計：XX%**" with bold markers
+  match = markdown.match(/\*\*總計[：:]\s*(\d+)%\*\*/);
 
   if (match) {
     const prob = parseInt(match[1], 10);
