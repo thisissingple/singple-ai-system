@@ -1020,8 +1020,77 @@ export default function TeachingQualityDetail() {
                       <span>⛔️</span>痛點與問題
                     </h3>
                     <div className="space-y-4 text-sm">
+                      {/* 五層痛點分析 */}
+                      {newParsedAnalysis.painPoints && newParsedAnalysis.painPoints.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="font-semibold text-red-700 border-b pb-2">
+                            💔 深層痛點分析（銷售核心）
+                          </div>
+                          {newParsedAnalysis.painPoints.map((painPoint, index) => {
+                            const levelColors: Record<string, string> = {
+                              '目標層': 'bg-purple-50 border-purple-300 text-purple-800',
+                              '社交層': 'bg-blue-50 border-blue-300 text-blue-800',
+                              '情緒層': 'bg-red-50 border-red-300 text-red-800',
+                              '環境層': 'bg-green-50 border-green-300 text-green-800',
+                              '技術層': 'bg-gray-50 border-gray-300 text-gray-800',
+                            };
+                            const levelEmojis: Record<string, string> = {
+                              '目標層': '🎯',
+                              '社交層': '👥',
+                              '情緒層': '💔',
+                              '環境層': '🏠',
+                              '技術層': '🔧',
+                            };
+                            const colorClass = levelColors[painPoint.level] || levelColors['技術層'];
+                            const emoji = levelEmojis[painPoint.level] || '•';
+
+                            return painPoint.isExplored ? (
+                              <div key={index} className={`rounded-md border p-3 ${colorClass}`}>
+                                <div className="font-semibold mb-1.5">
+                                  {emoji} {painPoint.level}痛點
+                                </div>
+                                <div className="text-foreground space-y-2">
+                                  <div>
+                                    <span className="font-medium">內心痛點：</span>
+                                    {painPoint.painDescription}
+                                    {painPoint.timestamp && (
+                                      <button
+                                        onClick={() => handleTimestampClick(painPoint.timestamp!)}
+                                        className="ml-2 inline-flex items-center gap-1 rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-200"
+                                      >
+                                        📍{painPoint.timestamp}
+                                      </button>
+                                    )}
+                                  </div>
+                                  {painPoint.evidence && (
+                                    <div>
+                                      <span className="font-medium">行為證據：</span>
+                                      {painPoint.evidence}
+                                    </div>
+                                  )}
+                                  <div className="bg-white/70 rounded p-2 border border-green-300">
+                                    <span className="font-medium text-green-700">✅ 一對一教練價值：</span>
+                                    <span className="text-foreground">{painPoint.coachingValue}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : null;
+                          })}
+                          {newParsedAnalysis.painPoints.some(p => !p.isExplored) && (
+                            <div className="rounded-md bg-yellow-50 border border-yellow-300 p-3">
+                              <div className="font-semibold text-yellow-800 mb-1">⚠️ 未探索的痛點層次：</div>
+                              <ul className="text-yellow-700 space-y-1">
+                                {newParsedAnalysis.painPoints.filter(p => !p.isExplored).map((p, i) => (
+                                  <li key={i}>• {p.level}（建議補問）</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {newParsedAnalysis.studentProfile.voiceStatus && (
-                        <div>
+                        <div className="pt-3 border-t">
                           <span className="font-medium text-red-700">🎤 聲音現況：</span>
                           <div className="mt-1 font-semibold text-foreground">
                             <InfoWithTimestamp
