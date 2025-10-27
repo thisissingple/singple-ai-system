@@ -182,134 +182,66 @@ export async function generateCostProfitPrediction(
 
   try {
     const client = getOpenAIClient();
-    const completion = await client.responses.create({
+    const completion = await client.chat.completions.create({
       model: DEFAULT_MODEL,
-      input: prompt,
-      max_output_tokens: 4000,
-      text: {
-        format: {
-          type: 'json_schema',
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
           name: PREDICTION_SCHEMA.name,
           schema: PREDICTION_SCHEMA.schema,
+          strict: true,
         },
       },
+      temperature: 0.7,
+      max_tokens: 4000,
     });
 
-    const messageBlock = completion.output?.find(
-      (block) => block.type === 'message',
-    );
-    const rawOutputText = completion.output_text || '';
+    const messageContent = completion.choices[0]?.message?.content;
 
     // Debug: 查看實際的回應結構
     console.log('📊 OpenAI Response Structure:', {
-      outputLength: completion.output?.length,
-      messageBlockType: messageBlock?.type,
-      contentTypes: messageBlock?.content?.map(c => c.type),
-      rawOutputTextLength: rawOutputText.length,
-      rawOutputTextPreview: rawOutputText.substring(0, 200)
+      finishReason: completion.choices[0]?.finish_reason,
+      hasContent: !!messageContent,
+      contentLength: messageContent?.length || 0,
+      contentPreview: messageContent?.substring(0, 200)
     });
 
-    const jsonContent = messageBlock?.content?.find(
-      (content) => content.type === 'output_json',
-    ) as { json?: { suggestions?: CostProfitPrediction[] } } | undefined;
+    if (!messageContent) {
+      console.warn('❌ OpenAI 回應無內容');
+      return [];
+    }
 
-    const textContent = messageBlock?.content?.find(
-      (content) => content.type === 'output_text',
-    ) as { text?: string } | undefined;
+    let suggestions: CostProfitPrediction[] = [];
 
-    let suggestions =
-      jsonContent?.json?.suggestions ??
-      ((jsonContent?.json as unknown as CostProfitPrediction[]) ?? []);
+    try {
+      const parsed = JSON.parse(messageContent);
+      console.log('✅ 成功解析 AI 輸出:', parsed);
+
+      if (Array.isArray(parsed)) {
+        suggestions = parsed;
+      } else if (parsed?.suggestions && Array.isArray(parsed.suggestions)) {
+        suggestions = parsed.suggestions;
+      } else {
+        console.warn('❌ 解析結果格式不正確:', parsed);
+      }
+    } catch (error) {
+      console.error('❌ JSON 解析失敗:', error);
+      console.log('原始輸出:', messageContent);
+      return [];
+    }
 
     if (!Array.isArray(suggestions) || suggestions.length === 0) {
-      const rawTextCandidates: string[] = [];
-
-      if (textContent?.text) rawTextCandidates.push(textContent.text);
-      if (rawOutputText) rawTextCandidates.push(rawOutputText);
-
-      const fallbackBlocks =
-        messageBlock?.content
-          ?.filter((content) => content.type === 'text' || content.type === 'output_text')
-          ?.map((content) => (content as any).text ?? '')
-          ?.filter((text) => text && text.trim().length > 0) ?? [];
-
-      rawTextCandidates.push(...fallbackBlocks);
-
-      // 合併所有候選文字，但要去重（避免重複輸出）
-      const uniqueTexts = Array.from(new Set(rawTextCandidates));
-      const rawText = uniqueTexts.join('\n').trim();
-
-     const arrayMatch = rawText.match(/\[[\s\S]*\]/);
-     const objectMatch = rawText.match(/\{[\s\S]*\}/);
-     const bracketStart = rawText.indexOf('{');
-     const bracketEnd = rawText.lastIndexOf('}');
-      const objectPatternStart = rawText.indexOf('{"suggestions"');
-      const objectPatternEnd = rawText.indexOf('}]}');
-
-      const sanitizedObject =
-        bracketStart !== -1 && bracketEnd !== -1 && bracketEnd > bracketStart
-          ? rawText.slice(bracketStart, bracketEnd + 1)
-          : null;
-      const trimmedObject =
-        objectPatternStart !== -1 && objectPatternEnd !== -1 && objectPatternEnd > objectPatternStart
-          ? rawText.slice(objectPatternStart, objectPatternEnd + 3)
-          : null;
-
-      const tryParse = (text?: string, label?: string) => {
-        if (!text) return null;
-        try {
-          const result = JSON.parse(text);
-          if (label) console.log(`✅ ${label} 解析成功`);
-          return result;
-        } catch (error) {
-          if (label) console.log(`❌ ${label} 解析失敗:`, error instanceof Error ? error.message : 'Unknown error');
-          return null;
-        }
-      };
-
-      let parsed: any = null;
-
-      console.log('🔍 嘗試解析 AI 輸出...');
-      console.log('rawText 長度:', rawText.length);
-      console.log('rawText 前 100 字:', rawText.substring(0, 100));
-      console.log('rawText 後 100 字:', rawText.substring(rawText.length - 100));
-
-      if (arrayMatch) {
-        parsed = tryParse(arrayMatch[0], 'arrayMatch');
-      } else if (objectMatch) {
-        parsed = tryParse(objectMatch[0], 'objectMatch');
-      }
-
-      if (!parsed && trimmedObject) {
-        parsed = tryParse(trimmedObject, 'trimmedObject');
-      }
-
-      if (!parsed && sanitizedObject) {
-        parsed = tryParse(sanitizedObject, 'sanitizedObject');
-      }
-
-      // 嘗試直接解析整個 rawText（去除頭尾空白）
-      if (!parsed) {
-        parsed = tryParse(rawText.trim(), 'rawText.trim()');
-      }
-
-      if (parsed) {
-        console.log('✅ 成功解析 AI 輸出:', parsed);
-        if (Array.isArray(parsed)) {
-          suggestions = parsed;
-        } else if (Array.isArray(parsed?.suggestions)) {
-          suggestions = parsed.suggestions;
-        }
-      }
-
-      if (!Array.isArray(suggestions) || suggestions.length === 0) {
-        console.warn('❌ CostProfit AI 預測解析失敗');
-        console.log('原始輸出:', rawText);
-        console.log('parsed 結果:', parsed);
-      } else {
-        console.log(`✅ 成功解析 ${suggestions.length} 筆預測資料`);
-      }
+      console.warn('❌ CostProfit AI 預測解析失敗 - 無有效建議');
+      return [];
     }
+
+    console.log(`✅ 成功解析 ${suggestions.length} 筆預測資料`);
 
     const normalized = Array.isArray(suggestions) ? suggestions : [];
 
