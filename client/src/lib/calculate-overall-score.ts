@@ -81,12 +81,12 @@ export function calculateOverallScore(
   const totalScore = teachingContribution + salesContribution + conversionContribution;
 
   return {
-    score: Math.round(totalScore * 10) / 10, // Round to 1 decimal place
+    score: Math.round(totalScore), // Round to integer
     grade: getGrade(totalScore),
     breakdown: {
-      teaching: Math.round(teachingContribution * 10) / 10,
-      sales: Math.round(salesContribution * 10) / 10,
-      conversion: Math.round(conversionContribution * 10) / 10,
+      teaching: Math.round(teachingContribution),
+      sales: Math.round(salesContribution),
+      conversion: Math.round(conversionContribution),
     },
   };
 }

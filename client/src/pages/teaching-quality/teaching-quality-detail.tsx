@@ -498,13 +498,12 @@ export default function TeachingQualityDetail() {
         throw new Error(data.error || '重新分析失敗');
       }
 
-      // 重新載入分析結果
-      await fetchAnalysisDetail();
-      alert('重新分析完成！');
+      // 重新分析成功，完整重新載入頁面以顯示最新結果
+      alert('重新分析完成！頁面即將重新載入。');
+      window.location.reload();
     } catch (err) {
       console.error('Error reanalyzing:', err);
       alert(err instanceof Error ? err.message : '重新分析失敗');
-    } finally {
       setReanalyzing(false);
     }
   }
@@ -689,7 +688,7 @@ export default function TeachingQualityDetail() {
                                 <div className="flex justify-between items-center text-sm">
                                   <span className="text-muted-foreground">📚 教學貢獻 (30%)</span>
                                   <span className="font-bold text-blue-600">
-                                    {overallScore.breakdown.teaching.toFixed(1)}/30
+                                    {Math.round(overallScore.breakdown.teaching)}/30
                                   </span>
                                 </div>
                                 <div className="text-xs text-muted-foreground">
@@ -702,7 +701,7 @@ export default function TeachingQualityDetail() {
                                 <div className="flex justify-between items-center text-sm">
                                   <span className="text-muted-foreground">🎯 推課貢獻 (30%)</span>
                                   <span className="font-bold text-purple-600">
-                                    {overallScore.breakdown.sales.toFixed(1)}/30
+                                    {Math.round(overallScore.breakdown.sales)}/30
                                   </span>
                                 </div>
                                 <div className="text-xs text-muted-foreground">
@@ -715,7 +714,7 @@ export default function TeachingQualityDetail() {
                                 <div className="flex justify-between items-center text-sm">
                                   <span className="text-muted-foreground">💰 成交貢獻 (40%)</span>
                                   <span className="font-bold text-orange-600">
-                                    {overallScore.breakdown.conversion.toFixed(1)}/40
+                                    {Math.round(overallScore.breakdown.conversion)}/40
                                   </span>
                                 </div>
                                 <div className="text-xs text-muted-foreground">
