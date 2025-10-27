@@ -37,6 +37,10 @@ import {
   CheckSquare,
   Square,
   GripVertical,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  AlertTriangle,
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -159,12 +163,26 @@ function mergePrediction(
   return updated;
 }
 
+type SortField = 'category' | 'item' | 'amount' | 'createdAt' | 'none';
+type SortOrder = 'asc' | 'desc';
+
 export default function CostProfitManagerPage() {
   const [selectedYear, setSelectedYear] = useState<number>(defaultYear);
   const [selectedMonth, setSelectedMonth] =
     useState<string>(defaultMonth);
   const [rows, setRows] = useState<EditableRow[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [sortField, setSortField] = useState<SortField>('none');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+  const [showDuplicates, setShowDuplicates] = useState(false);
+  const [columnWidths, setColumnWidths] = useState({
+    category: 150,
+    item: 200,
+    amount: 120,
+    notes: 250,
+    confirmed: 80,
+    recordTime: 200,
+  });
   const [exchangeRates, setExchangeRates] = useState<{
     USD: number;
     RMB: number;
@@ -470,9 +488,106 @@ export default function CostProfitManagerPage() {
     }
   };
 
-  // 自動排序：收入金額在前，其他分類按字母排序，同分類內按項目排序
-  // 同時建立 tempId 到原始索引的映射
-  // 已改用拖曳排序，不再需要自動排序
+  // 排序功能
+  const handleSort = (field: SortField) => {
+    if (field === 'none') {
+      setSortField('none');
+      return;
+    }
+
+    if (sortField === field) {
+      // Toggle sort order
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  // 檢測重複項目
+  const duplicateGroups = useMemo(() => {
+    const groups = new Map<string, number[]>();
+
+    rows.forEach((row, index) => {
+      const key = `${row.category.trim().toLowerCase()}|||${row.item.trim().toLowerCase()}`;
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+      groups.get(key)!.push(index);
+    });
+
+    // 只返回有重複的群組
+    const duplicates = new Map<string, number[]>();
+    groups.forEach((indices, key) => {
+      if (indices.length > 1) {
+        duplicates.set(key, indices);
+      }
+    });
+
+    return duplicates;
+  }, [rows]);
+
+  // 檢查某行是否為重複項目
+  const isDuplicate = (index: number): boolean => {
+    const groupsArray = Array.from(duplicateGroups.values());
+    for (const indices of groupsArray) {
+      if (indices.includes(index)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // 排序後的 rows
+  const sortedRows = useMemo(() => {
+    if (sortField === 'none') {
+      return rows;
+    }
+
+    const sorted = [...rows];
+    sorted.sort((a, b) => {
+      let aValue: string | number;
+      let bValue: string | number;
+
+      switch (sortField) {
+        case 'category':
+          aValue = a.category.trim().toLowerCase();
+          bValue = b.category.trim().toLowerCase();
+          break;
+        case 'item':
+          aValue = a.item.trim().toLowerCase();
+          bValue = b.item.trim().toLowerCase();
+          break;
+        case 'amount':
+          aValue = parseFloat(a.amount) || 0;
+          bValue = parseFloat(b.amount) || 0;
+          break;
+        case 'createdAt':
+          aValue = a.createdAt || '';
+          bValue = b.createdAt || '';
+          break;
+        default:
+          return 0;
+      }
+
+      if (aValue < bValue) return sortOrder === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return sorted;
+  }, [rows, sortField, sortOrder]);
+
+  // 過濾重複項目
+  const displayRows = useMemo(() => {
+    if (!showDuplicates) {
+      return sortedRows;
+    }
+    return sortedRows.filter((_, index) => {
+      const originalIndex = rows.findIndex(r => r.tempId === sortedRows[index].tempId);
+      return isDuplicate(originalIndex);
+    });
+  }, [sortedRows, showDuplicates, rows, duplicateGroups]);
 
   // 轉換為 TWD 的輔助函數
   const convertToTWD = (amount: number, currency: 'TWD' | 'USD' | 'RMB' = 'TWD'): number => {
@@ -734,6 +849,19 @@ export default function CostProfitManagerPage() {
                 <Trash2 className="h-4 w-4 mr-2" />
                 批次刪除
               </Button>
+              <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-md">
+                <Switch
+                  checked={showDuplicates}
+                  onCheckedChange={setShowDuplicates}
+                  id="show-duplicates"
+                />
+                <label htmlFor="show-duplicates" className="text-sm cursor-pointer flex items-center gap-1">
+                  {duplicateGroups.size > 0 && (
+                    <AlertTriangle className="h-4 w-4 text-orange-500" />
+                  )}
+                  只顯示重複項目 {duplicateGroups.size > 0 && `(${duplicateGroups.size} 組)`}
+                </label>
+              </div>
               <Button
                 onClick={handleSave}
                 disabled={saveMutation.isPending || isLoading}
@@ -768,14 +896,70 @@ export default function CostProfitManagerPage() {
                         onCheckedChange={handleToggleSelectAll}
                       />
                     </TableHead>
-                    <TableHead className="min-w-[90px] w-[110px]">分類</TableHead>
-                    <TableHead className="w-[200px] min-w-[200px]">項目</TableHead>
-                    <TableHead className="min-w-[110px] w-[120px]">金額 / 幣別</TableHead>
-                    <TableHead className="w-[180px]">備註</TableHead>
-                    <TableHead className="w-[100px] text-center">
+                    <TableHead className="min-w-[90px]" style={{ width: `${columnWidths.category}px` }}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 hover:bg-gray-100"
+                        onClick={() => handleSort('category')}
+                      >
+                        分類
+                        {sortField === 'category' ? (
+                          sortOrder === 'asc' ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                        )}
+                      </Button>
+                    </TableHead>
+                    <TableHead className="min-w-[150px]" style={{ width: `${columnWidths.item}px` }}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 hover:bg-gray-100"
+                        onClick={() => handleSort('item')}
+                      >
+                        項目
+                        {sortField === 'item' ? (
+                          sortOrder === 'asc' ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                        )}
+                      </Button>
+                    </TableHead>
+                    <TableHead className="min-w-[110px]" style={{ width: `${columnWidths.amount}px` }}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 hover:bg-gray-100"
+                        onClick={() => handleSort('amount')}
+                      >
+                        金額 / 幣別
+                        {sortField === 'amount' ? (
+                          sortOrder === 'asc' ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                        )}
+                      </Button>
+                    </TableHead>
+                    <TableHead className="min-w-[150px]" style={{ width: `${columnWidths.notes}px` }}>備註</TableHead>
+                    <TableHead className="text-center" style={{ width: `${columnWidths.confirmed}px` }}>
                       已確認
                     </TableHead>
-                    <TableHead className="w-[130px]">記錄時間</TableHead>
+                    <TableHead className="min-w-[130px]" style={{ width: `${columnWidths.recordTime}px` }}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2 hover:bg-gray-100"
+                        onClick={() => handleSort('createdAt')}
+                      >
+                        記錄時間
+                        {sortField === 'createdAt' ? (
+                          sortOrder === 'asc' ? <ArrowUp className="ml-1 h-3 w-3" /> : <ArrowDown className="ml-1 h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+                        )}
+                      </Button>
+                    </TableHead>
                     <TableHead className="w-[80px] text-center">刪除</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -790,37 +974,45 @@ export default function CostProfitManagerPage() {
                         載入中...
                       </TableCell>
                     </TableRow>
-                  ) : rows.length === 0 ? (
+                  ) : displayRows.length === 0 ? (
                     <TableRow>
                       <TableCell
                         colSpan={9}
                         className="text-center py-8 text-muted-foreground"
                       >
-                        尚未有資料，請手動新增或套用 AI 建議。
+                        {showDuplicates ? '沒有找到重複項目' : '尚未有資料，請手動新增或套用 AI 建議。'}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    rows.map((row, index) => (
+                    displayRows.map((row, displayIndex) => {
+                      const originalIndex = rows.findIndex(r => r.tempId === row.tempId);
+                      const isRowDuplicate = isDuplicate(originalIndex);
+                      return (
                       <Draggable
-                        key={row.tempId || `row-${index}`}
-                        draggableId={row.tempId || `row-${index}`}
-                        index={index}
+                        key={row.tempId || `row-${displayIndex}`}
+                        draggableId={row.tempId || `row-${displayIndex}`}
+                        index={displayIndex}
+                        isDragDisabled={sortField !== 'none'}
                       >
                         {(provided, snapshot) => (
                           <>
                             <TableRow
                               ref={provided.innerRef}
                               {...provided.draggableProps}
-                              className={`group relative ${snapshot.isDragging ? 'bg-muted' : ''}`}
+                              className={`group relative ${snapshot.isDragging ? 'bg-muted' : ''} ${isRowDuplicate ? 'bg-orange-50 border-l-4 border-l-orange-400' : ''}`}
                             >
                               <TableCell {...provided.dragHandleProps} className="cursor-grab active:cursor-grabbing">
-                                <GripVertical className="h-4 w-4 text-muted-foreground" />
+                                {sortField === 'none' ? (
+                                  <GripVertical className="h-4 w-4 text-muted-foreground" />
+                                ) : (
+                                  <div className="h-4 w-4" />
+                                )}
                               </TableCell>
                               <TableCell>
                                 <Checkbox
                                   checked={row.selected || false}
                                   onCheckedChange={(checked) =>
-                                    handleRowChange(index, 'selected', checked as boolean)
+                                    handleRowChange(originalIndex, 'selected', checked as boolean)
                                   }
                                 />
                               </TableCell>
@@ -828,7 +1020,7 @@ export default function CostProfitManagerPage() {
                                 <Select
                                   value={row.category || undefined}
                                   onValueChange={(value) =>
-                                    handleRowChange(index, 'category', value)
+                                    handleRowChange(originalIndex, 'category', value)
                             }
                           >
                             <SelectTrigger className="w-[150px]">
@@ -844,17 +1036,32 @@ export default function CostProfitManagerPage() {
                           </Select>
                         </TableCell>
                         <TableCell>
-                          <Input
-                            value={row.item}
-                            placeholder="項目名稱"
-                            onChange={(event) =>
-                              handleRowChange(
-                                index,
-                                'item',
-                                event.target.value,
-                              )
-                            }
-                          />
+                          <div className="flex items-center gap-2">
+                            {isRowDuplicate && (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <AlertTriangle className="h-4 w-4 text-orange-500 flex-shrink-0" />
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>此項目可能重複登記</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )}
+                            <Input
+                              value={row.item}
+                              placeholder="項目名稱"
+                              onChange={(event) =>
+                                handleRowChange(
+                                  originalIndex,
+                                  'item',
+                                  event.target.value,
+                                )
+                              }
+                              className={isRowDuplicate ? 'border-orange-300' : ''}
+                            />
+                          </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-2 items-center min-w-[200px]">
@@ -864,7 +1071,7 @@ export default function CostProfitManagerPage() {
                               placeholder="0"
                               onChange={(event) =>
                                 handleRowChange(
-                                  index,
+                                  originalIndex,
                                   'amount',
                                   event.target.value,
                                 )
@@ -873,7 +1080,7 @@ export default function CostProfitManagerPage() {
                             <Select
                               value={row.currency || 'TWD'}
                               onValueChange={(value) =>
-                                handleRowChange(index, 'currency', value)
+                                handleRowChange(originalIndex, 'currency', value)
                               }
                             >
                               <SelectTrigger className="w-[85px]">
@@ -893,7 +1100,7 @@ export default function CostProfitManagerPage() {
                                   placeholder="備註（可選）"
                                   onChange={(event) =>
                                     handleRowChange(
-                                      index,
+                                      originalIndex,
                                       'notes',
                                       event.target.value,
                                     )
@@ -905,7 +1112,7 @@ export default function CostProfitManagerPage() {
                             <Switch
                               checked={row.isConfirmed}
                               onCheckedChange={(checked) =>
-                                handleRowChange(index, 'isConfirmed', checked)
+                                handleRowChange(originalIndex, 'isConfirmed', checked)
                               }
                             />
                             {row.source === 'ai' && row.aiReason && row.aiConfidence !== undefined && (
@@ -947,7 +1154,7 @@ export default function CostProfitManagerPage() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => handleRemoveRow(index)}
+                                  onClick={() => handleRemoveRow(originalIndex)}
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
@@ -962,7 +1169,7 @@ export default function CostProfitManagerPage() {
                                       variant="outline"
                                       size="sm"
                                       className="h-6 px-3 opacity-0 group-hover:opacity-100 transition-all duration-200 bg-background shadow-md hover:shadow-lg hover:scale-105"
-                                      onClick={() => handleAddRowAfter(index)}
+                                      onClick={() => handleAddRowAfter(originalIndex)}
                                       title="在此列下方新增"
                                     >
                                       <Plus className="h-3 w-3 mr-1" />
@@ -975,7 +1182,8 @@ export default function CostProfitManagerPage() {
                           </>
                         )}
                       </Draggable>
-                    ))
+                      );
+                    })
                   )}
                   {provided.placeholder}
                       </TableBody>
