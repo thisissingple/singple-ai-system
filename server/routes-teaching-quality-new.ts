@@ -303,6 +303,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         weaknesses: JSON.stringify(analysis.weaknesses),
         class_summary: analysis.summary,
         suggestions: JSON.stringify(analysis.suggestions),
+        conversion_suggestions: analysis.conversionSuggestions ? JSON.stringify(analysis.conversionSuggestions) : null,  // 儲存完整的推課建議內容
         // Check if student has purchased by joining with trial_class_purchases
         conversion_status: attendance.no_conversion_reason ? 'not_converted' : 'pending',
         analyzed_by: req.user?.id || null
