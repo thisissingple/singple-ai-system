@@ -4671,6 +4671,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const num = Number(value);
             return Number.isFinite(num) ? num : null;
           }),
+        currency: z.enum(['TWD', 'USD', 'RMB']).optional().default('TWD'),
+        exchange_rate_used: z.number().optional(),
+        amount_in_twd: z.number().optional(),
         notes: z.union([z.string(), z.null()]).optional(),
         is_confirmed: z.coerce.boolean().optional(),
       });
@@ -4694,6 +4697,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           category_name: record.category_name,
           item_name: record.item_name,
           amount: record.amount,
+          currency: record.currency ?? 'TWD',
+          exchange_rate_used: record.exchange_rate_used ?? null,
+          amount_in_twd: record.amount_in_twd ?? null,
           notes: record.notes ?? null,
           is_confirmed: record.is_confirmed ?? false,
         })),

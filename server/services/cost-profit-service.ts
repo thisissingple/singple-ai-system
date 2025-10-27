@@ -193,6 +193,9 @@ export const costProfitService = {
       category_name: string;
       item_name: string;
       amount: number | null;
+      currency?: string;
+      exchange_rate_used?: number | null;
+      amount_in_twd?: number | null;
       notes?: string | null;
       is_confirmed?: boolean;
     }>;
@@ -211,8 +214,8 @@ export const costProfitService = {
       if (params.records.length > 0) {
         const insertText = `
           INSERT INTO cost_profit
-            (category_name, item_name, amount, notes, month, year, is_confirmed)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
+            (category_name, item_name, amount, currency, exchange_rate_used, amount_in_twd, notes, month, year, is_confirmed)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         `;
 
         for (const record of params.records) {
@@ -220,6 +223,9 @@ export const costProfitService = {
             record.category_name,
             record.item_name,
             record.amount,
+            record.currency ?? 'TWD',
+            record.exchange_rate_used ?? null,
+            record.amount_in_twd ?? null,
             record.notes ?? null,
             params.month,
             params.year,
