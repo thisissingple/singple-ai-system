@@ -62,13 +62,8 @@ function parseTeachingScore(markdown: string): number {
  * Parse sales score from Markdown (成交策略總分)
  */
 function parseSalesScore(markdown: string): number {
-  // Pattern 1: With bold markers and colon with space
-  let totalMatch = markdown.match(/\*\*總評[（(]總分\/25[）)][：:]\*\*\s*(\d+)\/25/);
-
-  if (!totalMatch) {
-    // Pattern 2: Without bold markers (original format)
-    totalMatch = markdown.match(/總評[（(]總分\/25[）)][：:]\s*(\d+)\/25/);
-  }
+  // Pattern 1: Most flexible - find any "總分/25" or "總評" followed by number/25
+  let totalMatch = markdown.match(/總[評分][^0-9]{0,20}(\d+)\s*\/\s*25/);
 
   if (totalMatch) {
     const score = parseInt(totalMatch[1], 10);
@@ -77,7 +72,7 @@ function parseSalesScore(markdown: string): number {
     }
   }
 
-  // Fallback: Look for individual metric scores in 成交策略評估 section
+  // Pattern 2: Fallback - Look for individual metric scores in 成交策略評估 section
   const strategySection = markdown.match(/# 🧮 成交策略評估[\s\S]*?(?=# |$)/);
 
   if (strategySection) {
@@ -107,8 +102,8 @@ function parseSalesScore(markdown: string): number {
  * Parse conversion probability from Markdown (預估成交機率)
  */
 function parseConversionProbability(markdown: string): number {
-  // Pattern 1: Look for "預估成交機率：XX%" (with optional trailing text)
-  let match = markdown.match(/# 📈 預估成交機率[：:]\s*(\d+)%/);
+  // Pattern 1: Most flexible - Look for "預估成交機率" followed by percentage
+  let match = markdown.match(/預估成交機率[^0-9]{0,20}(\d+)%/);
 
   if (match) {
     const prob = parseInt(match[1], 10);
@@ -117,18 +112,8 @@ function parseConversionProbability(markdown: string): number {
     }
   }
 
-  // Pattern 2: Look in calculation section for "總計：XX%"
-  match = markdown.match(/總計[：:]\s*(\d+)%/);
-
-  if (match) {
-    const prob = parseInt(match[1], 10);
-    if (prob >= 0 && prob <= 100) {
-      return prob;
-    }
-  }
-
-  // Pattern 3: Look for "**總計：XX%**" with bold markers
-  match = markdown.match(/\*\*總計[：:]\s*(\d+)%\*\*/);
+  // Pattern 2: Look in calculation section for "總計" followed by percentage
+  match = markdown.match(/總計[^0-9]{0,10}(\d+)%/);
 
   if (match) {
     const prob = parseInt(match[1], 10);
