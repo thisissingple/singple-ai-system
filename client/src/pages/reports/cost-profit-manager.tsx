@@ -897,79 +897,93 @@ export default function CostProfitManagerPage() {
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <CardTitle>成本／收入明細</CardTitle>
-              <CardDescription className="space-y-1">
-                <div>AI 建議列會附註來源，可直接調整金額；儲存後將覆蓋同月份資料。</div>
-                <div className="text-xs text-blue-600 font-medium">
-                  當前匯率：1 USD = {exchangeRates.USD.toFixed(2)} TWD | 1 RMB = {exchangeRates.RMB.toFixed(2)} TWD（每小時更新）
+          <CardHeader>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div>
+                  <CardTitle>成本／收入明細</CardTitle>
+                  <CardDescription>
+                    AI 建議列會附註來源，可直接調整金額；儲存後將覆蓋同月份資料。
+                  </CardDescription>
                 </div>
-              </CardDescription>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                onClick={handleGenerateAI}
-                disabled={isGenerating || isLoading}
-              >
-                {isGenerating ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : (
-                  <Wand2 className="h-4 w-4 mr-2" />
-                )}
-                套用 AI 建議
-              </Button>
-              <Button
-                variant="outline"
-                onClick={handleApplyTax}
-                disabled={isLoading || totals.revenue === 0}
-                className="bg-orange-50 border-orange-200 hover:bg-orange-100"
-              >
-                <Calculator className="h-4 w-4 mr-2" />
-                套用營業稅
-              </Button>
-              <Button variant="outline" onClick={handleAddRow}>
-                <Plus className="h-4 w-4 mr-2" />
-                新增項目
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => handleBatchAdd(5)}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                批次新增 5 列
-              </Button>
-              <Button
-                variant="outline"
-                onClick={handleBatchDelete}
-                disabled={rows.filter(r => r.selected).length === 0}
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                批次刪除
-              </Button>
-              <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-md">
-                <Switch
-                  checked={showDuplicates}
-                  onCheckedChange={setShowDuplicates}
-                  id="show-duplicates"
-                />
-                <label htmlFor="show-duplicates" className="text-sm cursor-pointer flex items-center gap-1">
-                  {duplicateGroups.size > 0 && (
-                    <AlertTriangle className="h-4 w-4 text-orange-500" />
-                  )}
-                  只顯示重複項目 {duplicateGroups.size > 0 && `(${duplicateGroups.size} 組)`}
-                </label>
+                <div className="text-xs text-blue-600 font-medium px-3 py-1.5 bg-blue-50 rounded-md whitespace-nowrap">
+                  當前匯率：1 USD = {exchangeRates.USD.toFixed(2)} TWD（每小時更新）
+                </div>
               </div>
-              <Button
-                onClick={handleSave}
-                disabled={saveMutation.isPending || isLoading}
-              >
-                {saveMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : null}
-                儲存月份資料
-              </Button>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleGenerateAI}
+                  disabled={isGenerating || isLoading}
+                  size="sm"
+                >
+                  {isGenerating ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Wand2 className="h-4 w-4 mr-2" />
+                  )}
+                  套用 AI 建議
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleApplyTax}
+                  disabled={isLoading || totals.revenue === 0}
+                  className="bg-orange-50 border-orange-200 hover:bg-orange-100"
+                  size="sm"
+                >
+                  <Calculator className="h-4 w-4 mr-2" />
+                  套用營業稅
+                </Button>
+                <div className="h-4 w-px bg-gray-300"></div>
+                <Button variant="outline" onClick={handleAddRow} size="sm">
+                  <Plus className="h-4 w-4 mr-2" />
+                  新增項目
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => handleBatchAdd(5)}
+                  size="sm"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  批次新增 5 列
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleBatchDelete}
+                  disabled={rows.filter(r => r.selected).length === 0}
+                  size="sm"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  批次刪除
+                </Button>
+                <div className="h-4 w-px bg-gray-300"></div>
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-md">
+                  <Switch
+                    checked={showDuplicates}
+                    onCheckedChange={setShowDuplicates}
+                    id="show-duplicates"
+                  />
+                  <label htmlFor="show-duplicates" className="text-xs cursor-pointer flex items-center gap-1 whitespace-nowrap">
+                    {duplicateGroups.size > 0 && (
+                      <AlertTriangle className="h-3 w-3 text-orange-500" />
+                    )}
+                    只顯示重複 {duplicateGroups.size > 0 && `(${duplicateGroups.size})`}
+                  </label>
+                </div>
+                <div className="ml-auto">
+                  <Button
+                    onClick={handleSave}
+                    disabled={saveMutation.isPending || isLoading}
+                    size="sm"
+                  >
+                    {saveMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : null}
+                    儲存月份資料
+                  </Button>
+                </div>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
