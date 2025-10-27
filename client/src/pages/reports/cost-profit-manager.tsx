@@ -233,26 +233,31 @@ export default function CostProfitManagerPage() {
   const recordsQuery = useQuery({
     queryKey: ['cost-profit-records', selectedYear, selectedMonth],
     queryFn: async () => {
-      const params = new URLSearchParams({
-        year: String(selectedYear),
-        month: selectedMonth,
-      });
-      const response = await fetch(`/api/cost-profit/records?${params.toString()}`, {
-        credentials: 'include',
-      });
+      try {
+        const params = new URLSearchParams({
+          year: String(selectedYear),
+          month: selectedMonth,
+        });
+        const response = await fetch(`/api/cost-profit/records?${params.toString()}`, {
+          credentials: 'include',
+        });
 
-      if (!response.ok) {
-        if (response.status === 404) {
-          return [];
+        if (!response.ok) {
+          if (response.status === 404) {
+            return [];
+          }
+          throw new Error(`API Error: ${response.statusText}`);
         }
-        throw new Error(`API Error: ${response.statusText}`);
-      }
 
-      const json = await response.json();
-      if (!json?.success) {
-        return json?.data ?? [];
+        const json = await response.json();
+        if (!json?.success) {
+          return json?.data ?? [];
+        }
+        return json.data as CostProfitRecord[];
+      } catch (error) {
+        console.error('API 查詢錯誤:', error);
+        return [];
       }
-      return json.data as CostProfitRecord[];
     },
   });
 
