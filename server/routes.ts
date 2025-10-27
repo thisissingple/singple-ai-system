@@ -5807,8 +5807,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { tableName } = req.params;
       const data = req.body;
 
-      const pool = createPool();
-      const result = await insertAndReturn(pool, tableName, data);
+      const result = await insertAndReturn(tableName, data);
 
       res.json({ success: true, data: result });
     } catch (error: any) {

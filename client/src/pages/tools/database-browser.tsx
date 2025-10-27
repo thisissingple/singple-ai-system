@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, Edit, Trash2, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { Search, Edit, Trash2, ChevronLeft, ChevronRight, Loader2, Plus } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface ColumnInfo {
@@ -30,7 +30,9 @@ export default function DatabaseBrowser() {
   const [limit] = useState(50);
   const [editingRow, setEditingRow] = useState<any>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editFormData, setEditFormData] = useState<Record<string, any>>({});
+  const [addFormData, setAddFormData] = useState<Record<string, any>>({});
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
 
   // 取得所有表格
@@ -101,6 +103,35 @@ export default function DatabaseBrowser() {
     },
   });
 
+  // 新增資料
+  const addMutation = useMutation({
+    mutationFn: async ({ tableName, data }: { tableName: string; data: any }) => {
+      const res = await fetch(`/api/database/${tableName}/data`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to add');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['database', 'data', selectedTable] });
+      setIsAddDialogOpen(false);
+      setAddFormData({});
+      toast({
+        title: "新增成功",
+        description: "資料已成功新增",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "新增失敗",
+        description: error.message || "無法新增資料",
+        variant: "destructive",
+      });
+    },
+  });
+
   // 刪除資料
   const deleteMutation = useMutation({
     mutationFn: async ({ tableName, id }: { tableName: string; id: string }) => {
@@ -130,6 +161,35 @@ export default function DatabaseBrowser() {
   const columns: ColumnInfo[] = columnsData?.columns || [];
   const data = tableData?.data || [];
   const pagination = tableData?.pagination;
+
+  const handleAdd = () => {
+    // 初始化新增表單資料
+    const initialData: Record<string, any> = {};
+    columns
+      .filter(col => !['id', 'created_at', 'updated_at'].includes(col.column_name))
+      .forEach(col => {
+        initialData[col.column_name] = '';
+      });
+    setAddFormData(initialData);
+    setIsAddDialogOpen(true);
+  };
+
+  const handleSaveAdd = () => {
+    if (!selectedTable) return;
+
+    // 移除空值和不需要的欄位
+    const dataToSubmit: Record<string, any> = {};
+    Object.entries(addFormData).forEach(([key, value]) => {
+      if (value !== '' && value !== null && value !== undefined) {
+        dataToSubmit[key] = value;
+      }
+    });
+
+    addMutation.mutate({
+      tableName: selectedTable,
+      data: dataToSubmit,
+    });
+  };
 
   const handleEdit = (row: any) => {
     setEditingRow(row);
@@ -235,6 +295,11 @@ export default function DatabaseBrowser() {
                 />
               </div>
               <Button onClick={handleSearch} size="sm">搜尋</Button>
+              <div className="h-6 w-px bg-gray-300" />
+              <Button onClick={handleAdd} size="sm" variant="default" className="gap-1">
+                <Plus className="h-4 w-4" />
+                新增紀錄
+              </Button>
               <div className="ml-auto text-sm text-muted-foreground">
                 共 {pagination?.total || 0} 筆
               </div>
@@ -447,6 +512,79 @@ export default function DatabaseBrowser() {
                 </>
               ) : (
                 '儲存'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 新增對話框 */}
+      <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
+        if (!addMutation.isPending) {
+          setIsAddDialogOpen(open);
+        }
+      }}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>新增資料</DialogTitle>
+            <DialogDescription>
+              在 {selectedTable} 表格中新增一筆資料
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* 載入遮罩 */}
+          {addMutation.isPending && (
+            <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-50 rounded-lg">
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                <p className="text-sm font-medium text-gray-700">正在新增資料...</p>
+              </div>
+            </div>
+          )}
+
+          <div className="grid gap-4 py-4">
+            {columns.filter(col => !['id', 'created_at', 'updated_at'].includes(col.column_name)).map((col) => (
+              <div key={col.column_name} className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor={`add-${col.column_name}`} className="text-right">
+                  {col.column_name}
+                  {col.is_nullable === 'NO' && <span className="text-red-500 ml-1">*</span>}
+                </Label>
+                <Input
+                  id={`add-${col.column_name}`}
+                  value={addFormData[col.column_name] || ''}
+                  onChange={(e) => setAddFormData({
+                    ...addFormData,
+                    [col.column_name]: e.target.value
+                  })}
+                  className="col-span-3"
+                  placeholder={col.data_type}
+                  disabled={addMutation.isPending}
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsAddDialogOpen(false);
+                setAddFormData({});
+              }}
+              disabled={addMutation.isPending}
+            >
+              取消
+            </Button>
+            <Button
+              onClick={handleSaveAdd}
+              disabled={addMutation.isPending}
+            >
+              {addMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  新增中...
+                </>
+              ) : (
+                '新增'
               )}
             </Button>
           </DialogFooter>

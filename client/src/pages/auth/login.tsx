@@ -33,6 +33,12 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
 
+      if (!response.ok) {
+        setError('伺服器錯誤，請稍後再試');
+        setLoading(false);
+        return;
+      }
+
       const data = await response.json();
 
       if (!data.success) {
@@ -42,14 +48,15 @@ export default function LoginPage() {
       }
 
       // 檢查是否需要修改密碼
-      if (data.user.must_change_password) {
+      if (data.user?.must_change_password) {
         setLocation('/change-password');
         return;
       }
 
       // 登入成功，跳轉到首頁
-      setLocation('/');
+      window.location.href = '/'; // 使用 window.location.href 強制重新載入
     } catch (err: any) {
+      console.error('登入錯誤:', err);
       setError('網路錯誤，請稍後再試');
       setLoading(false);
     }
@@ -85,12 +92,13 @@ export default function LoginPage() {
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
+                name="email"
                 type="email"
                 placeholder="your.email@company.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                autoComplete="email"
+                autoComplete="username email"
                 autoFocus
                 disabled={loading}
               />
@@ -102,6 +110,7 @@ export default function LoginPage() {
               <div className="relative">
                 <Input
                   id="password"
+                  name="password"
                   type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••"
                   value={password}

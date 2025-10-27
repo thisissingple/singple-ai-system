@@ -3923,7 +3923,513 @@ Response: { success: true, message: '已儲存到知識庫' }
 
 ---
 
-**最後更新時間**: 2025-10-25
-**當前狀態**: Phase 31 UI 排版優化完成 ✅
-**下一階段**: Phase 32 - 解析器優化 + 用戶驗收測試
+## 📅 Phase 32: 統一評分系統 + 整體評分計算邏輯（2025-10-25）
+
+### 🎯 核心目標
+建立雙評分系統（教學品質 + 推課策略），並設計整體評分計算邏輯，提供更全面的課程品質評估。
+
+### ✅ 完成項目
+
+#### 1. GPT Prompt 增強（5 大改進）
+
+**A. 自動發言者識別**
+- 新增逐字稿無標記時的自動辨識邏輯
+- 從對話內容、邏輯、時間戳推斷發言者
+- 防止 AI 編造不存在的對話
+- 所有引用必須標註【學員】或【老師】
+
+**B. 高階 Double Bind 識別（5 種類型）**
+- **明確二選一 Double Bind**（基礎型）
+- **隱含式 Double Bind**（高階型，極易遺漏）
+  - 範例：正常化 + 暗示解決方案
+  - 識別「吸引 + 問題 + 正常化」結構
+- **正常化 + 唯一解決方案 Double Bind**
+- **損失規避 Double Bind**（沉沒成本）
+- **未來錨定 Double Bind**（美好未來 vs 現狀困境）
+
+**C. 痛點呼應嚴格化**
+- 區分技術回應 vs 深層痛點呼應
+- ❌ 不算：只回應技術問題
+- ✅ 才算：連結情緒/社交/目標/應用場景
+- 核心原則：學員花錢必有明確目標與場景
+
+**D. 教學品質評估 /25 分（新增）**
+
+5 個指標：
+1. 教學目標清晰度 /5
+2. 示範與講解品質 /5
+3. 學員理解度與互動 /5
+4. 即時回饋與調整 /5
+5. 課程結構與時間掌控 /5
+
+每個指標包含：
+- 嚴格評分標準（0-5 分）
+- 證據要求（實際對話 + 時間戳）
+- 理由說明（為何給此分）
+
+**E. 雙評分系統統一**
+- **教學品質評估 /25**（教學技巧專業度）
+- **成交策略評估 /25**（推課能力）
+- 兩者分開評分，互不影響
+
+#### 2. 解析器架構升級
+
+**新增 parseTeachingMetrics() 函數** ([`parse-teaching-analysis.ts`](client/src/lib/parse-teaching-analysis.ts))
+- 解析教學品質 5 個指標
+- 提取證據 + 理由 + 時間戳
+- 計算教學總分 /25
+
+**更新 ParsedTeachingAnalysis Interface**
+```typescript
+interface ParsedTeachingAnalysis {
+  teachingMetrics: ScoreMetric[];     // 教學品質 5 指標
+  teachingTotalScore: number;         // 教學總分 /25
+  teachingMaxScore: number;           // 25
+  salesMetrics: ScoreMetric[];        // 推課策略 5 指標
+  salesTotalScore: number;            // 推課總分 /25
+  salesMaxScore: number;              // 25
+  // ... 其他欄位
+}
+```
+
+**優化 Regex 匹配**
+- 主指標 regex 匹配完整內容（含證據、理由）
+- 證據 regex 處理嵌套 bullet 結構
+- 理由 regex 靈活匹配多種格式
+- 自動提取所有時間戳
+
+#### 3. 整體評分計算系統
+
+**公式設計** ([`calculate-overall-score.ts`](client/src/lib/calculate-overall-score.ts))
+```
+Overall Score = (Teaching/25 × 30%) + (Sales/25 × 30%) + (Conversion/100 × 40%)
+```
+
+權重分配：
+- 教學品質：30%（0-30 分）
+- 推課策略：30%（0-30 分）
+- 成交機率：40%（0-40 分）
+- 總分：0-100 分
+
+**8 級評級系統**
+- **SSS** (95-100): 漸層金色 - 完美表現
+- **SS** (90-94): 紫粉漸層 - 卓越表現
+- **S** (85-89): 藍青漸層 - 優秀表現
+- **A** (80-84): 綠色 - 良好表現
+- **B** (70-79): 藍色 - 中上表現
+- **C** (60-69): 黃色 - 中等表現
+- **D** (50-59): 橙色 - 需改進
+- **E** (<50): 紅色 - 急需改進
+
+#### 4. UI 組件更新
+
+**FloatingAIChat**（完整重寫） ([`floating-ai-chat.tsx`](client/src/components/teaching-quality/floating-ai-chat.tsx))
+- 圓形按鈕始終可見（打開時也保留）
+- 對話視窗浮動在按鈕上方
+- 圖示切換：MessageSquare ↔ X
+- 動畫效果：slide-in-from-bottom + fade-in
+
+**SalesScoreCard**（改為 Dialog Popup） ([`sales-score-card.tsx`](client/src/components/teaching-quality/sales-score-card.tsx))
+- 從可展開卡片改為 Dialog 彈窗
+- 新增 TextWithTimestamps 組件
+  - 解析所有時間戳格式
+  - 點擊跳轉至逐字稿
+- 證據 + 理由分別顯示
+- 完整 5 個指標詳細資訊
+
+#### 5. 測試驗證
+
+**陳冠霖報告測試結果**
+
+改進前：
+- Double Bind: 2/5（遺漏隱含式）
+- 痛點呼應: 4/5（評分過鬆）
+- 缺少發言者標記，AI 編造回應
+
+改進後：
+- Double Bind: 3/5 ✅（正確識別隱含式 14:13:51）
+- 痛點呼應: 3/5 ✅（更精準，區分技術 vs 深層）
+- 推課評分: 17/25 ✅
+- 所有對話標註【學員】【老師】✅
+- 證據 + 理由完整顯示 ✅
+
+**整體評分測試**
+```
+陳冠霖（假設教學 21/25）：
+- 教學貢獻：25.2/30
+- 推課貢獻：20.4/30
+- 成交貢獻：30/40
+- 總分：75.6/100 (B級)
+```
+
+### 📁 修改/新增檔案
+
+**Backend**
+- [`teaching-quality-gpt-service.ts`](server/services/teaching-quality-gpt-service.ts) - 新增教學品質評估段落、強化 Double Bind 識別
+
+**Frontend Components**
+- [`floating-ai-chat.tsx`](client/src/components/teaching-quality/floating-ai-chat.tsx) - 新增
+- [`sales-score-card.tsx`](client/src/components/teaching-quality/sales-score-card.tsx) - 新增
+
+**Frontend Utilities**
+- [`calculate-overall-score.ts`](client/src/lib/calculate-overall-score.ts) - 新增
+- [`parse-teaching-analysis.ts`](client/src/lib/parse-teaching-analysis.ts) - 更新
+
+**Frontend Pages**
+- [`teaching-quality-detail.tsx`](client/src/pages/teaching-quality/teaching-quality-detail.tsx) - UI 重組
+
+**Tests**
+- `tests/check-double-bind.ts` - 新增
+- `tests/test-parser-with-new-report.ts` - 新增
+- `tests/test-overall-score.ts` - 新增
+
+### 💡 技術亮點
+
+1. **AI Prompt Engineering**：5 種 Double Bind 類型識別，涵蓋隱含式高階技巧
+2. **嚴格評分標準**：0-5 分有明確區分，防止評分過鬆
+3. **雙軌評分系統**：教學 vs 推課分開評分，更有鑑別度
+4. **加權整體評分**：40% 成交機率反映最終目標
+5. **8 級評級視覺化**：漸層色彩系統，類似魔物獵人任務評分
+
+---
+
+## 📅 Phase 32.5: 雙評分系統驗證 + 教學評分卡片組件（2025-10-25）
+
+### 🎯 核心目標
+建立教學評分卡片組件，與推課評分卡片保持一致的互動模式。
+
+### ✅ 完成項目
+
+**TeachingScoreCard 組件** ([`teaching-score-card.tsx`](client/src/components/teaching-quality/teaching-score-card.tsx))
+- Dialog Popup 設計（與 SalesScoreCard 一致）
+- 5 個教學品質指標詳細資訊
+- 進度條視覺化
+- 證據 + 理由分別顯示
+- 時間戳可點擊跳轉
+
+### 📁 新增檔案
+- [`client/src/components/teaching-quality/teaching-score-card.tsx`](client/src/components/teaching-quality/teaching-score-card.tsx)
+
+---
+
+## 📅 Phase 33: 完整整合雙評分系統 UI（2025-10-25）
+
+### 🎯 核心目標
+將雙評分系統完整整合到教學品質詳細頁面，提供清晰的視覺化呈現。
+
+### ✅ 完成項目
+
+#### 1. 推課戰績報告 UI 全面重構
+
+**整合教學評分卡片**
+
+舊版（已移除）：
+- 簡單的數字顯示 /10
+- 星星評級 ★★★★★
+- 固定等級 S/A/B/C
+- 無互動功能
+
+新版（TeachingScoreCard）：
+- 完整 5 個指標 Dialog Popup
+- 總分 /25 與推課評分統一
+- 進度條視覺化
+- 動態等級標籤（優秀/良好/中等/需改進）
+- 時間戳可點擊跳轉
+- 證據 + 理由完整顯示
+
+**更新推課評分卡片**
+
+數據源變更：
+- 舊: `newParsedAnalysis.scoreMetrics`
+- 新: `newParsedAnalysis.salesMetrics`
+
+總分變更：
+- 舊: `newParsedAnalysis.totalScore`
+- 新: `newParsedAnalysis.salesTotalScore`
+
+最大值變更：
+- 舊: `newParsedAnalysis.maxTotalScore`
+- 新: `newParsedAnalysis.salesMaxScore`
+
+#### 2. 整體評分顯示（右上角）
+
+**實時計算邏輯**
+```typescript
+const overallScore = calculateOverallScore(
+  newParsedAnalysis.teachingTotalScore,  // 教學 /25
+  newParsedAnalysis.salesTotalScore,     // 推課 /25
+  newParsedAnalysis.probability          // 成交 /100
+);
+```
+
+**UI 設計**
+- **位置**: 推課戰績報告標題右上角
+- **組成**:
+  - 總分顯示: `64/100` (大字體)
+  - 等級 Badge: `C` (動態顏色)
+  - 「整體評分」標籤
+
+**動態顏色系統**：
+- SSS: 漸層金色
+- SS: 紫粉漸層
+- S: 藍青漸層
+- A: 綠色
+- B: 藍色
+- C: 黃色
+- D: 橙色
+- E: 紅色
+
+#### 3. 推課戰績報告佈局
+
+**4 格佈局（Grid 2×2）**
+```
+┌───────────────┬───────────────┐
+│  1. 教學評分  │  2. 推課評分  │
+│  (藍色主題)   │  (紫色主題)   │
+├───────────────┼───────────────┤
+│ 3. AI成交率   │ 4. 課程資訊   │
+│  (橙色主題)   │  (藍色主題)   │
+└───────────────┴───────────────┘
+```
+
+每個卡片都是可互動的組件，點擊可查看詳情。
+
+### 📁 修改檔案
+- [`teaching-quality-detail.tsx`](client/src/pages/teaching-quality/teaching-quality-detail.tsx) - 完整 UI 重構
+
+### 📊 測試結果（陳冠霖數據）
+```
+教學評分: 20/25 (80%)
+推課評分: 15/25 (60%)
+成交機率: 55%
+整體評分: 64/100 (C級)
+
+貢獻分解:
+- 教學: 24/30
+- 推課: 18/30
+- 成交: 22/40
+```
+
+---
+
+## 📅 Phase 31.5: UI 風格統一與可收合功能完善（2025-10-26）
+
+### 🎯 核心目標
+統一所有卡片的視覺風格，並為主要區塊添加可收合功能，提升用戶體驗。
+
+### ✅ 完成項目
+
+#### 1. 4 張指標卡片風格統一
+
+所有卡片統一使用 TeachingScoreCard 風格：
+- 使用 Card 組件結構（非 div）
+- CardTitle: text-lg（非 text-xs uppercase）
+- Border: border-2 border-{color}-500/30
+- Background: bg-gradient-to-br from-{color}-50 to-white
+- Icon + text 佈局
+
+修改的卡片：
+- 教學評分卡（藍色）
+- 推課評分卡（紫色）
+- 預估成交率（橙色）
+- 課程資訊（綠色）
+
+#### 2. 可收合功能實作
+
+新增所有主要區塊的展開/收合功能：
+- **學員檔案卡**: 預設展開 (useState(true))
+- **教學品質評估**: 預設收合 (useState(false))
+- **成交策略評估**: 預設收合 (useState(false))
+- **推課話術總結**: 預設展開 (useState(true))
+
+每個區塊的 CardHeader 都加入：
+- ChevronUp/ChevronDown 圖示按鈕
+- 點擊切換展開/收合狀態
+- 條件渲染 CardContent
+
+#### 3. 推課方向清單式排版
+
+將推課方向的核心價值從使用 `<br />` 改為清單式：
+```tsx
+<ul className="list-disc list-inside space-y-0.5 ml-2">
+  <li><strong>隨時隨地練習</strong></li>
+  <li><strong>即時指導</strong></li>
+  <li><strong>練習頻率提升</strong></li>
+  <li><strong>確保做對</strong></li>
+</ul>
+```
+
+#### 4. 版本 A/B/C 按鈕間距調整
+
+將 TabsList 到 TabsContent 的間距從 `mt-6` 增加至 `mt-8`，讓按鈕與內容區塊視覺上更分離。
+
+### 📁 修改檔案
+
+**Components**
+- [`sales-score-card.tsx`](client/src/components/teaching-quality/sales-score-card.tsx) - 風格統一
+- [`teaching-scores-detail-section.tsx`](client/src/components/teaching-quality/teaching-scores-detail-section.tsx) - 新增
+- [`sales-scores-detail-section.tsx`](client/src/components/teaching-quality/sales-scores-detail-section.tsx) - 新增
+- [`sales-scripts-section.tsx`](client/src/components/teaching-quality/sales-scripts-section.tsx) - 可收合功能 + 清單式排版
+
+**Pages**
+- [`teaching-quality-detail.tsx`](client/src/pages/teaching-quality/teaching-quality-detail.tsx) - 整合所有可收合區塊
+
+### 🎨 UI/UX 改進
+
+1. **視覺一致性**: 4 張指標卡片完全統一風格
+2. **減少視覺疲勞**: 預設收合教學/推課詳情，減少初始資訊量
+3. **提升閱讀體驗**: 推課方向使用清單式排版，更清晰
+4. **互動性增強**: 所有區塊可展開/收合，使用者自主控制資訊密度
+
+---
+
+## 📅 Phase 34: 修復整體評分計算問題，實作後端雙評分系統（2025-10-26）
+
+### 🎯 核心問題
+- 陳冠霖的分數顯示為 6 分（E），實際應該是 64 分（C）
+- overall_score 使用舊算法：Math.round(55/10) = 6
+- teaching_score, sales_score, conversion_probability 未儲存至資料庫
+
+### ✅ 解決方案
+
+#### 1. 資料庫遷移（Migration 031）
+
+**新增欄位** ([`031_add_dual_score_system.sql`](supabase/migrations/031_add_dual_score_system.sql))
+- `teaching_score` NUMERIC(5,2) - 教學評分 (0-25)
+- `sales_score` NUMERIC(5,2) - 推課評分 (0-25)
+- `conversion_probability` NUMERIC(5,2) - 成交機率 (0-100)
+- `overall_score` 範圍從 1-10 改為 0-100
+
+#### 2. 後端 Markdown 解析器
+
+**新增解析服務** ([`parse-teaching-scores.ts`](server/services/parse-teaching-scores.ts))
+- `parseTeachingScore()`: 3 層遞進式容錯提取教學評分
+- `parseSalesScore()`: 提取推課評分
+- `parseConversionProbability()`: 提取成交機率
+- `calculateOverallScore()`: (T/25×30) + (S/25×30) + (P×0.4)
+
+#### 3. 更新分析儲存邏輯
+
+**修改路由** ([`routes-teaching-quality-new.ts`](server/routes-teaching-quality-new.ts))
+- 呼叫 `parseScoresFromMarkdown()`
+- 儲存 teaching_score, sales_score, conversion_probability, overall_score
+
+#### 4. 批次更新歷史資料
+
+**更新腳本** (`tests/update-existing-scores.ts`)
+- 更新 153 筆分析記錄
+- 陳冠霖: 6/10 → 64/100 (T:20/25, S:15/25, P:55%)
+
+### 📁 新增/修改檔案
+
+**Backend**
+- [`server/services/parse-teaching-scores.ts`](server/services/parse-teaching-scores.ts) - 新增
+- [`server/routes-teaching-quality-new.ts`](server/routes-teaching-quality-new.ts) - 修改
+
+**Database**
+- [`supabase/migrations/031_add_dual_score_system.sql`](supabase/migrations/031_add_dual_score_system.sql) - 新增
+
+**Tests**
+- `tests/run-migration-031.ts` - 新增
+- `tests/test-score-parser.ts` - 新增
+- `tests/update-existing-scores.ts` - 新增
+- `tests/check-chen-score.ts` - 新增
+
+**Documentation**
+- `PHASE_34_SCORE_FIX_SUMMARY.md` - 新增
+
+### ✅ 測試結果
+- ✅ 解析器測試通過（Teaching:20/25, Sales:15/25, Prob:55%, Overall:64/100）
+- ✅ 資料庫遷移成功
+- ✅ 153 筆歷史資料全部更新
+- ✅ API 回應正確顯示 overall_score:64
+
+---
+
+## 📅 Phase 35: 自動儲存分析報告到學員知識庫（2025-10-26）
+
+### 🎯 核心需求
+教學品質分析完成後，自動將 Markdown 報告儲存到學員知識庫，讓 AI 對話框可以引用完整分析內容。
+
+### ✅ 解決方案
+
+#### 1. 修正 addDataSourceRef 函數 Bug
+
+**檔案**: [`student-knowledge-service.ts`](server/services/student-knowledge-service.ts)
+
+問題：原本 SQL 未處理 data_sources 為 null 的情況
+
+修正：
+```sql
+UPDATE student_knowledge_base
+SET data_sources = jsonb_set(
+  COALESCE(data_sources, '{}'::jsonb),  -- 新增: 處理 null
+  '{ai_analyses}',
+  COALESCE(data_sources->'ai_analyses', '[]'::jsonb) || $1::jsonb,
+  true
+)
+WHERE student_email = $2
+```
+
+#### 2. 在分析完成後自動呼叫
+
+**檔案**: [`routes-teaching-quality-new.ts`](server/routes-teaching-quality-new.ts) (lines 328-342)
+
+流程：
+1. 分析完成並儲存到 teaching_quality_analysis
+2. 自動呼叫 `getOrCreateStudentKB()` 確保知識庫存在
+3. 自動呼叫 `addDataSourceRef()` 將分析 ID 加入 data_sources.ai_analyses
+4. 使用 try-catch 包裹，即使失敗也不影響主流程
+
+#### 3. 測試驗證
+
+**測試腳本**
+- `tests/test-add-data-source-ref.ts` - 函數測試通過 ✅
+- `tests/test-auto-save-to-kb.ts` - 知識庫狀態驗證 ✅
+- 陳冠霖的分析已在知識庫中 ✅
+
+**測試結果**
+```
+✅ Test PASSED: Analysis ID found in knowledge base!
+📊 Summary:
+  Total analyses: 1
+  In knowledge base: 1
+  Missing from KB: 0
+```
+
+### 📁 新增/修改檔案
+
+**Backend**
+- [`server/services/student-knowledge-service.ts`](server/services/student-knowledge-service.ts) - 修正 bug
+- [`server/routes-teaching-quality-new.ts`](server/routes-teaching-quality-new.ts) - 新增自動儲存
+
+**Tests**
+- `tests/test-auto-save-to-kb.ts` - 新增
+- `tests/test-add-data-source-ref.ts` - 新增
+- `tests/manual-add-to-kb.ts` - 新增（手動補救工具）
+- `tests/backfill-analyses-to-kb.ts` - 新增（批次更新工具）
+
+**Documentation**
+- `PHASE_35_AUTO_SAVE_KB_SUMMARY.md` - 新增
+
+### 💡 技術細節
+
+**資料流程**:
+```
+分析完成 → 儲存 teaching_quality_analysis
+          → getOrCreateStudentKB(email, name)
+          → addDataSourceRef(email, 'ai_analyses', analysis_id)
+          → student_knowledge_base.data_sources.ai_analyses[] 更新
+```
+
+### 🎯 影響範圍
+- ✅ 新增分析: 自動加入知識庫
+- ✅ AI 對話: 可引用完整教學品質分析報告
+- ⏳ 歷史資料: 可選擇性批次更新（backfill script 已準備）
+
+---
+
+**最後更新時間**: 2025-10-27
+**當前狀態**: Phase 35 完成 - 自動儲存分析報告到學員知識庫 ✅
+**下一階段**: 資料庫瀏覽器新增紀錄功能
 

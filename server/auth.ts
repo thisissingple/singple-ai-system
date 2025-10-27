@@ -46,7 +46,7 @@ export function getSession() {
     cookie: {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production', // HTTPS only in production
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // 'none' for cross-site cookies in production
+      sameSite: 'lax', // 使用 'lax' 以支援手機瀏覽器（zeabur.app 同域不需要 'none'）
       maxAge: sessionTtl,
       path: '/', // Ensure cookie is available for all paths
     },
