@@ -668,11 +668,15 @@ export default function CostProfitManagerPage() {
 
       if (row.amountInTWD !== undefined && row.amountInTWD !== null) {
         // 使用已儲存的 TWD 金額（不受當前匯率影響）
-        amountInTWD = row.amountInTWD;
+        // 確保轉換為數字（資料庫可能返回字串）
+        amountInTWD = Number(row.amountInTWD);
       } else {
         // 即時計算（新增或修改中的資料）
         amountInTWD = convertToTWD(amount, row.currency);
       }
+
+      // 確保 amountInTWD 是有效數字
+      if (!Number.isFinite(amountInTWD)) return;
 
       if (isRevenueCategory(row.category)) {
         revenue += amountInTWD;
