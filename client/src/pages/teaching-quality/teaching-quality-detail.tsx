@@ -498,9 +498,10 @@ export default function TeachingQualityDetail() {
         throw new Error(data.error || '重新分析失敗');
       }
 
-      // 重新分析成功，完整重新載入頁面以顯示最新結果
-      alert('重新分析完成！頁面即將重新載入。');
-      window.location.reload();
+      // 重新分析成功，重新載入資料（不使用 window.location.reload）
+      alert('重新分析完成！');
+      await fetchAnalysisDetail();
+      setReanalyzing(false);
     } catch (err) {
       console.error('Error reanalyzing:', err);
       alert(err instanceof Error ? err.message : '重新分析失敗');
@@ -635,14 +636,23 @@ export default function TeachingQualityDetail() {
       <div className="mx-auto max-w-7xl space-y-6 pb-10">
         {/* Header */}
         <div className="flex flex-col gap-4">
-          <Button
-            variant="ghost"
-            onClick={() => navigate('/teaching-quality')}
-            className="w-fit"
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            返回列表
-          </Button>
+          <div className="flex items-center justify-between">
+            <Button
+              variant="ghost"
+              onClick={() => navigate('/teaching-quality')}
+              className="w-fit"
+            >
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              返回列表
+            </Button>
+            <Button
+              onClick={handleReanalyze}
+              disabled={reanalyzing}
+              variant="outline"
+            >
+              {reanalyzing ? '分析中...' : '🔄 重新分析'}
+            </Button>
+          </div>
           <h1 className="text-3xl font-bold">🎯 推課分析詳情</h1>
         </div>
 
