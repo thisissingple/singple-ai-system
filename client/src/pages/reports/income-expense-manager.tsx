@@ -1147,32 +1147,159 @@ export default function IncomeExpenseManager() {
                       />
                     </TableHead>
                     <TableHead className="w-[60px] whitespace-nowrap text-center">#</TableHead>
-                    <TableHead className="w-[150px] whitespace-nowrap">日期</TableHead>
-                    <TableHead className="w-[120px] whitespace-nowrap">類型</TableHead>
-                    <TableHead className="w-[150px] whitespace-nowrap">付款方式</TableHead>
-                    <TableHead className="w-[250px] whitespace-nowrap">項目</TableHead>
-                    <TableHead className="w-[180px] whitespace-nowrap">授課教練</TableHead>
-                    <TableHead className="w-[200px] whitespace-nowrap">商家/學生名稱</TableHead>
-                    <TableHead className="w-[240px] whitespace-nowrap">Email</TableHead>
-                    <TableHead className="w-[200px] whitespace-nowrap">金額</TableHead>
-                    <TableHead className="w-[280px] whitespace-nowrap">備註</TableHead>
-                    <TableHead className="w-[180px] whitespace-nowrap">電訪人員</TableHead>
-                    <TableHead className="w-[180px] whitespace-nowrap">諮詢人員</TableHead>
-                    <TableHead className="w-[180px] whitespace-nowrap">填表人</TableHead>
-                    <TableHead className="w-[200px] whitespace-nowrap">建立時間</TableHead>
-                    <TableHead className="w-[200px] whitespace-nowrap">最後更新</TableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.date}
+                      onResize={(w) => handleColumnResize('date', w)}
+                      sortable
+                      sortDirection={sortColumn === 'transaction_date' ? sortDirection : null}
+                      onSort={() => handleSort('transaction_date')}
+                    >
+                      日期
+                    </ResizableTableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.type}
+                      onResize={(w) => handleColumnResize('type', w)}
+                      sortable
+                      sortDirection={sortColumn === 'transaction_type' ? sortDirection : null}
+                      onSort={() => handleSort('transaction_type')}
+                    >
+                      類型
+                    </ResizableTableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.payment}
+                      onResize={(w) => handleColumnResize('payment', w)}
+                      sortable
+                      sortDirection={sortColumn === 'payment_method' ? sortDirection : null}
+                      onSort={() => handleSort('payment_method')}
+                    >
+                      付款方式
+                    </ResizableTableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.item}
+                      onResize={(w) => handleColumnResize('item', w)}
+                      sortable
+                      sortDirection={sortColumn === 'item_name' ? sortDirection : null}
+                      onSort={() => handleSort('item_name')}
+                    >
+                      項目
+                    </ResizableTableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.teacher}
+                      onResize={(w) => handleColumnResize('teacher', w)}
+                      sortable
+                      sortDirection={sortColumn === 'teacher_id' ? sortDirection : null}
+                      onSort={() => handleSort('teacher_id')}
+                    >
+                      授課教練
+                    </ResizableTableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.customer}
+                      onResize={(w) => handleColumnResize('customer', w)}
+                      sortable
+                      sortDirection={sortColumn === 'customer_name' ? sortDirection : null}
+                      onSort={() => handleSort('customer_name')}
+                    >
+                      商家/學生名稱
+                    </ResizableTableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.email}
+                      onResize={(w) => handleColumnResize('email', w)}
+                      sortable
+                      sortDirection={sortColumn === 'customer_email' ? sortDirection : null}
+                      onSort={() => handleSort('customer_email')}
+                    >
+                      Email
+                    </ResizableTableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.amount}
+                      onResize={(w) => handleColumnResize('amount', w)}
+                      sortable
+                      sortDirection={sortColumn === 'amount' ? sortDirection : null}
+                      onSort={() => handleSort('amount')}
+                    >
+                      金額
+                    </ResizableTableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.notes}
+                      onResize={(w) => handleColumnResize('notes', w)}
+                      sortable
+                      sortDirection={sortColumn === 'notes' ? sortDirection : null}
+                      onSort={() => handleSort('notes')}
+                    >
+                      備註
+                    </ResizableTableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.setter}
+                      onResize={(w) => handleColumnResize('setter', w)}
+                      sortable
+                      sortDirection={sortColumn === 'setter_id' ? sortDirection : null}
+                      onSort={() => handleSort('setter_id')}
+                    >
+                      電訪人員
+                    </ResizableTableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.consultant}
+                      onResize={(w) => handleColumnResize('consultant', w)}
+                      sortable
+                      sortDirection={sortColumn === 'consultant_id' ? sortDirection : null}
+                      onSort={() => handleSort('consultant_id')}
+                    >
+                      諮詢人員
+                    </ResizableTableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.createdBy}
+                      onResize={(w) => handleColumnResize('createdBy', w)}
+                      sortable
+                      sortDirection={sortColumn === 'created_by' ? sortDirection : null}
+                      onSort={() => handleSort('created_by')}
+                    >
+                      填表人
+                    </ResizableTableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.createdAt}
+                      onResize={(w) => handleColumnResize('createdAt', w)}
+                      sortable
+                      sortDirection={sortColumn === 'created_at' ? sortDirection : null}
+                      onSort={() => handleSort('created_at')}
+                    >
+                      建立時間
+                    </ResizableTableHead>
+
+                    <ResizableTableHead
+                      width={columnWidths.updatedAt}
+                      onResize={(w) => handleColumnResize('updatedAt', w)}
+                      sortable
+                      sortDirection={sortColumn === 'updated_at' ? sortDirection : null}
+                      onSort={() => handleSort('updated_at')}
+                    >
+                      最後更新
+                    </ResizableTableHead>
+
                     <TableHead className="w-[100px] whitespace-nowrap text-center">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.length === 0 ? (
+                  {sortedRows.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={17} className="text-center text-muted-foreground py-8">
                         尚無記錄，點擊「新增列」開始輸入
                       </TableCell>
                     </TableRow>
                   ) : (
-                    rows.map((row, index) => {
+                    sortedRows.map((row, index) => {
                       const rowKey = row.tempId || row.id || `row-${index}`;
 
                       return (

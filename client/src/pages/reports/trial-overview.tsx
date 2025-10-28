@@ -395,13 +395,13 @@ export default function TrialOverview() {
 
         {/* 主 Tabs */}
         <Tabs value={activeMainTab} onValueChange={(v) => handleMainTabChange(v as 'data' | 'analysis')}>
-          <TabsList className="grid w-full max-w-md grid-cols-2">
-            <TabsTrigger value="data" className="gap-2">
-              <BarChart3 className="h-4 w-4" />
+          <TabsList className="grid w-full max-w-md grid-cols-2 h-12">
+            <TabsTrigger value="data" className="gap-2 text-base">
+              <BarChart3 className="h-5 w-5" />
               整體數據
             </TabsTrigger>
-            <TabsTrigger value="analysis" className="gap-2">
-              <Users className="h-4 w-4" />
+            <TabsTrigger value="analysis" className="gap-2 text-base">
+              <Users className="h-5 w-5" />
               體驗課分析
             </TabsTrigger>
           </TabsList>
@@ -553,27 +553,23 @@ export default function TrialOverview() {
             )}
           </TabsContent>
 
-          {/* ==================== Tab 2: 學員分析 ==================== */}
+          {/* ==================== Tab 2: 體驗課分析 ==================== */}
           <TabsContent value="analysis" className="mt-6 space-y-6">
-            {/* 標題和重新整理按鈕 */}
-            <div className="flex justify-between items-start">
-              <div>
-                <h2 className="text-2xl font-bold">教學品質追蹤系統</h2>
-                <p className="text-muted-foreground mt-2">
-                  手動觸發分析每位學生的上課記錄 • 即時追蹤教學品質和改進建議
-                </p>
-              </div>
-              <Button variant="outline" onClick={() => fetchAnalysisData()} disabled={isLoadingAnalysis}>
-                <RefreshCw className={`mr-2 h-4 w-4 ${isLoadingAnalysis ? 'animate-spin' : ''}`} />
-                重新整理
-              </Button>
-            </div>
-
             {/* 篩選選項 */}
             <Card>
               <CardHeader>
-                <CardTitle>篩選選項</CardTitle>
-                <CardDescription>選擇老師查看其學生記錄 • 需要時點擊「手動分析」生成結果</CardDescription>
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <CardTitle>體驗課分析</CardTitle>
+                    <CardDescription className="mt-2">
+                      手動觸發分析每位學生的上課記錄 • 即時追蹤教學品質和改進建議 • AI 產出痛點、動機與成交策略 • 選擇老師查看其學生記錄 • 需要時點擊「手動分析」生成結果
+                    </CardDescription>
+                  </div>
+                  <Button variant="outline" onClick={() => fetchAnalysisData()} disabled={isLoadingAnalysis} className="ml-4">
+                    <RefreshCw className={`mr-2 h-4 w-4 ${isLoadingAnalysis ? 'animate-spin' : ''}`} />
+                    重新整理
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="flex gap-4 items-center">
@@ -624,17 +620,9 @@ export default function TrialOverview() {
               </CardContent>
             </Card>
 
-            {/* 學員分析記錄表格 */}
+            {/* 體驗課分析記錄表格 */}
             <Card>
-              <CardHeader>
-                <CardTitle>學員銷售分析記錄</CardTitle>
-                <CardDescription>
-                  {selectedTeacher === 'all'
-                    ? '顯示所有老師的銷售分析記錄'
-                    : `顯示 ${selectedTeacher} 的銷售分析記錄`} • 需要時手動啟動 AI 產出痛點、動機與成交策略
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+              <CardContent className="pt-6">
                 {isLoadingAnalysis ? (
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
