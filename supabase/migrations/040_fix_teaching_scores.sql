@@ -164,7 +164,7 @@ BEGIN
           updated_at = NOW()
       WHERE id = rec.id;
 
-      RAISE NOTICE '✅ % - Old: T=% S=% C=%% → O=% | New: T=% S=% C=%% → O=%',
+      RAISE NOTICE '✅ % - Old: T=% S=% C=% O=% | New: T=% S=% C=% O=%',
         rec.student_name,
         rec.teaching_score, rec.sales_score, rec.conversion_probability, rec.overall_score,
         new_teaching_score, new_sales_score, new_conversion_prob, new_overall_score;
@@ -183,7 +183,9 @@ BEGIN
   RAISE NOTICE '========================================================';
   RAISE NOTICE '✅ Successfully fixed: % records', success_count;
   RAISE NOTICE '❌ Failed: % records', fail_count;
-  RAISE NOTICE '📈 Success rate: %%', ROUND((success_count::NUMERIC / (success_count + fail_count)) * 100, 1);
+  IF (success_count + fail_count) > 0 THEN
+    RAISE NOTICE '📈 Success rate: %', ROUND((success_count::NUMERIC / (success_count + fail_count)) * 100, 1) || '%';
+  END IF;
 END $$;
 
 -- Verify final state
