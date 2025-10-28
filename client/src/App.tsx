@@ -1,4 +1,5 @@
 import { Switch, Route } from "wouter";
+import { lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -6,50 +7,63 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/auth-context";
 import { TeachingQualityProvider } from "@/contexts/teaching-quality-context";
 import { ProtectedRoute } from "@/components/auth/protected-route";
-import NotFound from "@/pages/not-found";
-import Dashboard from "@/pages/dashboard";
 
+// 只有這些頁面需要立即載入（登入頁面和 404）
+import NotFound from "@/pages/not-found";
+import LoginPage from "@/pages/auth/login";
+
+// 優化：使用 lazy loading 延遲載入其他頁面，減少初始 bundle 大小
 // 舊版頁面（用於兼容舊路由）
-import DashboardKPICalculator from "@/pages/dashboard-kpi-calculator";
-import DashboardTrialReport from "@/pages/dashboard-trial-report";
-import DashboardAIAnalysis from "@/pages/dashboard-ai-analysis";
-import DashboardRawDataMVP from "@/pages/dashboard-raw-data-mvp";
+const Dashboard = lazy(() => import("@/pages/dashboard"));
+const DashboardKPICalculator = lazy(() => import("@/pages/dashboard-kpi-calculator"));
+const DashboardTrialReport = lazy(() => import("@/pages/dashboard-trial-report"));
+const DashboardAIAnalysis = lazy(() => import("@/pages/dashboard-ai-analysis"));
+const DashboardRawDataMVP = lazy(() => import("@/pages/dashboard-raw-data-mvp"));
 
 // 新版頁面（包含側邊選單）
-import DashboardOverview from "@/pages/dashboard-overview";
-import TrialReportPage from "@/pages/reports/trial-report";
-import CostProfitUnifiedPage from "@/pages/reports/cost-profit-unified";
-import IncomeExpenseManager from "@/pages/reports/income-expense-manager";
-import KPICalculatorPage from "@/pages/tools/kpi-calculator";
-import AIAnalysisPage from "@/pages/tools/ai-analysis";
-import RawDataMVPPage from "@/pages/tools/raw-data-mvp";
-import DatabaseBrowser from "@/pages/tools/database-browser";
-import FormsPage from "@/pages/forms/forms-page";
-import PublicFormPage from "@/pages/forms/form-share";
-import DataSourcesPage from "@/pages/settings/data-sources";
-import FormBuilderList from "@/pages/settings/form-builder-list";
-import FormBuilderEditor from "@/pages/settings/form-builder-editor";
-import UserManagement from "@/pages/settings/user-management";
-import EmployeesPage from "@/pages/settings/employees";
-import FacebookSettings from "@/pages/settings/facebook-settings";
-import TeachingQualityList from "@/pages/teaching-quality/teaching-quality-list";
-import TeachingQualityDetail from "@/pages/teaching-quality/teaching-quality-detail";
-import LoginPage from "@/pages/auth/login";
-import ChangePasswordPage from "@/pages/auth/change-password";
-import PublicTrialClassForm from "@/pages/forms/public-trial-class-form";
-import AdLeadsList from "@/pages/telemarketing/ad-leads-list";
-import AdPerformanceReport from "@/pages/telemarketing/ad-performance-report";
-import CallRecordsList from "@/pages/telemarketing/call-records-list";
-import StudentFollowUp from "@/pages/telemarketing/student-follow-up";
-import GoHighLevelContacts from "@/pages/leads/gohighlevel-contacts";
+const DashboardOverview = lazy(() => import("@/pages/dashboard-overview"));
+const TrialReportPage = lazy(() => import("@/pages/reports/trial-report"));
+const CostProfitUnifiedPage = lazy(() => import("@/pages/reports/cost-profit-unified"));
+const IncomeExpenseManager = lazy(() => import("@/pages/reports/income-expense-manager"));
+const KPICalculatorPage = lazy(() => import("@/pages/tools/kpi-calculator"));
+const AIAnalysisPage = lazy(() => import("@/pages/tools/ai-analysis"));
+const RawDataMVPPage = lazy(() => import("@/pages/tools/raw-data-mvp"));
+const DatabaseBrowser = lazy(() => import("@/pages/tools/database-browser"));
+const FormsPage = lazy(() => import("@/pages/forms/forms-page"));
+const PublicFormPage = lazy(() => import("@/pages/forms/form-share"));
+const DataSourcesPage = lazy(() => import("@/pages/settings/data-sources"));
+const FormBuilderList = lazy(() => import("@/pages/settings/form-builder-list"));
+const FormBuilderEditor = lazy(() => import("@/pages/settings/form-builder-editor"));
+const UserManagement = lazy(() => import("@/pages/settings/user-management"));
+const EmployeesPage = lazy(() => import("@/pages/settings/employees"));
+const FacebookSettings = lazy(() => import("@/pages/settings/facebook-settings"));
+const TeachingQualityList = lazy(() => import("@/pages/teaching-quality/teaching-quality-list"));
+const TeachingQualityDetail = lazy(() => import("@/pages/teaching-quality/teaching-quality-detail"));
+const ChangePasswordPage = lazy(() => import("@/pages/auth/change-password"));
+const PublicTrialClassForm = lazy(() => import("@/pages/forms/public-trial-class-form"));
+const AdLeadsList = lazy(() => import("@/pages/telemarketing/ad-leads-list"));
+const AdPerformanceReport = lazy(() => import("@/pages/telemarketing/ad-performance-report"));
+const CallRecordsList = lazy(() => import("@/pages/telemarketing/call-records-list"));
+const StudentFollowUp = lazy(() => import("@/pages/telemarketing/student-follow-up"));
+const GoHighLevelContacts = lazy(() => import("@/pages/leads/gohighlevel-contacts"));
+
+// Loading 元件
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+    </div>
+  );
+}
 
 function Router() {
   return (
-    <Switch>
-      {/* 公開路由 - 無需登入 */}
-      <Route path="/login" component={LoginPage} />
-      <Route path="/forms/share/:id" component={PublicFormPage} />
-      <Route path="/forms/public/trial-class" component={PublicTrialClassForm} />
+    <Suspense fallback={<PageLoader />}>
+      <Switch>
+        {/* 公開路由 - 無需登入 */}
+        <Route path="/login" component={LoginPage} />
+        <Route path="/forms/share/:id" component={PublicFormPage} />
+        <Route path="/forms/public/trial-class" component={PublicTrialClassForm} />
 
       {/* 需要登入但可在未修改密碼時訪問 */}
       <Route path="/change-password">
@@ -160,9 +174,10 @@ function Router() {
         <ProtectedRoute><DashboardRawDataMVP /></ProtectedRoute>
       </Route>
 
-      {/* 404 */}
-      <Route component={NotFound} />
-    </Switch>
+        {/* 404 */}
+        <Route component={NotFound} />
+      </Switch>
+    </Suspense>
   );
 }
 

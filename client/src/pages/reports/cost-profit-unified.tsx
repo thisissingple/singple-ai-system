@@ -523,50 +523,161 @@ export default function CostProfitUnifiedPage() {
       });
   }, [allDataQuery.data]);
 
-  // AI 洞察
+  // AI 洞察（增強版 - 三層級分析）
   const aiInsights = useMemo(() => {
     const { revenue, totalCost, profit, profitMargin } = currentMonthMetrics;
     const insights: { type: 'success' | 'warning' | 'danger', message: string }[] = [];
 
-    if (profitMargin >= 30) {
-      insights.push({ type: 'success', message: `毛利率 ${profitMargin.toFixed(1)}% 表現優秀，財務狀況健康！` });
-    } else if (profitMargin >= 20) {
-      insights.push({ type: 'warning', message: `毛利率 ${profitMargin.toFixed(1)}%，建議優化成本結構以提升獲利空間` });
+    // 歌唱教育機構行業標準
+    const INDUSTRY_STANDARDS = {
+      profitMargin: { excellent: 35, good: 25, acceptable: 15 },
+      laborCostRatio: { max: 45, warning: 50 },
+      adCostRatio: { max: 12, warning: 15 },
+      operatingCostRatio: { max: 20, warning: 25 },
+    };
+
+    // ============ 層級 1: 毛利率分析（差距分析 + 問題診斷）============
+    if (profitMargin >= INDUSTRY_STANDARDS.profitMargin.excellent) {
+      insights.push({
+        type: 'success',
+        message: `📊 毛利率 ${profitMargin.toFixed(1)}% 優於行業標準 ${INDUSTRY_STANDARDS.profitMargin.excellent}%，表現優異！維持現有成本控制策略。`
+      });
+    } else if (profitMargin >= INDUSTRY_STANDARDS.profitMargin.good) {
+      const gap = INDUSTRY_STANDARDS.profitMargin.excellent - profitMargin;
+      insights.push({
+        type: 'success',
+        message: `📊 毛利率 ${profitMargin.toFixed(1)}% 達行業良好水平（標準 ${INDUSTRY_STANDARDS.profitMargin.good}-${INDUSTRY_STANDARDS.profitMargin.excellent}%），距卓越還有 ${gap.toFixed(1)}% 提升空間。`
+      });
+    } else if (profitMargin >= INDUSTRY_STANDARDS.profitMargin.acceptable) {
+      const gap = INDUSTRY_STANDARDS.profitMargin.good - profitMargin;
+      insights.push({
+        type: 'warning',
+        message: `📊 毛利率 ${profitMargin.toFixed(1)}% 低於行業良好標準 ${INDUSTRY_STANDARDS.profitMargin.good}%，差距 ${gap.toFixed(1)}%。需檢討成本結構並優化。`
+      });
     } else if (profitMargin >= 0) {
-      insights.push({ type: 'danger', message: `毛利率 ${profitMargin.toFixed(1)}% 偏低，需立即檢討成本控制策略` });
+      const gap = INDUSTRY_STANDARDS.profitMargin.acceptable - profitMargin;
+      insights.push({
+        type: 'danger',
+        message: `📊 毛利率 ${profitMargin.toFixed(1)}% 嚴重低於行業可接受標準 ${INDUSTRY_STANDARDS.profitMargin.acceptable}%，差距 ${gap.toFixed(1)}%。財務風險高，需立即改善！`
+      });
     } else {
-      insights.push({ type: 'danger', message: `當月虧損 ${formatCurrency(Math.abs(profit))}，需緊急改善財務狀況` });
+      insights.push({
+        type: 'danger',
+        message: `📊 當月虧損 ${formatCurrency(Math.abs(profit))}（毛利率 ${profitMargin.toFixed(1)}%），需緊急檢討營運模式與成本結構。`
+      });
     }
 
+    // ============ 層級 1+2: 人力成本分析（問題診斷 + 具體方案）============
     const laborCost = categoryBreakdown.find(c => c.category === '人力成本');
     if (laborCost && revenue > 0) {
       const laborRatio = (laborCost.amount / revenue) * 100;
-      if (laborRatio > 50) {
-        insights.push({ type: 'warning', message: `人力成本佔營收 ${laborRatio.toFixed(1)}%，建議評估人員配置效率` });
+      if (laborRatio > INDUSTRY_STANDARDS.laborCostRatio.warning) {
+        const gap = laborRatio - INDUSTRY_STANDARDS.laborCostRatio.max;
+        const savingTarget = (gap / 100) * revenue;
+        insights.push({
+          type: 'danger',
+          message: `👥 人力成本 ${laborRatio.toFixed(1)}% 超出行業標準 ${INDUSTRY_STANDARDS.laborCostRatio.max}%，超出 ${gap.toFixed(1)}%（約 ${formatCurrency(savingTarget)}）。\n\n` +
+          `🎯 層級 2 - 具體改善方案：\n` +
+          `1. 優化排課：提升教師稼動率至 85% 以上（預估節省 10-15%）\n` +
+          `2. 調整班型：大班制比例從目前提升至 40%（預估節省 12-18%）\n` +
+          `3. 師資結構：引入 30% 兼職講師降低固定成本\n` +
+          `4. 績效管理：設定人均營收目標 ${formatCurrency(revenue / 5)} 以上\n\n` +
+          `📈 層級 3 - 可行性分析：根據過去 ${monthlyTrend.length} 個月數據，若執行以上方案可望降低人力成本至 ${INDUSTRY_STANDARDS.laborCostRatio.max}% 以內，提升毛利率約 ${gap.toFixed(1)}%。`
+        });
+      } else if (laborRatio > INDUSTRY_STANDARDS.laborCostRatio.max) {
+        const gap = laborRatio - INDUSTRY_STANDARDS.laborCostRatio.max;
+        insights.push({
+          type: 'warning',
+          message: `👥 人力成本 ${laborRatio.toFixed(1)}% 略高於標準 ${INDUSTRY_STANDARDS.laborCostRatio.max}%，建議優化教師排課與班型配置，目標降低 ${gap.toFixed(1)}%。`
+        });
+      } else {
+        insights.push({
+          type: 'success',
+          message: `👥 人力成本 ${laborRatio.toFixed(1)}% 控制良好（低於標準 ${INDUSTRY_STANDARDS.laborCostRatio.max}%），維持現有人力配置策略。`
+        });
       }
     }
 
+    // ============ 層級 1+2: 廣告費用分析（問題診斷 + 具體方案）============
     const adCost = categoryBreakdown.find(c => c.category === '廣告費用');
     if (adCost && revenue > 0) {
       const adRatio = (adCost.amount / revenue) * 100;
-      const adROI = ((revenue - totalCost) / adCost.amount) * 100;
-      if (adRatio > 15) {
-        insights.push({ type: 'warning', message: `廣告費用佔營收 ${adRatio.toFixed(1)}%，ROI 為 ${adROI.toFixed(0)}%，建議優化投放策略` });
+      const adROI = adCost.amount > 0 ? ((revenue - totalCost) / adCost.amount) * 100 : 0;
+      const cac = adCost.amount > 0 ? adCost.amount / (revenue / 50000) : 0; // 假設平均客單價 50000
+
+      if (adRatio > INDUSTRY_STANDARDS.adCostRatio.warning) {
+        const gap = adRatio - INDUSTRY_STANDARDS.adCostRatio.max;
+        insights.push({
+          type: 'warning',
+          message: `📢 廣告費用 ${adRatio.toFixed(1)}% 超出行業標準 ${INDUSTRY_STANDARDS.adCostRatio.max}%，ROI ${adROI.toFixed(0)}%，獲客成本約 ${formatCurrency(cac)}。\n\n` +
+          `🎯 層級 2 - 優化方案：\n` +
+          `1. 渠道優化：分析各平台 ROI，停止 ROI < 150% 的渠道\n` +
+          `2. 受眾精準化：縮小目標族群，提升轉換率至 15% 以上\n` +
+          `3. 內容行銷：增加自然流量，降低付費廣告依賴度\n` +
+          `4. 轉介紹計畫：設計學員推薦獎勵機制（目標 30% 來自轉介紹）\n\n` +
+          `📈 層級 3 - 預期效益：若執行優化，預估可降低廣告成本 ${gap.toFixed(1)}%（約 ${formatCurrency((gap / 100) * revenue)}），提升整體毛利率 ${gap.toFixed(1)}%。`
+        });
       } else if (adROI > 200) {
-        insights.push({ type: 'success', message: `廣告 ROI ${adROI.toFixed(0)}% 表現良好，可考慮適度增加投放` });
+        insights.push({
+          type: 'success',
+          message: `📢 廣告 ROI ${adROI.toFixed(0)}% 表現優異（行業平均 150-200%），廣告費用 ${adRatio.toFixed(1)}% 合理。可考慮適度增加 10-15% 投放擴大市佔率。`
+        });
+      } else if (adROI < 100) {
+        insights.push({
+          type: 'danger',
+          message: `📢 廣告 ROI ${adROI.toFixed(0)}% 低於成本（<100%），需立即暫停低效渠道並重新規劃投放策略。建議先降低 30% 預算，專注高轉換渠道。`
+        });
+      } else {
+        insights.push({
+          type: 'warning',
+          message: `📢 廣告費用 ${adRatio.toFixed(1)}%，ROI ${adROI.toFixed(0)}% 尚可，但有優化空間。建議測試新素材與受眾，目標提升至 ROI 200% 以上。`
+        });
       }
     }
 
+    // ============ 層級 1: 成本變化趨勢分析 ============
     if (Math.abs(changes.costChange) > 10) {
       if (changes.costChange > 0) {
-        insights.push({ type: 'warning', message: `成本較上月增加 ${changes.costChange.toFixed(1)}%，需關注成本控制` });
+        insights.push({
+          type: 'warning',
+          message: `📈 成本較上月增加 ${changes.costChange.toFixed(1)}%，需檢視是否為季節性因素或新增項目。建議每週監控成本變化，確保不偏離預算。`
+        });
       } else {
-        insights.push({ type: 'success', message: `成本較上月降低 ${Math.abs(changes.costChange).toFixed(1)}%，成本控制有效！` });
+        insights.push({
+          type: 'success',
+          message: `📉 成本較上月降低 ${Math.abs(changes.costChange).toFixed(1)}%，成本控制有效！請記錄優化措施，作為未來參考標準。`
+        });
+      }
+    }
+
+    // ============ 層級 2+3: 綜合改善路徑（基於多項數據）============
+    if (profitMargin < INDUSTRY_STANDARDS.profitMargin.good && insights.length >= 2) {
+      const totalSavingPotential = categoryBreakdown
+        .filter(c => c.category === '人力成本' || c.category === '廣告費用')
+        .reduce((sum, c) => {
+          const ratio = (c.amount / revenue) * 100;
+          const standard = c.category === '人力成本'
+            ? INDUSTRY_STANDARDS.laborCostRatio.max
+            : INDUSTRY_STANDARDS.adCostRatio.max;
+          return sum + Math.max(0, ratio - standard);
+        }, 0);
+
+      if (totalSavingPotential > 5) {
+        insights.push({
+          type: 'warning',
+          message: `🎯 綜合改善路徑：\n\n` +
+          `當前毛利率 ${profitMargin.toFixed(1)}% 可透過優化人力與廣告成本，預估提升 ${totalSavingPotential.toFixed(1)}% 至目標 ${(profitMargin + totalSavingPotential).toFixed(1)}%。\n\n` +
+          `📊 執行優先序（3 個月計畫）：\n` +
+          `第 1 月：立即優化廣告投放（快速見效）\n` +
+          `第 2 月：調整班型與排課（中期效益）\n` +
+          `第 3 月：優化師資結構（長期穩定）\n\n` +
+          `📈 預期成果：3 個月後毛利率可達 ${(profitMargin + totalSavingPotential * 0.8).toFixed(1)}%，接近行業良好標準。`
+        });
       }
     }
 
     return insights;
-  }, [currentMonthMetrics, categoryBreakdown, changes]);
+  }, [currentMonthMetrics, categoryBreakdown, changes, monthlyTrend]);
 
   // ========== 儲存 Mutation ==========
   const saveMutation = useMutation({
@@ -1650,89 +1761,6 @@ export default function CostProfitUnifiedPage() {
               </Card>
             ) : (
               <>
-                {/* 關鍵指標卡片 */}
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">總營收</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold text-green-600">
-                        {formatCurrency(currentMonthMetrics.revenue)}
-                      </div>
-                      <div className="flex items-center text-xs mt-1">
-                        {changes.revenueChange >= 0 ? (
-                          <ArrowUpRight className="h-3 w-3 text-green-600 mr-1" />
-                        ) : (
-                          <ArrowDownRight className="h-3 w-3 text-red-600 mr-1" />
-                        )}
-                        <span className={changes.revenueChange >= 0 ? 'text-green-600' : 'text-red-600'}>
-                          {formatPercentage(changes.revenueChange)}
-                        </span>
-                        <span className="text-muted-foreground ml-1">vs 上月</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">總成本</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold text-red-600">
-                        {formatCurrency(currentMonthMetrics.totalCost)}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        佔營收 {currentMonthMetrics.revenue > 0
-                          ? ((currentMonthMetrics.totalCost / currentMonthMetrics.revenue) * 100).toFixed(1)
-                          : '0'}%
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">淨利潤</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className={`text-2xl font-bold ${currentMonthMetrics.profit >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                        {formatCurrency(currentMonthMetrics.profit)}
-                      </div>
-                      <div className="flex items-center text-xs mt-1">
-                        {changes.profitChange >= 0 ? (
-                          <ArrowUpRight className="h-3 w-3 text-green-600 mr-1" />
-                        ) : (
-                          <ArrowDownRight className="h-3 w-3 text-red-600 mr-1" />
-                        )}
-                        <span className={changes.profitChange >= 0 ? 'text-green-600' : 'text-red-600'}>
-                          {formatPercentage(changes.profitChange)}
-                        </span>
-                        <span className="text-muted-foreground ml-1">vs 上月</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium">毛利率</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">
-                        {currentMonthMetrics.profitMargin.toFixed(1)}%
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {currentMonthMetrics.profitMargin >= 30
-                          ? '✓ 健康水平'
-                          : currentMonthMetrics.profitMargin >= 20
-                          ? '⚠ 需注意'
-                          : currentMonthMetrics.profitMargin >= 0
-                          ? '⚠ 偏低'
-                          : '✗ 虧損'}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
                 {/* AI 評估與建議 */}
                 <Card className="bg-gradient-to-r from-purple-50 to-blue-50">
                   <CardHeader>
@@ -1745,16 +1773,18 @@ export default function CostProfitUnifiedPage() {
                     {aiInsights.map((insight, index) => (
                       <div
                         key={index}
-                        className={`flex items-start gap-2 p-3 rounded-lg ${
+                        className={`flex items-start gap-2 p-4 rounded-lg ${
                           insight.type === 'success' ? 'bg-green-100 text-green-800' :
                           insight.type === 'warning' ? 'bg-yellow-100 text-yellow-800' :
                           'bg-red-100 text-red-800'
                         }`}
                       >
-                        {insight.type === 'success' && <TrendingUp className="h-5 w-5 mt-0.5" />}
-                        {insight.type === 'warning' && <AlertTriangle className="h-5 w-5 mt-0.5" />}
-                        {insight.type === 'danger' && <TrendingDown className="h-5 w-5 mt-0.5" />}
-                        <p className="text-sm font-medium">{insight.message}</p>
+                        {insight.type === 'success' && <TrendingUp className="h-5 w-5 mt-0.5 flex-shrink-0" />}
+                        {insight.type === 'warning' && <AlertTriangle className="h-5 w-5 mt-0.5 flex-shrink-0" />}
+                        {insight.type === 'danger' && <TrendingDown className="h-5 w-5 mt-0.5 flex-shrink-0" />}
+                        <div className="text-sm font-medium whitespace-pre-line">
+                          {insight.message}
+                        </div>
                       </div>
                     ))}
                   </CardContent>

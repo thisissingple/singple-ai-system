@@ -39,17 +39,17 @@ ON trial_class_purchases(purchase_date);
 CREATE INDEX IF NOT EXISTS idx_trial_class_purchases_student_email
 ON trial_class_purchases(student_email);
 
--- 為 status 建立索引（用於篩選不同狀態的學生）
-CREATE INDEX IF NOT EXISTS idx_trial_class_purchases_status
-ON trial_class_purchases(status);
+-- 為 current_status 建立索引（用於篩選不同狀態的學生）
+CREATE INDEX IF NOT EXISTS idx_trial_class_purchases_current_status
+ON trial_class_purchases(current_status);
 
 -- 複合索引：購買日期 + 狀態（常見查詢組合）
 CREATE INDEX IF NOT EXISTS idx_trial_class_purchases_date_status
-ON trial_class_purchases(purchase_date, status);
+ON trial_class_purchases(purchase_date, current_status);
 
 COMMENT ON INDEX idx_trial_class_purchases_purchase_date IS '優化購買日期範圍查詢 (getPurchases)';
 COMMENT ON INDEX idx_trial_class_purchases_student_email IS '優化學生資料關聯查詢';
-COMMENT ON INDEX idx_trial_class_purchases_status IS '優化狀態篩選查詢';
+COMMENT ON INDEX idx_trial_class_purchases_current_status IS '優化狀態篩選查詢';
 COMMENT ON INDEX idx_trial_class_purchases_date_status IS '優化複合條件查詢';
 
 -- ========================================
