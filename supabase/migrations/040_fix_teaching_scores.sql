@@ -52,8 +52,19 @@ DECLARE
   score_match TEXT;
   score INTEGER;
 BEGIN
-  -- Pattern: 總評：18/25 or 總分：18/25
-  score_match := (regexp_matches(markdown, '總[評分][^0-9]{0,20}(\d+)\s*/\s*25', 'i'))[1];
+  -- Pattern 1: Most specific - Look for "總評（總分/25）：" format
+  -- This avoids accidentally matching "教學品質總分：18/25" from teaching section
+  score_match := (regexp_matches(markdown, '總評[（(][^)）]*[)）][：:]\s*\*\*\s*(\d+)\s*/\s*25', 'i'))[1];
+
+  IF score_match IS NOT NULL THEN
+    score := score_match::INTEGER;
+    IF score >= 0 AND score <= 25 THEN
+      RETURN score;
+    END IF;
+  END IF;
+
+  -- Pattern 2: Alternative format - **總評：** 16/25
+  score_match := (regexp_matches(markdown, '\*\*總評[：:]\*\*\s*(\d+)\s*/\s*25', 'i'))[1];
 
   IF score_match IS NOT NULL THEN
     score := score_match::INTEGER;

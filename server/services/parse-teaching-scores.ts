@@ -62,8 +62,9 @@ function parseTeachingScore(markdown: string): number {
  * Parse sales score from Markdown (成交策略總分)
  */
 function parseSalesScore(markdown: string): number {
-  // Pattern 1: Most flexible - find any "總分/25" or "總評" followed by number/25
-  let totalMatch = markdown.match(/總[評分][^0-9]{0,20}(\d+)\s*\/\s*25/);
+  // Pattern 1: Most specific - Look for "總評（總分/25）：" format (e.g., **總評（總分/25）：** 16/25)
+  // This avoids accidentally matching "教學品質總分：18/25" from teaching section
+  let totalMatch = markdown.match(/總評[（(][^)）]*[)）][：:]\s*\*\*\s*(\d+)\s*\/\s*25/);
 
   if (totalMatch) {
     const score = parseInt(totalMatch[1], 10);
@@ -72,7 +73,18 @@ function parseSalesScore(markdown: string): number {
     }
   }
 
-  // Pattern 2: Fallback - Look for individual metric scores in 成交策略評估 section
+  // Pattern 2: Alternative format - **總評：** 16/25
+  if (!totalMatch) {
+    totalMatch = markdown.match(/\*\*總評[：:]\*\*\s*(\d+)\s*\/\s*25/);
+    if (totalMatch) {
+      const score = parseInt(totalMatch[1], 10);
+      if (score >= 0 && score <= 25) {
+        return score;
+      }
+    }
+  }
+
+  // Pattern 3: Fallback - Look for individual metric scores in 成交策略評估 section
   const strategySection = markdown.match(/# 🧮 成交策略評估[\s\S]*?(?=# |$)/);
 
   if (strategySection) {
