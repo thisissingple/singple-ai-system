@@ -283,7 +283,9 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
       );
 
       // Parse scores from Markdown (Phase 32-33: Dual score system)
-      const parsedScores = parseScoresFromMarkdown(analysis.summary);
+      // Fix: Use markdownOutput if available, otherwise fall back to summary
+      const markdownSource = analysis.conversionSuggestions?.markdownOutput || analysis.summary;
+      const parsedScores = parseScoresFromMarkdown(markdownSource);
 
       // Save to database
       const result = await insertAndReturn('teaching_quality_analysis', {
@@ -517,7 +519,9 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
       );
 
       // Parse scores from Markdown
-      const parsedScores = parseScoresFromMarkdown(analysis.summary);
+      // Fix: Use markdownOutput if available, otherwise fall back to summary
+      const markdownSource = analysis.conversionSuggestions?.markdownOutput || analysis.summary;
+      const parsedScores = parseScoresFromMarkdown(markdownSource);
 
       // Update existing analysis record
       await pool.query(`
