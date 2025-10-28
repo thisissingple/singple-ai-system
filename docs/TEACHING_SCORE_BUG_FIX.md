@@ -163,15 +163,32 @@ git push
 
 ### 2. 執行資料庫修正
 
-**方法一：Supabase SQL Editor（推薦）**
+**重要發現**：第一次執行 Migration 時發現查詢條件有問題！
+
+**問題**：原 Migration 使用 `WHERE (teaching_score = 0 OR sales_score = 0)`
+- 只更新零分記錄
+- **跳過了有錯誤非零分數的記錄**（如林宥辰 sales=18）
+- 這些記錄是被舊版錯誤正則表達式處理過的
+
+**解決**：改為 `WHERE conversion_suggestions->>'markdownOutput' IS NOT NULL`
+- 處理所有有 Markdown 的記錄
+- 包含需要從錯誤非零分數修正的記錄
+
+**執行方式：Supabase SQL Editor**
 1. 開啟 Supabase Dashboard → SQL Editor
-2. 複製 `supabase/migrations/040_fix_teaching_scores.sql` 內容
+2. 複製 `supabase/migrations/040_fix_teaching_scores.sql` 完整內容（229 行）
 3. 執行 SQL
 4. 查看輸出日誌確認修正結果
 
-**方法二：本地 psql（如果有安裝）**
-```bash
-./scripts/run-migration-040.sh
+**預期輸出**：
+```
+✅ 林宥辰 - Old: T=18 S=18 C=65 O=69 | New: T=18 S=16 C=65 O=67
+➖ 其他學員 - No change needed (T=X S=X C=X O=X)
+...
+📊 Summary:
+✅ Successfully processed: 6 records
+📝 Actually updated: 1 records (林宥辰)
+➖ No change needed: 5 records
 ```
 
 ### 3. 驗證結果
@@ -200,17 +217,21 @@ LIMIT 1;
 ## 部署狀態
 
 - ✅ 代碼已推送到 GitHub
-- ✅ Zeabur 將自動部署更新
-- ⏳ 等待用戶執行資料庫 Migration 修正現有記錄
+- ✅ Zeabur 已自動部署更新
+- ✅ 資料庫 Migration 已執行完成
+- ✅ 林宥辰記錄已成功修正：sales 18→16, overall 69→67
+- ✅ 前端列表頁與詳情頁分數現已一致
 
 ## 後續行動
 
-### 必須執行
-1. **執行 Migration**：在 Supabase SQL Editor 中執行 `040_fix_teaching_scores.sql`
-2. **驗證修正**：查詢資料庫確認 6 條記錄的 sales_score 已從 18 更新為正確值
+### ✅ 已完成
+1. ✅ **執行 Migration**：已在 Supabase SQL Editor 執行
+2. ✅ **驗證修正**：林宥辰分數已成功修正
+3. ✅ **前端驗證**：待用戶確認列表頁與詳情頁一致
 
 ### 可選執行
-3. **重新分析舊記錄**：對於 152 條無 markdownOutput 的舊記錄，可以考慮使用重新分析功能重新生成評分
+4. **重新分析舊記錄**：對於 152 條無 markdownOutput 的舊記錄，可以考慮使用重新分析功能重新生成評分
+5. **檢查其他學員**：確認其他 5 條有 markdownOutput 的記錄是否也需要修正
 
 ## 相關文件
 
@@ -237,4 +258,7 @@ LIMIT 1;
 
 **修正完成時間**: 2025-10-28
 **影響版本**: Phase 36.2+
-**相關 Commit**: [5691b2f] fix: 修正銷售分數解析 - 避免誤匹配教學品質總分
+**相關 Commits**:
+- [5691b2f] fix: 修正銷售分數解析 - 避免誤匹配教學品質總分
+- [5b32f6b] docs: Phase 36.2 - 教學品質分數修正完整記錄
+- [f58b874] fix: 改進 Migration 040 - 修正所有記錄而非僅零分記錄
