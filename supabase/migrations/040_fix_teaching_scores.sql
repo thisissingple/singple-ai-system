@@ -121,7 +121,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
--- Update all records with zero scores that have markdown
+-- Update all records that have markdownOutput (not just zero scores)
+-- This is important because some records may have incorrect non-zero scores
+-- due to the previous bug in regex pattern matching
 DO $$
 DECLARE
   rec RECORD;
@@ -131,29 +133,24 @@ DECLARE
   new_conversion_prob INTEGER;
   new_overall_score INTEGER;
   success_count INTEGER := 0;
+  updated_count INTEGER := 0;
   fail_count INTEGER := 0;
 BEGIN
-  RAISE NOTICE '🔍 Starting to fix teaching quality scores...';
+  RAISE NOTICE '🔍 Starting to fix teaching quality scores (including non-zero scores)...';
   RAISE NOTICE '';
 
   FOR rec IN
     SELECT id, student_name, conversion_suggestions, teaching_score, sales_score, conversion_probability, overall_score
     FROM teaching_quality_analysis
-    WHERE (teaching_score = 0 OR sales_score = 0)
-      AND conversion_suggestions IS NOT NULL
+    WHERE conversion_suggestions->>'markdownOutput' IS NOT NULL
+      AND length(conversion_suggestions->>'markdownOutput') > 50
     ORDER BY created_at DESC
   LOOP
     BEGIN
-      -- Extract markdown from JSON
+      -- Extract markdown from JSON (already validated by WHERE clause)
       markdown_text := rec.conversion_suggestions->>'markdownOutput';
 
-      IF markdown_text IS NULL OR LENGTH(markdown_text) < 50 THEN
-        RAISE NOTICE '⚠️  % - No markdownOutput found, skipping', rec.student_name;
-        fail_count := fail_count + 1;
-        CONTINUE;
-      END IF;
-
-      -- Parse scores
+      -- Parse scores using the corrected functions
       new_teaching_score := extract_teaching_score(markdown_text);
       new_sales_score := extract_sales_score(markdown_text);
       new_conversion_prob := extract_conversion_probability(markdown_text);
@@ -166,19 +163,31 @@ BEGIN
         CONTINUE;
       END IF;
 
-      -- Update record
-      UPDATE teaching_quality_analysis
-      SET teaching_score = new_teaching_score,
-          sales_score = new_sales_score,
-          conversion_probability = new_conversion_prob,
-          overall_score = new_overall_score,
-          updated_at = NOW()
-      WHERE id = rec.id;
+      -- Check if any score changed (only update if needed)
+      IF new_teaching_score != rec.teaching_score OR
+         new_sales_score != rec.sales_score OR
+         new_conversion_prob != rec.conversion_probability THEN
 
-      RAISE NOTICE '✅ % - Old: T=% S=% C=% O=% | New: T=% S=% C=% O=%',
-        rec.student_name,
-        rec.teaching_score, rec.sales_score, rec.conversion_probability, rec.overall_score,
-        new_teaching_score, new_sales_score, new_conversion_prob, new_overall_score;
+        -- Update record
+        UPDATE teaching_quality_analysis
+        SET teaching_score = new_teaching_score,
+            sales_score = new_sales_score,
+            conversion_probability = new_conversion_prob,
+            overall_score = new_overall_score,
+            updated_at = NOW()
+        WHERE id = rec.id;
+
+        RAISE NOTICE '✅ % - Old: T=% S=% C=% O=% | New: T=% S=% C=% O=%',
+          rec.student_name,
+          rec.teaching_score, rec.sales_score, rec.conversion_probability, rec.overall_score,
+          new_teaching_score, new_sales_score, new_conversion_prob, new_overall_score;
+
+        updated_count := updated_count + 1;
+      ELSE
+        RAISE NOTICE '➖ % - No change needed (T=% S=% C=% O=%)',
+          rec.student_name,
+          rec.teaching_score, rec.sales_score, rec.conversion_probability, rec.overall_score;
+      END IF;
 
       success_count := success_count + 1;
 
@@ -192,7 +201,9 @@ BEGIN
   RAISE NOTICE '========================================================';
   RAISE NOTICE '📊 Summary:';
   RAISE NOTICE '========================================================';
-  RAISE NOTICE '✅ Successfully fixed: % records', success_count;
+  RAISE NOTICE '✅ Successfully processed: % records', success_count;
+  RAISE NOTICE '📝 Actually updated: % records', updated_count;
+  RAISE NOTICE '➖ No change needed: % records', success_count - updated_count;
   RAISE NOTICE '❌ Failed: % records', fail_count;
   IF (success_count + fail_count) > 0 THEN
     RAISE NOTICE '📈 Success rate: %', ROUND((success_count::NUMERIC / (success_count + fail_count)) * 100, 1) || '%';
