@@ -46,6 +46,8 @@ import {
   AlertCircle,
   ArrowUpRight,
   ArrowDownRight,
+  DollarSign,
+  Activity,
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -71,6 +73,7 @@ import {
   Tooltip as RechartsTooltip,
   Legend,
   ResponsiveContainer,
+  ReferenceLine,
 } from 'recharts';
 
 // ==================== Types ====================
@@ -679,6 +682,119 @@ export default function CostProfitUnifiedPage() {
     return insights;
   }, [currentMonthMetrics, categoryBreakdown, changes, monthlyTrend]);
 
+  // ========== 年度數據計算（用於年度總覽 Tab）==========
+  const annualMetrics = useMemo(() => {
+    const currentYearData = (allDataQuery.data || []).filter(item => item.year === selectedYear);
+    const previousYearData = (allDataQuery.data || []).filter(item => item.year === selectedYear - 1);
+
+    // 計算當前年度總計
+    let currentRevenue = 0;
+    let currentCost = 0;
+    currentYearData.forEach((item) => {
+      const amount = parseFloat(item.amount as string) || 0;
+      if (item.category_name === '收入金額') {
+        currentRevenue += amount;
+      } else {
+        currentCost += amount;
+      }
+    });
+    const currentProfit = currentRevenue - currentCost;
+    const currentMargin = currentRevenue > 0 ? (currentProfit / currentRevenue) * 100 : 0;
+
+    // 計算去年同期總計
+    let previousRevenue = 0;
+    let previousCost = 0;
+    previousYearData.forEach((item) => {
+      const amount = parseFloat(item.amount as string) || 0;
+      if (item.category_name === '收入金額') {
+        previousRevenue += amount;
+      } else {
+        previousCost += amount;
+      }
+    });
+    const previousProfit = previousRevenue - previousCost;
+    const previousMargin = previousRevenue > 0 ? (previousProfit / previousRevenue) * 100 : 0;
+
+    // 計算同比變化率（Year-over-Year）
+    const yoyRevenueChange = previousRevenue > 0
+      ? ((currentRevenue - previousRevenue) / previousRevenue) * 100
+      : 0;
+    const yoyCostChange = previousCost > 0
+      ? ((currentCost - previousCost) / previousCost) * 100
+      : 0;
+    const yoyProfitChange = previousProfit !== 0
+      ? ((currentProfit - previousProfit) / Math.abs(previousProfit)) * 100
+      : 0;
+    const yoyMarginChange = currentMargin - previousMargin;
+
+    // 計算每月平均
+    const monthsWithData = new Set(currentYearData.map(item => item.month)).size;
+    const avgMonthlyRevenue = monthsWithData > 0 ? currentRevenue / monthsWithData : 0;
+    const avgMonthlyCost = monthsWithData > 0 ? currentCost / monthsWithData : 0;
+    const avgMonthlyProfit = monthsWithData > 0 ? currentProfit / monthsWithData : 0;
+
+    return {
+      current: {
+        revenue: currentRevenue,
+        cost: currentCost,
+        profit: currentProfit,
+        margin: currentMargin,
+        monthsWithData,
+      },
+      previous: {
+        revenue: previousRevenue,
+        cost: previousCost,
+        profit: previousProfit,
+        margin: previousMargin,
+      },
+      yoy: {
+        revenueChange: yoyRevenueChange,
+        costChange: yoyCostChange,
+        profitChange: yoyProfitChange,
+        marginChange: yoyMarginChange,
+      },
+      average: {
+        revenue: avgMonthlyRevenue,
+        cost: avgMonthlyCost,
+        profit: avgMonthlyProfit,
+      },
+    };
+  }, [allDataQuery.data, selectedYear]);
+
+  // 年度月度趨勢（用於年度總覽圖表）
+  const annualMonthlyTrend = useMemo(() => {
+    const currentYearData = (allDataQuery.data || []).filter(item => item.year === selectedYear);
+
+    const monthlyStats = MONTHS.map((month) => {
+      const monthData = currentYearData.filter(item => item.month === month);
+
+      let revenue = 0;
+      let cost = 0;
+
+      monthData.forEach((item) => {
+        const amount = parseFloat(item.amount as string) || 0;
+        if (item.category_name === '收入金額') {
+          revenue += amount;
+        } else {
+          cost += amount;
+        }
+      });
+
+      const profit = revenue - cost;
+      const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+
+      return {
+        month: month.substring(0, 3), // Jan, Feb, Mar...
+        revenue,
+        cost,
+        profit,
+        margin,
+      };
+    });
+
+    return monthlyStats;
+  }, [allDataQuery.data, selectedYear]);
+
   // ========== 儲存 Mutation ==========
   const saveMutation = useMutation({
     mutationFn: async (payload: {
@@ -1193,11 +1309,12 @@ export default function CostProfitUnifiedPage() {
 
         {/* Tab 區域 */}
         <Tabs defaultValue="edit" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="edit">📝 資料編輯</TabsTrigger>
             <TabsTrigger value="visual">📊 視覺分析</TabsTrigger>
             <TabsTrigger value="trend">📈 趨勢圖表</TabsTrigger>
             <TabsTrigger value="ai">🤖 AI 洞察</TabsTrigger>
+            <TabsTrigger value="annual">📅 年度總覽</TabsTrigger>
           </TabsList>
 
           {/* TAB 1: 資料編輯 */}
@@ -1817,6 +1934,213 @@ export default function CostProfitUnifiedPage() {
                 </div>
               </>
             )}
+          </TabsContent>
+
+          {/* TAB 5: 年度總覽 */}
+          <TabsContent value="annual" className="space-y-4">
+            {/* 年度總計卡片（含同比） */}
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              {/* 年度總營收 */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">年度總營收</CardTitle>
+                  <DollarSign className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{formatCurrency(annualMetrics.current.revenue)}</div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <p className="text-xs text-muted-foreground">
+                      {selectedYear - 1} 年: {formatCurrency(annualMetrics.previous.revenue)}
+                    </p>
+                  </div>
+                  <p className={`text-xs mt-1 flex items-center gap-1 ${
+                    annualMetrics.yoy.revenueChange >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {annualMetrics.yoy.revenueChange >= 0 ? (
+                      <TrendingUp className="h-3 w-3" />
+                    ) : (
+                      <TrendingDown className="h-3 w-3" />
+                    )}
+                    同比 {formatPercentage(annualMetrics.yoy.revenueChange)}
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* 年度總成本 */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">年度總成本</CardTitle>
+                  <TrendingDown className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-red-600">{formatCurrency(annualMetrics.current.cost)}</div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <p className="text-xs text-muted-foreground">
+                      {selectedYear - 1} 年: {formatCurrency(annualMetrics.previous.cost)}
+                    </p>
+                  </div>
+                  <p className={`text-xs mt-1 flex items-center gap-1 ${
+                    annualMetrics.yoy.costChange <= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {annualMetrics.yoy.costChange >= 0 ? (
+                      <TrendingUp className="h-3 w-3" />
+                    ) : (
+                      <TrendingDown className="h-3 w-3" />
+                    )}
+                    同比 {formatPercentage(annualMetrics.yoy.costChange)}
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* 年度淨利 */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">年度淨利</CardTitle>
+                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className={`text-2xl font-bold ${
+                    annualMetrics.current.profit >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {formatCurrency(annualMetrics.current.profit)}
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <p className="text-xs text-muted-foreground">
+                      {selectedYear - 1} 年: {formatCurrency(annualMetrics.previous.profit)}
+                    </p>
+                  </div>
+                  <p className={`text-xs mt-1 flex items-center gap-1 ${
+                    annualMetrics.yoy.profitChange >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {annualMetrics.yoy.profitChange >= 0 ? (
+                      <TrendingUp className="h-3 w-3" />
+                    ) : (
+                      <TrendingDown className="h-3 w-3" />
+                    )}
+                    同比 {formatPercentage(annualMetrics.yoy.profitChange)}
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* 年度毛利率 */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">年度毛利率</CardTitle>
+                  <Activity className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{annualMetrics.current.margin.toFixed(1)}%</div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <p className="text-xs text-muted-foreground">
+                      {selectedYear - 1} 年: {annualMetrics.previous.margin.toFixed(1)}%
+                    </p>
+                  </div>
+                  <p className={`text-xs mt-1 flex items-center gap-1 ${
+                    annualMetrics.yoy.marginChange >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {annualMetrics.yoy.marginChange >= 0 ? (
+                      <TrendingUp className="h-3 w-3" />
+                    ) : (
+                      <TrendingDown className="h-3 w-3" />
+                    )}
+                    同比 {annualMetrics.yoy.marginChange >= 0 ? '+' : ''}{annualMetrics.yoy.marginChange.toFixed(1)}%
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* 月度平均數據 */}
+            <Card>
+              <CardHeader>
+                <CardTitle>月度平均數據</CardTitle>
+                <CardDescription>基於 {annualMetrics.current.monthsWithData} 個月的數據計算</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="rounded-lg border p-4">
+                    <div className="text-sm text-muted-foreground">平均月營收</div>
+                    <div className="text-2xl font-semibold mt-2">
+                      {formatCurrency(annualMetrics.average.revenue)}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border p-4">
+                    <div className="text-sm text-muted-foreground">平均月成本</div>
+                    <div className="text-2xl font-semibold mt-2 text-red-600">
+                      {formatCurrency(annualMetrics.average.cost)}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border p-4">
+                    <div className="text-sm text-muted-foreground">平均月淨利</div>
+                    <div className={`text-2xl font-semibold mt-2 ${
+                      annualMetrics.average.profit >= 0 ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {formatCurrency(annualMetrics.average.profit)}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* 年度月度趨勢圖 */}
+            <Card>
+              <CardHeader>
+                <CardTitle>年度月度趨勢</CardTitle>
+                <CardDescription>{selectedYear} 年各月收支情況</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={350}>
+                  <BarChart data={annualMonthlyTrend}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" />
+                    <YAxis />
+                    <Tooltip
+                      formatter={(value: number) => formatCurrency(value)}
+                      labelStyle={{ color: '#000' }}
+                    />
+                    <Legend />
+                    <Bar dataKey="revenue" name="營收" fill="#10b981" />
+                    <Bar dataKey="cost" name="成本" fill="#ef4444" />
+                    <Bar dataKey="profit" name="淨利" fill="#3b82f6" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            {/* 年度毛利率趨勢 */}
+            <Card>
+              <CardHeader>
+                <CardTitle>年度毛利率趨勢</CardTitle>
+                <CardDescription>{selectedYear} 年各月毛利率變化</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={annualMonthlyTrend}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" />
+                    <YAxis
+                      label={{ value: '毛利率 (%)', angle: -90, position: 'insideLeft' }}
+                    />
+                    <Tooltip
+                      formatter={(value: number) => `${value.toFixed(1)}%`}
+                      labelStyle={{ color: '#000' }}
+                    />
+                    <Legend />
+                    <Line
+                      type="monotone"
+                      dataKey="margin"
+                      name="毛利率"
+                      stroke="#8b5cf6"
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                    />
+                    {/* 添加行業標準參考線 */}
+                    <ReferenceLine y={35} stroke="#10b981" strokeDasharray="3 3" label="優秀 35%" />
+                    <ReferenceLine y={25} stroke="#f59e0b" strokeDasharray="3 3" label="良好 25%" />
+                    <ReferenceLine y={15} stroke="#ef4444" strokeDasharray="3 3" label="及格 15%" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>
