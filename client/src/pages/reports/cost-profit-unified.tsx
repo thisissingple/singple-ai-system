@@ -1699,7 +1699,7 @@ export default function CostProfitUnifiedPage() {
 
           {/* TAB 2: 視覺分析 */}
           <TabsContent value="visual" className="space-y-4">
-            {filteredData.length === 0 ? (
+            {rows.length === 0 ? (
               <Card className="border-yellow-200 bg-yellow-50">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-yellow-800">
@@ -1880,7 +1880,7 @@ export default function CostProfitUnifiedPage() {
 
           {/* TAB 4: AI 洞察 */}
           <TabsContent value="ai" className="space-y-4">
-            {filteredData.length === 0 ? (
+            {rows.length === 0 ? (
               <Card className="border-yellow-200 bg-yellow-50">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-yellow-800">
@@ -1942,8 +1942,8 @@ export default function CostProfitUnifiedPage() {
                           佔總成本 {item.percentage.toFixed(1)}%
                         </div>
                         <div className="text-xs text-muted-foreground mt-1">
-                          佔營收 {currentMonthMetrics.revenue > 0
-                            ? ((item.amount / currentMonthMetrics.revenue) * 100).toFixed(1)
+                          佔營收 {totals.revenue > 0
+                            ? ((item.amount / totals.revenue) * 100).toFixed(1)
                             : '0'}%
                         </div>
                       </CardContent>
