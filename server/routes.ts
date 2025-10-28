@@ -3667,7 +3667,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({
           success: false,
           error: 'No data available',
-          message: '無法產生報表：資料來源不足或無資料。請確認 Google Sheets 已正確設定並同步。',
+          message: '無法產生報表：資料來源不足或無資料。',
         });
       }
 
@@ -3700,6 +3700,138 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: false,
         error: 'Internal server error',
         message: '產生報表時發生錯誤',
+      });
+    }
+  });
+
+  // Dashboard Overview API - 儀表板總覽數據
+  app.get('/api/reports/overview', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req as any).user?.id;
+
+      // 1. 取得本月數據
+      const monthlyReport = await totalReportService.generateReport({
+        period: 'monthly',
+        userId,
+      });
+
+      // 2. 取得本週數據
+      const weeklyReport = await totalReportService.generateReport({
+        period: 'weekly',
+        userId,
+      });
+
+      // 3. 取得上週數據
+      const lastWeekReport = await totalReportService.generateReport({
+        period: 'lastWeek',
+        userId,
+      });
+
+      // 4. 從 eods_for_closers 計算財務數據
+      const pool = createPool();
+
+      // 本月營收和毛利率
+      const monthlyFinancialQuery = `
+        SELECT
+          COALESCE(SUM(actual_amount), 0) as monthly_revenue,
+          COALESCE(AVG(
+            CASE
+              WHEN actual_amount > 0 AND package_price > 0
+              THEN ((actual_amount - (package_price * 0.7)) / actual_amount * 100)
+              ELSE 0
+            END
+          ), 0) as profit_margin
+        FROM eods_for_closers
+        WHERE deal_date >= date_trunc('month', CURRENT_DATE)
+          AND deal_date < date_trunc('month', CURRENT_DATE) + interval '1 month'
+          AND consultation_result = '成交'
+      `;
+
+      const monthlyFinancialResult = await queryDatabase(pool, monthlyFinancialQuery);
+
+      // 本週營收
+      const weeklyRevenueQuery = `
+        SELECT COALESCE(SUM(actual_amount), 0) as weekly_revenue
+        FROM eods_for_closers
+        WHERE deal_date >= date_trunc('week', CURRENT_DATE)
+          AND deal_date < date_trunc('week', CURRENT_DATE) + interval '1 week'
+          AND consultation_result = '成交'
+      `;
+
+      const weeklyRevenueResult = await queryDatabase(pool, weeklyRevenueQuery);
+
+      // 上週營收
+      const lastWeekRevenueQuery = `
+        SELECT COALESCE(SUM(actual_amount), 0) as last_week_revenue
+        FROM eods_for_closers
+        WHERE deal_date >= date_trunc('week', CURRENT_DATE) - interval '1 week'
+          AND deal_date < date_trunc('week', CURRENT_DATE)
+          AND consultation_result = '成交'
+      `;
+
+      const lastWeekRevenueResult = await queryDatabase(pool, lastWeekRevenueQuery);
+
+      // 5. 計算學生數據
+      const studentsQuery = `
+        SELECT
+          COUNT(DISTINCT student_email) as total_students,
+          COUNT(DISTINCT CASE
+            WHEN purchase_date >= date_trunc('month', CURRENT_DATE)
+            THEN student_email
+          END) as new_students_this_month
+        FROM trial_class_purchases
+        WHERE student_email IS NOT NULL
+      `;
+
+      const studentsResult = await queryDatabase(pool, studentsQuery);
+
+      // 6. 組裝回應
+      const responseData = {
+        // 本月營收概況
+        monthlyRevenue: parseFloat(monthlyFinancialResult.rows[0]?.monthly_revenue || 0),
+        monthlyTarget: 2000000, // NT$ 2,000,000
+        yearlyTarget: 20000000, // NT$ 20,000,000
+        profitMargin: parseFloat(monthlyFinancialResult.rows[0]?.profit_margin || 0),
+
+        // 體驗課數據
+        trialConversionRate: monthlyReport?.summaryMetrics?.conversionRate || 0,
+        pendingStudents: monthlyReport?.summaryMetrics?.pendingStudents || 0,
+        weeklyTrials: weeklyReport?.summaryMetrics?.totalTrials || 0,
+
+        // 學生數據
+        totalStudents: parseInt(studentsResult.rows[0]?.total_students || 0),
+        newStudentsThisMonth: parseInt(studentsResult.rows[0]?.new_students_this_month || 0),
+
+        // 本週趨勢 (vs 上週)
+        weeklyTrends: {
+          trials: {
+            current: weeklyReport?.summaryMetrics?.totalTrials || 0,
+            previous: lastWeekReport?.summaryMetrics?.totalTrials || 0,
+          },
+          conversions: {
+            current: weeklyReport?.summaryMetrics?.totalConversions || 0,
+            previous: lastWeekReport?.summaryMetrics?.totalConversions || 0,
+          },
+          revenue: {
+            current: parseFloat(weeklyRevenueResult.rows[0]?.weekly_revenue || 0),
+            previous: parseFloat(lastWeekRevenueResult.rows[0]?.last_week_revenue || 0),
+          },
+        },
+
+        // 數據來源元數據
+        dataSourceMeta: monthlyReport?.dataSourceMeta || null,
+      };
+
+      res.json({
+        success: true,
+        data: responseData,
+      });
+    } catch (error) {
+      console.error('Error generating overview:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to generate overview',
+        details: error instanceof Error ? error.message : 'Unknown error',
       });
     }
   });

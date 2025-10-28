@@ -62,31 +62,19 @@ interface DataQualityIssue {
 export default function DashboardOverview() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // 取得總覽指標
+  // 取得總覽指標 - 使用真實 API
   const { data: metrics, isLoading, refetch } = useQuery<OverviewMetrics>({
     queryKey: ['/api/reports/overview'],
     queryFn: async () => {
-      // TODO: 建立實際的 API 端點
-      // 目前使用模擬數據
-      return {
-        trialConversionRate: 30.9,
-        pendingStudents: 66,
-        weeklyTrials: 23,
-        monthlyRevenue: 1592002,
-        monthlyTarget: 2000000,
-        profitMargin: 21.3,
-        totalStudents: 97,
-        newStudentsThisMonth: 14,
-        weeklyTrends: {
-          trials: { current: 23, previous: 18 },
-          conversions: { current: 7, previous: 5 },
-          revenue: { current: 385000, previous: 290000 },
-        },
-      };
+      return await apiRequest<OverviewMetrics>('GET', '/api/reports/overview');
     },
   });
 
-  // 資料品質警告
+  // 資料品質警告 - 暫時隱藏所有警告
+  const dataQualityIssues: DataQualityIssue[] = [];
+
+  // 以下是原本硬編碼的警告，暫時註解掉
+  /*
   const dataQualityIssues: DataQualityIssue[] = [
     {
       type: 'error',
@@ -110,6 +98,7 @@ export default function DashboardOverview() {
       actionUrl: '/settings/data-sources',
     },
   ];
+  */
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -429,68 +418,70 @@ export default function DashboardOverview() {
         </CardContent>
       </Card>
 
-      {/* 資料品質儀表板 */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="border-red-200 bg-red-50/50">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <XCircle className="h-4 w-4 text-red-600" />
-              無效資料
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-red-600">972</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              成交記錄無法找到對應學生
-            </p>
-            <Link href="/settings/data-sources">
-              <Button variant="link" className="h-auto p-0 mt-2 text-xs text-red-600">
-                立即處理 →
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
+      {/* 資料品質儀表板 - 暫時隱藏 */}
+      {false && (
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card className="border-red-200 bg-red-50/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <XCircle className="h-4 w-4 text-red-600" />
+                無效資料
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-red-600">972</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                成交記錄無法找到對應學生
+              </p>
+              <Link href="/settings/data-sources">
+                <Button variant="link" className="h-auto p-0 mt-2 text-xs text-red-600">
+                  立即處理 →
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
 
-        <Card className="border-amber-200 bg-amber-50/50">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
-              缺少購買記錄
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-amber-600">2</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              有上課記錄但缺少購買記錄
-            </p>
-            <Link href="/reports/trial-report">
-              <Button variant="link" className="h-auto p-0 mt-2 text-xs text-amber-600">
-                查看詳情 →
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
+          <Card className="border-amber-200 bg-amber-50/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                缺少購買記錄
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-amber-600">2</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                有上課記錄但缺少購買記錄
+              </p>
+              <Link href="/reports/trial-report">
+                <Button variant="link" className="h-auto p-0 mt-2 text-xs text-amber-600">
+                  查看詳情 →
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
 
-        <Card className="border-amber-200 bg-amber-50/50">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Clock className="h-4 w-4 text-amber-600" />
-              待處理訂單
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-amber-600">-474</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              pending 計算結果異常
-            </p>
-            <Link href="/settings/data-sources">
-              <Button variant="link" className="h-auto p-0 mt-2 text-xs text-amber-600">
-                檢查資料來源 →
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
+          <Card className="border-amber-200 bg-amber-50/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Clock className="h-4 w-4 text-amber-600" />
+                待處理訂單
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-amber-600">-474</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                pending 計算結果異常
+              </p>
+              <Link href="/settings/data-sources">
+                <Button variant="link" className="h-auto p-0 mt-2 text-xs text-amber-600">
+                  檢查資料來源 →
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      )}
       </div>
     </ReportsLayout>
   );
