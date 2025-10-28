@@ -4964,9 +4964,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 取得老師名單（從 users 表查詢 roles 包含 'teacher'）- 支援多重角色
   app.get('/api/teachers', async (req, res) => {
     try {
-      const pool = createPool();
       const result = await queryDatabase(
-        pool,
         `SELECT id, first_name, last_name, email, roles
          FROM users
          WHERE 'teacher' = ANY(roles)
@@ -4981,7 +4979,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         roles: user.roles  // 返回所有角色資訊
       }));
 
-      await pool.end();
       res.json(teachers);
     } catch (error: any) {
       console.error('老師名單 API 錯誤:', error);

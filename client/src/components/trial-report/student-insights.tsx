@@ -386,7 +386,7 @@ function PriorityExplanationDialog() {
 export function StudentInsights({ students, initialFilter = 'all' }: StudentInsightsProps) {
   // 多欄位排序：支援疊加排序（Shift+Click）
   const [sortConfigs, setSortConfigs] = useState<SortConfig[]>([
-    { field: 'priority', direction: 'asc' } // 預設按優先級排序
+    { field: 'lastClassDate', direction: 'desc' } // 預設按最近上課日期從新到舊排序
   ]);
   const [statusFilter, setStatusFilter] = useState<ActualStatus | 'all'>('all');
   const [teacherFilter, setTeacherFilter] = useState<string | 'all'>('all');
@@ -1060,8 +1060,7 @@ export function StudentInsights({ students, initialFilter = 'all' }: StudentInsi
 
                   {/* 購買日期 */}
                   <TableCell className="w-[90px]">
-                    <div className="flex items-center gap-1 text-xs text-gray-700">
-                      <ShoppingCart className="h-3 w-3 text-muted-foreground" />
+                    <div className="text-xs text-gray-700 whitespace-nowrap">
                       {student.purchaseDate || '—'}
                     </div>
                   </TableCell>
@@ -1115,8 +1114,7 @@ export function StudentInsights({ students, initialFilter = 'all' }: StudentInsi
 
                   {/* 最近一次上課日 */}
                   <TableCell className="w-[90px]">
-                    <div className="flex items-center gap-1 text-xs text-gray-700">
-                      <Calendar className="h-3 w-3 text-muted-foreground" />
+                    <div className="text-xs text-gray-700 whitespace-nowrap">
                       {student.lastClassDate || '—'}
                     </div>
                   </TableCell>
