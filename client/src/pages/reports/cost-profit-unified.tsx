@@ -466,12 +466,25 @@ export default function CostProfitUnifiedPage() {
     const categoryTotals = new Map<string, number>();
     let totalCost = 0;
 
-    filteredData.forEach((item) => {
-      if (item.category_name !== '收入金額') {
-        const amount = parseFloat(item.amount as string) || 0;
-        const current = categoryTotals.get(item.category_name) || 0;
-        categoryTotals.set(item.category_name, current + amount);
-        totalCost += amount;
+    // 使用即時編輯的資料（rows），而非資料庫的舊資料（filteredData）
+    rows.forEach((row) => {
+      if (!isRevenueCategory(row.category)) {
+        const amount = parseFloat(row.amount) || 0;
+        if (!Number.isFinite(amount)) return;
+
+        // 轉換為 TWD
+        let amountInTWD: number;
+        if (row.amountInTWD !== undefined && row.amountInTWD !== null) {
+          amountInTWD = Number(row.amountInTWD);
+        } else {
+          amountInTWD = convertToTWD(amount, row.currency);
+        }
+
+        if (!Number.isFinite(amountInTWD)) return;
+
+        const current = categoryTotals.get(row.category.trim()) || 0;
+        categoryTotals.set(row.category.trim(), current + amountInTWD);
+        totalCost += amountInTWD;
       }
     });
 
@@ -483,7 +496,7 @@ export default function CostProfitUnifiedPage() {
         color: COLORS[category as keyof typeof COLORS] || '#64748b',
       }))
       .sort((a, b) => b.amount - a.amount);
-  }, [filteredData]);
+  }, [rows, exchangeRates]);
 
   // 月度趨勢
   const monthlyTrend = useMemo((): MonthlyMetrics[] => {
@@ -528,7 +541,12 @@ export default function CostProfitUnifiedPage() {
 
   // AI 洞察（增強版 - 三層級分析）
   const aiInsights = useMemo(() => {
-    const { revenue, totalCost, profit, profitMargin } = currentMonthMetrics;
+    // 使用即時摘要的數據（totals），而非資料庫的舊資料（currentMonthMetrics）
+    const revenue = totals.revenue;
+    const totalCost = totals.cost;
+    const profit = totals.profit;
+    const profitMargin = totals.margin;
+
     const insights: { type: 'success' | 'warning' | 'danger', message: string }[] = [];
 
     // 歌唱教育機構行業標準
@@ -680,7 +698,7 @@ export default function CostProfitUnifiedPage() {
     }
 
     return insights;
-  }, [currentMonthMetrics, categoryBreakdown, changes, monthlyTrend]);
+  }, [totals, categoryBreakdown, changes, monthlyTrend]);
 
   // ========== 年度數據計算（用於年度總覽 Tab）==========
   const annualMetrics = useMemo(() => {
