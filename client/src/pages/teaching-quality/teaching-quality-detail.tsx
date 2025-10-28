@@ -644,7 +644,7 @@ export default function TeachingQualityDetail() {
       <DashboardLayout sidebarSections={sidebarConfig}>
         <div className="flex h-64 flex-col items-center justify-center gap-4">
           <div className="text-lg text-red-600">載入失敗：{error || '找不到分析資料'}</div>
-          <Button onClick={() => navigate('/teaching-quality')}>
+          <Button onClick={() => navigate('/reports/trial-overview?tab=analysis')}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             返回列表
           </Button>
@@ -667,7 +667,7 @@ export default function TeachingQualityDetail() {
           <div className="flex items-center justify-between">
             <Button
               variant="ghost"
-              onClick={() => navigate('/teaching-quality')}
+              onClick={() => navigate('/reports/trial-overview?tab=analysis')}
               className="w-fit"
             >
               <ArrowLeft className="mr-2 h-4 w-4" />
@@ -922,7 +922,7 @@ export default function TeachingQualityDetail() {
                 </p>
                 <div className="flex gap-4 justify-center">
                   <Button
-                    onClick={() => navigate('/teaching-quality')}
+                    onClick={() => navigate('/reports/trial-overview?tab=analysis')}
                     variant="outline"
                   >
                     <ArrowLeft className="mr-2 h-4 w-4" />

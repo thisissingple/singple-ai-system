@@ -8,11 +8,6 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -50,15 +45,13 @@ import {
   TrendingUp,
   TrendingDown,
   DollarSign,
-  ChevronDown,
-  ChevronRight,
-  ChevronLeft,
   Settings,
   X,
   ListPlus,
   Upload,
 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ResizableTableHead } from '@/components/ui/resizable-table-head';
 import { useToast } from '@/hooks/use-toast';
 import Papa from 'papaparse';
 import type {
@@ -145,9 +138,33 @@ export default function IncomeExpenseManager() {
   const [saving, setSaving] = useState(false);
   const [selectedYear, setSelectedYear] = useState<number>(defaultYear);
   const [selectedMonth, setSelectedMonth] = useState<string>(defaultMonth);
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [showConsultFields, setShowConsultFields] = useState(false); // 控制諮詢欄位顯示
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set()); // 批次選擇的列
+
+  // 排序狀態
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  // 欄寬調整狀態
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
+    checkbox: 50,
+    index: 60,
+    date: 150,
+    type: 120,
+    payment: 150,
+    item: 250,
+    teacher: 180,
+    customer: 200,
+    email: 240,
+    amount: 200,
+    notes: 280,
+    setter: 180,
+    consultant: 180,
+    createdBy: 180,
+    createdAt: 200,
+    updatedAt: 200,
+    actions: 100,
+  });
   const [showBatchAddDialog, setShowBatchAddDialog] = useState(false); // 批次新增對話框
   const [batchAddCount, setBatchAddCount] = useState('5'); // 批次新增數量
   const [showImportDialog, setShowImportDialog] = useState(false); // CSV 匯入對話框
@@ -531,17 +548,73 @@ export default function IncomeExpenseManager() {
     setRows(newRows);
   };
 
-  // 展開/收合詳細資訊
-  const toggleExpand = (rowId: string) => {
-    const newExpanded = new Set(expandedRows);
-    const isExpanding = !newExpanded.has(rowId);
-
-    if (newExpanded.has(rowId)) {
-      newExpanded.delete(rowId);
+  // 排序功能
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      // Toggle direction if same column
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
     } else {
-      newExpanded.add(rowId);
+      // New column, default to ascending
+      setSortColumn(column);
+      setSortDirection('asc');
     }
-    setExpandedRows(newExpanded);
+  };
+
+  // 應用排序的 rows
+  const sortedRows = useMemo(() => {
+    if (!sortColumn) return rows;
+
+    const sorted = [...rows].sort((a, b) => {
+      let aVal: any = a[sortColumn as keyof EditableRow];
+      let bVal: any = b[sortColumn as keyof EditableRow];
+
+      // Handle teacher names
+      if (sortColumn === 'teacher_id') {
+        aVal = a.teacher_name || '';
+        bVal = b.teacher_name || '';
+      } else if (sortColumn === 'setter_id') {
+        aVal = a.setter_name || '';
+        bVal = b.setter_name || '';
+      } else if (sortColumn === 'consultant_id') {
+        aVal = a.consultant_name || '';
+        bVal = b.consultant_name || '';
+      } else if (sortColumn === 'created_by') {
+        aVal = a.created_by_name || '';
+        bVal = b.created_by_name || '';
+      }
+
+      // Handle numbers
+      if (sortColumn === 'amount') {
+        aVal = parseFloat(aVal || '0');
+        bVal = parseFloat(bVal || '0');
+      }
+
+      // Handle dates
+      if (sortColumn === 'transaction_date' || sortColumn === 'created_at' || sortColumn === 'updated_at') {
+        aVal = new Date(aVal || 0).getTime();
+        bVal = new Date(bVal || 0).getTime();
+      }
+
+      // Convert to string for comparison
+      aVal = String(aVal || '');
+      bVal = String(bVal || '');
+
+      if (sortDirection === 'asc') {
+        return aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+      } else {
+        return aVal > bVal ? -1 : aVal < bVal ? 1 : 0;
+      }
+    });
+
+    return sorted;
+  }, [rows, sortColumn, sortDirection]);
+
+  // 欄寬調整功能
+  const handleColumnResize = (column: string, newWidth: number) => {
+    setColumnWidths(prev => ({
+      ...prev,
+      [column]: Math.max(50, newWidth), // 最小 50px
+    }));
 
     // 如果是展開，自動滾動到展開按鈕位置（讓詳細欄位進入視野）
     if (isExpanding) {
@@ -1064,7 +1137,7 @@ export default function IncomeExpenseManager() {
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
-              <Table className={expandedRows.size > 0 ? "min-w-[3280px]" : "min-w-[2080px]"}>
+              <Table className="min-w-[3000px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[50px] whitespace-nowrap text-center">
@@ -1083,31 +1156,24 @@ export default function IncomeExpenseManager() {
                     <TableHead className="w-[240px] whitespace-nowrap">Email</TableHead>
                     <TableHead className="w-[200px] whitespace-nowrap">金額</TableHead>
                     <TableHead className="w-[280px] whitespace-nowrap">備註</TableHead>
+                    <TableHead className="w-[180px] whitespace-nowrap">電訪人員</TableHead>
+                    <TableHead className="w-[180px] whitespace-nowrap">諮詢人員</TableHead>
+                    <TableHead className="w-[180px] whitespace-nowrap">填表人</TableHead>
+                    <TableHead className="w-[200px] whitespace-nowrap">建立時間</TableHead>
+                    <TableHead className="w-[200px] whitespace-nowrap">最後更新</TableHead>
                     <TableHead className="w-[100px] whitespace-nowrap text-center">操作</TableHead>
-                    <TableHead className="w-[80px] whitespace-nowrap text-center">展開</TableHead>
-                    {/* 詳細欄位表頭（只在有展開時顯示） */}
-                    {expandedRows.size > 0 && (
-                      <>
-                        <TableHead className="w-[180px] whitespace-nowrap">電訪人員</TableHead>
-                        <TableHead className="w-[180px] whitespace-nowrap">諮詢人員</TableHead>
-                        <TableHead className="w-[180px] whitespace-nowrap">填表人</TableHead>
-                        <TableHead className="w-[200px] whitespace-nowrap">建立時間</TableHead>
-                        <TableHead className="w-[200px] whitespace-nowrap">最後更新</TableHead>
-                      </>
-                    )}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {rows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={18} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={17} className="text-center text-muted-foreground py-8">
                         尚無記錄，點擊「新增列」開始輸入
                       </TableCell>
                     </TableRow>
                   ) : (
                     rows.map((row, index) => {
                       const rowKey = row.tempId || row.id || `row-${index}`;
-                      const isExpanded = expandedRows.has(rowKey);
 
                       return (
                         <>
@@ -1264,6 +1330,76 @@ export default function IncomeExpenseManager() {
                               />
                             </TableCell>
 
+                            {/* 電訪人員 */}
+                            <TableCell>
+                              <Select
+                                value={row.setter_id || "none"}
+                                onValueChange={(value) => handleUpdateRow(index, 'setter_id', value === "none" ? "" : value)}
+                              >
+                                <SelectTrigger className="h-9 text-sm">
+                                  <SelectValue placeholder="選擇" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">無</SelectItem>
+                                  {teachers.map((teacher) => (
+                                    <SelectItem key={teacher.id} value={teacher.id}>
+                                      {teacher.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+
+                            {/* 諮詢人員 */}
+                            <TableCell>
+                              <Select
+                                value={row.consultant_id || "none"}
+                                onValueChange={(value) => handleUpdateRow(index, 'consultant_id', value === "none" ? "" : value)}
+                              >
+                                <SelectTrigger className="h-9 text-sm">
+                                  <SelectValue placeholder="選擇" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">無</SelectItem>
+                                  {teachers.map((teacher) => (
+                                    <SelectItem key={teacher.id} value={teacher.id}>
+                                      {teacher.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+
+                            {/* 填表人 */}
+                            <TableCell>
+                              <Select
+                                value={row.created_by || "none"}
+                                onValueChange={(value) => handleUpdateRow(index, 'created_by', value === "none" ? "" : value)}
+                              >
+                                <SelectTrigger className="h-9 text-sm">
+                                  <SelectValue placeholder="選擇" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">系統</SelectItem>
+                                  {teachers.map((teacher) => (
+                                    <SelectItem key={teacher.id} value={teacher.id}>
+                                      {teacher.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+
+                            {/* 建立時間 */}
+                            <TableCell className="text-sm text-muted-foreground">
+                              {row.created_at || '-'}
+                            </TableCell>
+
+                            {/* 最後更新 */}
+                            <TableCell className="text-sm text-muted-foreground">
+                              {row.updated_at || '-'}
+                            </TableCell>
+
                             {/* 操作 */}
                             <TableCell>
                               <div className="flex gap-1">
@@ -1277,98 +1413,6 @@ export default function IncomeExpenseManager() {
                                 </Button>
                               </div>
                             </TableCell>
-
-                            {/* 展開按鈕 */}
-                            <TableCell className="text-center">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => toggleExpand(rowKey)}
-                                className="h-8 w-8 p-0"
-                                title={isExpanded ? "收合" : "展開詳細"}
-                              >
-                                {isExpanded ? (
-                                  <ChevronLeft className="h-4 w-4" />
-                                ) : (
-                                  <ChevronRight className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </TableCell>
-
-                            {/* 詳細欄位（只在展開時顯示） */}
-                            {isExpanded && (
-                              <>
-                                {/* 電訪人員 */}
-                                <TableCell>
-                                  <Select
-                                    value={row.setter_id || "none"}
-                                    onValueChange={(value) => handleUpdateRow(index, 'setter_id', value === "none" ? "" : value)}
-                                  >
-                                    <SelectTrigger className="h-9 text-sm">
-                                      <SelectValue placeholder="選擇" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="none">無</SelectItem>
-                                      {teachers.map((teacher) => (
-                                        <SelectItem key={teacher.id} value={teacher.id}>
-                                          {teacher.name}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </TableCell>
-
-                                {/* 諮詢人員 */}
-                                <TableCell>
-                                  <Select
-                                    value={row.consultant_id || "none"}
-                                    onValueChange={(value) => handleUpdateRow(index, 'consultant_id', value === "none" ? "" : value)}
-                                  >
-                                    <SelectTrigger className="h-9 text-sm">
-                                      <SelectValue placeholder="選擇" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="none">無</SelectItem>
-                                      {teachers.map((teacher) => (
-                                        <SelectItem key={teacher.id} value={teacher.id}>
-                                          {teacher.name}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </TableCell>
-
-                                {/* 填表人 */}
-                                <TableCell>
-                                  <Select
-                                    value={row.created_by || "none"}
-                                    onValueChange={(value) => handleUpdateRow(index, 'created_by', value === "none" ? "" : value)}
-                                  >
-                                    <SelectTrigger className="h-9 text-sm">
-                                      <SelectValue placeholder="選擇" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="none">系統</SelectItem>
-                                      {teachers.map((teacher) => (
-                                        <SelectItem key={teacher.id} value={teacher.id}>
-                                          {teacher.name}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </TableCell>
-
-                                {/* 建立時間 */}
-                                <TableCell className="text-sm text-muted-foreground">
-                                  {row.created_at || '-'}
-                                </TableCell>
-
-                                {/* 最後更新 */}
-                                <TableCell className="text-sm text-muted-foreground">
-                                  {row.updated_at || '-'}
-                                </TableCell>
-                              </>
-                            )}
                           </TableRow>
 
                           {/* 舊的詳細資訊展開區已移除 - 改為橫向顯示 */}

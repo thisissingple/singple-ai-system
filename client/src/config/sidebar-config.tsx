@@ -47,15 +47,9 @@ export const sidebarConfig: SidebarSection[] = [
     title: '教師系統',
     items: [
       {
-        label: '我的體驗課報表',
-        href: '/reports/trial-report',
+        label: '體驗課總覽',
+        href: '/reports/trial-overview',
         icon: FileText,
-        requiredRoles: ['teacher'],
-      },
-      {
-        label: '教學品質分析',
-        href: '/teaching-quality',
-        icon: GraduationCap,
         requiredRoles: ['teacher'],
       },
       {
@@ -129,8 +123,8 @@ export const sidebarConfig: SidebarSection[] = [
         requiredRoles: ['consultant'],
       },
       {
-        label: '我的體驗課報表',
-        href: '/reports/trial-report',
+        label: '體驗課總覽',
+        href: '/reports/trial-overview',
         icon: FileText,
         requiredRoles: ['consultant'],
       },
@@ -154,8 +148,8 @@ export const sidebarConfig: SidebarSection[] = [
         requiredRoles: ['admin', 'manager'],
       },
       {
-        label: '體驗課報表',
-        href: '/reports/trial-report',
+        label: '體驗課總覽',
+        href: '/reports/trial-overview',
         icon: FileText,
         requiredRoles: ['admin', 'manager'],
       },
@@ -219,12 +213,6 @@ export const sidebarConfig: SidebarSection[] = [
         label: '電訪記錄',
         href: '/telemarketing/call-records',
         icon: PhoneCall,
-        requiredRoles: ['admin', 'manager'],
-      },
-      {
-        label: '教學品質分析',
-        href: '/teaching-quality',
-        icon: GraduationCap,
         requiredRoles: ['admin', 'manager'],
       },
       {

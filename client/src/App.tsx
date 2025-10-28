@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, Redirect } from "wouter";
 import { lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -23,6 +23,7 @@ const DashboardRawDataMVP = lazy(() => import("@/pages/dashboard-raw-data-mvp"))
 // 新版頁面（包含側邊選單）
 const DashboardOverview = lazy(() => import("@/pages/dashboard-overview"));
 const TrialReportPage = lazy(() => import("@/pages/reports/trial-report"));
+const TrialOverviewPage = lazy(() => import("@/pages/reports/trial-overview"));
 const CostProfitUnifiedPage = lazy(() => import("@/pages/reports/cost-profit-unified"));
 const IncomeExpenseManager = lazy(() => import("@/pages/reports/income-expense-manager"));
 const KPICalculatorPage = lazy(() => import("@/pages/tools/kpi-calculator"));
@@ -80,9 +81,19 @@ function Router() {
       </Route>
 
       {/* 報表路由（新，包含側邊選單） */}
-      <Route path="/reports/trial-report">
-        <ProtectedRoute><TrialReportPage /></ProtectedRoute>
+
+      {/* 新的整合頁面：體驗課總覽 */}
+      <Route path="/reports/trial-overview">
+        <ProtectedRoute><TrialOverviewPage /></ProtectedRoute>
       </Route>
+
+      {/* 舊路由重導向到新的整合頁面 */}
+      <Route path="/reports/trial-report">
+        <ProtectedRoute>
+          <Redirect to="/reports/trial-overview?tab=data" />
+        </ProtectedRoute>
+      </Route>
+
       <Route path="/reports/cost-profit">
         <ProtectedRoute><CostProfitUnifiedPage /></ProtectedRoute>
       </Route>
@@ -127,9 +138,14 @@ function Router() {
       </Route>
 
       {/* 教學品質路由 */}
+      {/* 舊的列表頁重導向到新的整合頁面的學員分析 Tab */}
       <Route path="/teaching-quality">
-        <ProtectedRoute><TeachingQualityList /></ProtectedRoute>
+        <ProtectedRoute>
+          <Redirect to="/reports/trial-overview?tab=analysis" />
+        </ProtectedRoute>
       </Route>
+
+      {/* 詳情頁保持獨立 */}
       <Route path="/teaching-quality/:id">
         <ProtectedRoute><TeachingQualityDetail /></ProtectedRoute>
       </Route>
