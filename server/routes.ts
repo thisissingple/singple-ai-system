@@ -1411,6 +1411,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Worksheet API routes (protected)
+
+  // 優化：一次取得所有 spreadsheets 的 worksheets，避免 N+1 查詢
+  app.get('/api/worksheets/all', async (req, res) => {
+    try {
+      const spreadsheets = await storage.listSpreadsheets();
+      const allWorksheets: any[] = [];
+
+      // 並行查詢所有 spreadsheets 的 worksheets
+      await Promise.all(
+        spreadsheets.map(async (spreadsheet) => {
+          try {
+            // Get worksheets from Google Sheets API
+            const worksheetInfo = await googleSheetsService.getWorksheets(spreadsheet.spreadsheetId);
+            if (!worksheetInfo) return;
+
+            // Get existing worksheets from storage
+            const existingWorksheets = await storage.getWorksheets(spreadsheet.id);
+
+            // Merge Google Sheets data with local storage data
+            const worksheets = worksheetInfo.map(wsInfo => {
+              const existing = existingWorksheets.find(w => w.gid === wsInfo.gid);
+              return existing || {
+                id: `temp-${wsInfo.gid}`,
+                worksheetName: wsInfo.name,
+                gid: wsInfo.gid,
+                spreadsheetId: spreadsheet.spreadsheetId,
+                isEnabled: false,
+                range: "A1:Z1000",
+                headers: null,
+                rowCount: 0,
+                lastSyncAt: null,
+                createdAt: new Date(),
+              };
+            });
+
+            allWorksheets.push(...worksheets);
+          } catch (error) {
+            console.error(`Error fetching worksheets for spreadsheet ${spreadsheet.id}:`, error);
+            // Continue with other spreadsheets even if one fails
+          }
+        })
+      );
+
+      res.json({ success: true, data: allWorksheets });
+    } catch (error) {
+      console.error('Error fetching all worksheets:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch worksheets' });
+    }
+  });
+
   app.get('/api/spreadsheets/:id/worksheets', async (req, res) => {
     try {
       const { id } = req.params;

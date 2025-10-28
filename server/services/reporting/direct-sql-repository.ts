@@ -27,30 +27,30 @@ import { DateRange, SupabaseDataRow } from './supabase-report-repository';
 export class DirectSqlRepository {
   /**
    * Get trial class attendance data
-   * NOTE: PostgREST schema cache 問題 - 暫時取得全部資料後在應用層過濾
+   * 優化：在資料庫層級過濾日期，而非應用層
    */
   async getAttendance(dateRange: DateRange): Promise<SupabaseDataRow[]> {
     const client = getSupabaseClient();
 
     try {
-      // 繞過 PostgREST schema cache - 取得全部資料
-      const { data, error } = await client
+      // 建立查詢
+      let query = client
         .from('trial_class_attendance')
         .select('*');
 
+      // 在資料庫層級過濾日期（除非是 "all" 期間）
+      if (dateRange.start !== '1970-01-01' || dateRange.end !== '2099-12-31') {
+        // 優先使用英文欄位名稱 class_date，如果不存在則使用中文欄位
+        query = query
+          .gte('class_date', dateRange.start)
+          .lte('class_date', dateRange.end);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
 
-      // 在應用層過濾日期
-      const filtered = (data || []).filter(row => {
-        if (dateRange.start === '1970-01-01' && dateRange.end === '2099-12-31') {
-          return true; // All period
-        }
-        const classDate = row.class_date || row['上課日期'];
-        if (!classDate) return true; // Include null dates
-        return classDate >= dateRange.start && classDate <= dateRange.end;
-      });
-
-      return filtered.map(row => this.normalizeAttendanceRow(row));
+      return (data || []).map((row: any) => this.normalizeAttendanceRow(row));
     } catch (error) {
       console.error('Error in getAttendance (direct query):', error);
       throw error;
@@ -59,30 +59,29 @@ export class DirectSqlRepository {
 
   /**
    * Get trial class purchase data
-   * NOTE: PostgREST schema cache 問題 - 暫時取得全部資料後在應用層過濾
+   * 優化：在資料庫層級過濾日期，而非應用層
    */
   async getPurchases(dateRange: DateRange): Promise<SupabaseDataRow[]> {
     const client = getSupabaseClient();
 
     try {
-      // 繞過 PostgREST schema cache - 取得全部資料
-      const { data, error } = await client
+      // 建立查詢
+      let query = client
         .from('trial_class_purchases')
         .select('*');
 
+      // 在資料庫層級過濾日期（除非是 "all" 期間）
+      if (dateRange.start !== '1970-01-01' || dateRange.end !== '2099-12-31') {
+        query = query
+          .gte('purchase_date', dateRange.start)
+          .lte('purchase_date', dateRange.end);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
 
-      // 在應用層過濾日期
-      const filtered = (data || []).filter(row => {
-        if (dateRange.start === '1970-01-01' && dateRange.end === '2099-12-31') {
-          return true; // All period
-        }
-        const purchaseDate = row.purchase_date || row['體驗課購買日期'];
-        if (!purchaseDate) return true; // Include null dates
-        return purchaseDate >= dateRange.start && purchaseDate <= dateRange.end;
-      });
-
-      return filtered.map(row => this.normalizePurchaseRow(row));
+      return (data || []).map((row: any) => this.normalizePurchaseRow(row));
     } catch (error) {
       console.error('Error in getPurchases (direct query):', error);
       throw error;
@@ -91,30 +90,29 @@ export class DirectSqlRepository {
 
   /**
    * Get EODs (deals) data
-   * NOTE: PostgREST schema cache 問題 - 暫時取得全部資料後在應用層過濾
+   * 優化：在資料庫層級過濾日期，而非應用層
    */
   async getDeals(dateRange: DateRange): Promise<SupabaseDataRow[]> {
     const client = getSupabaseClient();
 
     try {
-      // 繞過 PostgREST schema cache - 取得全部資料
-      const { data, error } = await client
+      // 建立查詢
+      let query = client
         .from('eods_for_closers')
         .select('*');
 
+      // 在資料庫層級過濾日期（除非是 "all" 期間）
+      if (dateRange.start !== '1970-01-01' || dateRange.end !== '2099-12-31') {
+        query = query
+          .gte('deal_date', dateRange.start)
+          .lte('deal_date', dateRange.end);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
 
-      // 在應用層過濾日期
-      const filtered = (data || []).filter(row => {
-        if (dateRange.start === '1970-01-01' && dateRange.end === '2099-12-31') {
-          return true; // All period
-        }
-        const dealDate = row.deal_date || row['成交日期'];
-        if (!dealDate) return true; // Include null dates
-        return dealDate >= dateRange.start && dealDate <= dateRange.end;
-      });
-
-      return filtered.map(row => this.normalizeDealRow(row));
+      return (data || []).map((row: any) => this.normalizeDealRow(row));
     } catch (error) {
       console.error('Error in getDeals (direct query):', error);
       throw error;

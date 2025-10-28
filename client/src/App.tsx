@@ -18,8 +18,7 @@ import DashboardRawDataMVP from "@/pages/dashboard-raw-data-mvp";
 // 新版頁面（包含側邊選單）
 import DashboardOverview from "@/pages/dashboard-overview";
 import TrialReportPage from "@/pages/reports/trial-report";
-import CostProfitDashboard from "@/pages/reports/cost-profit-dashboard";
-import CostProfitManagerPage from "@/pages/reports/cost-profit-manager";
+import CostProfitUnifiedPage from "@/pages/reports/cost-profit-unified";
 import IncomeExpenseManager from "@/pages/reports/income-expense-manager";
 import KPICalculatorPage from "@/pages/tools/kpi-calculator";
 import AIAnalysisPage from "@/pages/tools/ai-analysis";
@@ -71,10 +70,7 @@ function Router() {
         <ProtectedRoute><TrialReportPage /></ProtectedRoute>
       </Route>
       <Route path="/reports/cost-profit">
-        <ProtectedRoute><CostProfitDashboard /></ProtectedRoute>
-      </Route>
-      <Route path="/reports/cost-profit/manage">
-        <ProtectedRoute><CostProfitManagerPage /></ProtectedRoute>
+        <ProtectedRoute><CostProfitUnifiedPage /></ProtectedRoute>
       </Route>
       <Route path="/reports/income-expense">
         <ProtectedRoute><IncomeExpenseManager /></ProtectedRoute>

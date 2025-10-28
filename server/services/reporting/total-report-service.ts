@@ -120,19 +120,29 @@ export class TotalReportService {
     const warnings: string[] = [];
 
     try {
-      // 統一資料取得（Supabase 優先 → Storage fallback）
-      const { attendanceData, purchaseData, eodsData, dataSource } = await this.fetchRawData(dateRange, warnings, request.userId);
+      // 優化：並行查詢當期和前期資料，減少等待時間
+      const shouldFetchPrevious = this.shouldFetchPreviousPeriod(request.period);
+      const previousDateRange = shouldFetchPrevious
+        ? this.getPreviousPeriodDateRange(request.period, baseDate)
+        : null;
 
-      // 🆕 取得前一時段資料（用於對比）
+      // 並行執行當期和前期資料查詢
+      const [currentData, previousData] = await Promise.all([
+        this.fetchRawData(dateRange, warnings, request.userId),
+        shouldFetchPrevious && previousDateRange
+          ? this.fetchRawData(previousDateRange, warnings, request.userId)
+          : Promise.resolve(null)
+      ]);
+
+      const { attendanceData, purchaseData, eodsData, dataSource } = currentData;
+
+      // 組裝前期資料
       let previousPeriodData: { attendanceData: any[]; purchaseData: any[]; eodsData: any[] } | null = null;
-      if (this.shouldFetchPreviousPeriod(request.period)) {
-        const previousDateRange = this.getPreviousPeriodDateRange(request.period, baseDate);
-        const { attendanceData: prevAttendance, purchaseData: prevPurchase, eodsData: prevEods } =
-          await this.fetchRawData(previousDateRange, warnings, request.userId);
+      if (previousData) {
         previousPeriodData = {
-          attendanceData: prevAttendance,
-          purchaseData: prevPurchase,
-          eodsData: prevEods
+          attendanceData: previousData.attendanceData,
+          purchaseData: previousData.purchaseData,
+          eodsData: previousData.eodsData
         };
       }
 
@@ -605,7 +615,10 @@ export class TotalReportService {
     const studentClassDataMap = new Map<string, { purchased: number; attended: number }>();
     let missingTeacherCount = 0;
 
-    // Step 1: 統計教師授課記錄，同時建立學生→教師對應
+    // 優化：Step 1 - 統計教師授課記錄，同時建立學生→教師對應
+    // 同時收集 class date 資訊供後續轉換天數計算使用
+    const studentClassDatesMap = new Map<string, Date[]>();
+
     attendanceData.forEach(row => {
       const teacher = resolveField(row.data, 'teacher');
       const studentEmail = resolveField(row.data, 'studentEmail');
@@ -638,15 +651,19 @@ export class TotalReportService {
       if (studentEmail) {
         const email = studentEmail.toLowerCase();
         stats.students.add(email);
-        // 建立學生→教師對應（如果同一學生有多位教師，以最後一位為準）
         studentTeacherMap.set(email, teacher);
 
-        // 🆕 累計學生已上堂數
+        // 累計學生已上堂數
         if (!studentClassDataMap.has(email)) {
           studentClassDataMap.set(email, { purchased: 0, attended: 0 });
         }
         if (classDate) {
           studentClassDataMap.get(email)!.attended++;
+          // 同時保存上課日期供後續使用
+          if (!studentClassDatesMap.has(email)) {
+            studentClassDatesMap.set(email, []);
+          }
+          studentClassDatesMap.get(email)!.push(classDate);
         }
       }
 
@@ -712,10 +729,10 @@ export class TotalReportService {
       }
     });
 
-    // Step 3: 從 EODs 統計高階方案實收金額（使用 studentTeacherMap 找到教師）
+    // 優化：Step 3 - 從 EODs 統計高階方案實收金額，同時計算轉換天數
+    // 合併原本的 Step 3 和 Step 4，避免重複遍歷
     eodsData.forEach((row, idx) => {
       const studentEmail = resolveField(row.data, 'studentEmail');
-      // 直接從 data 取值，因為 resolveField 可能無法處理中文欄位
       const plan = (
         row.data?.成交方案 ||
         row.data?.deal_package ||
@@ -747,32 +764,24 @@ export class TotalReportService {
 
       if (amount > 0) {
         const stats = teacherMap.get(teacher)!;
-        stats.highLevelDeals.push({
+        const dealRecord = {
           amount,
           date: dealDate || new Date(),
           studentEmail: email,
-        });
-      }
-    });
+        };
+        stats.highLevelDeals.push(dealRecord);
 
-    // Step 4: 計算轉換天數（從 attendance 到 EODs）
-    attendanceData.forEach(attRow => {
-      const teacher = resolveField(attRow.data, 'teacher');
-      const studentEmail = resolveField(attRow.data, 'studentEmail');
-      const attDateRaw = resolveField(attRow.data, 'classDate');
-      const attDate = parseDateField(attDateRaw);
-
-      if (!teacher || !studentEmail || !attDate || !teacherMap.has(teacher)) return;
-
-      const stats = teacherMap.get(teacher)!;
-      const email = studentEmail.toLowerCase();
-
-      // 找到該學生的成交記錄
-      const deal = stats.highLevelDeals.find(d => d.studentEmail === email);
-      if (deal && deal.date) {
-        const days = Math.floor((deal.date.getTime() - attDate.getTime()) / (1000 * 60 * 60 * 24));
-        if (days >= 0 && days < 365) {  // 合理範圍內
-          stats.conversionDays.push(days);
+        // 優化：同時計算轉換天數，使用已保存的上課日期
+        const classDates = studentClassDatesMap.get(email);
+        if (classDates && classDates.length > 0 && dealRecord.date) {
+          // 找到最早的上課日期
+          const firstClassDate = classDates.reduce((earliest, current) =>
+            current < earliest ? current : earliest
+          );
+          const days = Math.floor((dealRecord.date.getTime() - firstClassDate.getTime()) / (1000 * 60 * 60 * 24));
+          if (days >= 0 && days < 365) {  // 合理範圍內
+            stats.conversionDays.push(days);
+          }
         }
       }
     });

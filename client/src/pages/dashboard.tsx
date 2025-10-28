@@ -212,22 +212,16 @@ export default function Dashboard() {
     return spreadsheets.find((sheet) => sheet.spreadsheetId === previewWorksheet.spreadsheetId) || null;
   }, [previewWorksheet, spreadsheets]);
 
-  // Get all enabled worksheets across all spreadsheets
+  // 優化：使用新的 /api/worksheets/all endpoint，一次取得所有 worksheets
+  // 避免對每個 spreadsheet 發起個別請求（N+1 問題）
   const { data: allWorksheets = [], refetch: refetchAllWorksheets } = useQuery<Worksheet[]>({
-    queryKey: ['/api/worksheets', spreadsheets.map(s => s.id)],
+    queryKey: ['/api/worksheets/all'],
     queryFn: async () => {
-      const results = await Promise.all(
-        spreadsheets.map(async (spreadsheet) => {
-          try {
-            return await apiRequest<Worksheet[]>('GET', `/api/spreadsheets/${spreadsheet.id}/worksheets`);
-          } catch {
-            return [];
-          }
-        })
-      );
-      return results.flat();
+      return await apiRequest<Worksheet[]>('GET', '/api/worksheets/all');
     },
     enabled: spreadsheets.length > 0,
+    staleTime: 1000 * 60 * 5,  // 5 分鐘快取
+    gcTime: 1000 * 60 * 10,     // 10 分鐘保留
   });
 
   const enabledWorksheets = useMemo(() => {

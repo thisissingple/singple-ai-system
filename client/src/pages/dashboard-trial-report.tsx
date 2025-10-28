@@ -57,10 +57,6 @@ export default function DashboardTrialReport() {
 
       const response = await fetch(`/api/reports/trial-class?${params.toString()}`, {
         credentials: 'include',
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-        },
       });
 
       if (!response.ok) {
@@ -74,8 +70,9 @@ export default function DashboardTrialReport() {
 
       return json.data;
     },
-    staleTime: 0,
-    gcTime: 0,
+    // 優化：設定合理的快取時間以減少不必要的 API 呼叫
+    staleTime: 1000 * 60 * 5,  // 5 分鐘內資料視為新鮮，不重新請求
+    gcTime: 1000 * 60 * 10,     // 快取保留 10 分鐘
     retry: 1,
   });
 
@@ -96,10 +93,6 @@ export default function DashboardTrialReport() {
 
       const response = await fetch(`/api/reports/trial-class?${params.toString()}`, {
         credentials: 'include',
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-        },
       });
 
       if (!response.ok) {
@@ -113,8 +106,9 @@ export default function DashboardTrialReport() {
 
       return json.data;
     },
-    staleTime: 0,
-    gcTime: 0,
+    // 優化：設定合理的快取時間以減少不必要的 API 呼叫
+    staleTime: 1000 * 60 * 5,  // 5 分鐘內資料視為新鮮，不重新請求
+    gcTime: 1000 * 60 * 10,     // 快取保留 10 分鐘
     retry: 1,
   });
 

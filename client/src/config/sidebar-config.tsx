@@ -160,14 +160,8 @@ export const sidebarConfig: SidebarSection[] = [
         requiredRoles: ['admin', 'manager'],
       },
       {
-        label: '成本獲利報表',
-        href: '/reports/cost-profit',
-        icon: DollarSign,
-        requiredRoles: ['admin', 'manager'],
-      },
-      {
         label: '成本獲利管理',
-        href: '/reports/cost-profit/manage',
+        href: '/reports/cost-profit',
         icon: DollarSign,
         requiredRoles: ['admin'],
       },
