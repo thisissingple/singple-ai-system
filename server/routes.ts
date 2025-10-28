@@ -4964,26 +4964,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 取得老師名單（從 users 表查詢 roles 包含 'teacher'）- 支援多重角色
   app.get('/api/teachers', async (req, res) => {
     try {
-      const supabase = getSupabaseClient();
-
-      const { data, error } = await supabase
-        .from('users')
-        .select('id, first_name, last_name, email, roles')
-        .contains('roles', ['teacher'])
-        .eq('status', 'active')
-        .order('first_name', { ascending: true });
-
-      if (error) {
-        throw error;
-      }
+      const pool = createPool();
+      const result = await queryDatabase(
+        pool,
+        `SELECT id, first_name, last_name, email, roles
+         FROM users
+         WHERE 'teacher' = ANY(roles)
+         AND status = 'active'
+         ORDER BY first_name ASC`
+      );
 
       // 組合姓名（只用 first_name，不包含 last_name「老師」）
-      const teachers = (data || []).map(user => ({
+      const teachers = result.rows.map(user => ({
         id: user.id,
         name: user.first_name || user.email || user.id,
         roles: user.roles  // 返回所有角色資訊
       }));
 
+      await pool.end();
       res.json(teachers);
     } catch (error: any) {
       console.error('老師名單 API 錯誤:', error);
