@@ -3728,16 +3728,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // 4. 從 eods_for_closers 計算財務數據
-      const pool = createPool();
-
       // 本月營收和毛利率
       const monthlyFinancialQuery = `
         SELECT
-          COALESCE(SUM(actual_amount), 0) as monthly_revenue,
+          COALESCE(SUM(CAST(actual_amount AS NUMERIC)), 0) as monthly_revenue,
           COALESCE(AVG(
             CASE
-              WHEN actual_amount > 0 AND package_price > 0
-              THEN ((actual_amount - (package_price * 0.7)) / actual_amount * 100)
+              WHEN CAST(actual_amount AS NUMERIC) > 0 AND CAST(package_price AS NUMERIC) > 0
+              THEN ((CAST(actual_amount AS NUMERIC) - (CAST(package_price AS NUMERIC) * 0.7)) / CAST(actual_amount AS NUMERIC) * 100)
               ELSE 0
             END
           ), 0) as profit_margin
@@ -3747,29 +3745,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
           AND consultation_result = '成交'
       `;
 
-      const monthlyFinancialResult = await queryDatabase(pool, monthlyFinancialQuery);
+      const monthlyFinancialResult = await queryDatabase(monthlyFinancialQuery);
 
       // 本週營收
       const weeklyRevenueQuery = `
-        SELECT COALESCE(SUM(actual_amount), 0) as weekly_revenue
+        SELECT COALESCE(SUM(CAST(actual_amount AS NUMERIC)), 0) as weekly_revenue
         FROM eods_for_closers
         WHERE deal_date >= date_trunc('week', CURRENT_DATE)
           AND deal_date < date_trunc('week', CURRENT_DATE) + interval '1 week'
           AND consultation_result = '成交'
       `;
 
-      const weeklyRevenueResult = await queryDatabase(pool, weeklyRevenueQuery);
+      const weeklyRevenueResult = await queryDatabase(weeklyRevenueQuery);
 
       // 上週營收
       const lastWeekRevenueQuery = `
-        SELECT COALESCE(SUM(actual_amount), 0) as last_week_revenue
+        SELECT COALESCE(SUM(CAST(actual_amount AS NUMERIC)), 0) as last_week_revenue
         FROM eods_for_closers
         WHERE deal_date >= date_trunc('week', CURRENT_DATE) - interval '1 week'
           AND deal_date < date_trunc('week', CURRENT_DATE)
           AND consultation_result = '成交'
       `;
 
-      const lastWeekRevenueResult = await queryDatabase(pool, lastWeekRevenueQuery);
+      const lastWeekRevenueResult = await queryDatabase(lastWeekRevenueQuery);
 
       // 5. 計算學生數據
       const studentsQuery = `
@@ -3783,7 +3781,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         WHERE student_email IS NOT NULL
       `;
 
-      const studentsResult = await queryDatabase(pool, studentsQuery);
+      const studentsResult = await queryDatabase(studentsQuery);
 
       // 6. 組裝回應
       const responseData = {
