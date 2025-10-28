@@ -20,6 +20,76 @@ function getSupabaseClient() {
   return createClient(supabaseUrl, supabaseServiceKey);
 }
 
+/**
+ * 同步 business_identities → users.roles
+ *
+ * 核心邏輯：
+ * - business_identities 是主表（有業務編號、歷史記錄）
+ * - users.roles 是副表（供 API 查詢、權限控制使用）
+ * - 當修改 business_identities 時，自動更新 users.roles
+ *
+ * @param userId - 使用者 ID
+ */
+async function syncRolesToUser(userId: string): Promise<void> {
+  try {
+    // 1. 查詢該使用者所有 active 的 business_identities
+    const result = await queryDatabase(
+      `SELECT DISTINCT identity_type
+       FROM business_identities
+       WHERE user_id = $1 AND is_active = true`,
+      [userId]
+    );
+
+    // 2. 轉換為 roles 陣列
+    const roles = ['user']; // 基本角色
+
+    // 檢查是否為 admin（保留原有 admin 角色）
+    const adminCheck = await queryDatabase(
+      `SELECT roles FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    if (adminCheck.rows[0]?.roles?.includes('admin')) {
+      roles.push('admin');
+    }
+
+    // 根據 business_identities 新增角色
+    result.rows.forEach(row => {
+      const identityType = row.identity_type;
+
+      // identity_type → role 的對應
+      if (identityType === 'teacher' && !roles.includes('teacher')) {
+        roles.push('teacher');
+      }
+      if (identityType === 'consultant' && !roles.includes('consultant')) {
+        roles.push('consultant');
+      }
+      if (identityType === 'setter' && !roles.includes('setter')) {
+        roles.push('setter');
+      }
+      if (identityType === 'sales' && !roles.includes('sales')) {
+        roles.push('sales');
+      }
+      if (identityType === 'telemarketing' && !roles.includes('telemarketing')) {
+        roles.push('telemarketing');
+      }
+    });
+
+    // 3. 更新 users.roles
+    await queryDatabase(
+      `UPDATE users
+       SET roles = $1, updated_at = NOW()
+       WHERE id = $2`,
+      [roles, userId]
+    );
+
+    console.log(`✅ 已同步角色: userId=${userId}, roles=${JSON.stringify(roles)}`);
+  } catch (error: any) {
+    console.error(`❌ 同步角色失敗: userId=${userId}`, error);
+    throw new Error(`Failed to sync roles: ${error.message}`);
+  }
+}
+
 export function registerEmployeeManagementRoutes(app: Express) {
   /**
    * GET /api/employees
@@ -255,6 +325,9 @@ export function registerEmployeeManagementRoutes(app: Express) {
 
       if (error) throw error;
 
+      // ✅ 同步 users.roles
+      await syncRolesToUser(userId);
+
       res.json({
         success: true,
         data,
@@ -301,6 +374,9 @@ export function registerEmployeeManagementRoutes(app: Express) {
           message: 'Business identity not found',
         });
       }
+
+      // ✅ 同步 users.roles（停用後重新計算角色）
+      await syncRolesToUser(data.user_id);
 
       res.json({
         success: true,
@@ -707,6 +783,9 @@ export function registerEmployeeManagementRoutes(app: Express) {
       if (error) {
         throw error;
       }
+
+      // ✅ 同步 users.roles（刪除後重新計算角色）
+      await syncRolesToUser(userId);
 
       res.json({
         success: true,
