@@ -49,6 +49,7 @@ import { TeachingScoreCard } from '@/components/teaching-quality/teaching-score-
 import { TeachingScoresDetailSection } from '@/components/teaching-quality/teaching-scores-detail-section';
 import { SalesScoresDetailSection } from '@/components/teaching-quality/sales-scores-detail-section';
 import { FloatingAIChat } from '@/components/teaching-quality/floating-ai-chat';
+import { AnalysisProgressToast } from '@/components/teaching-quality/analysis-progress-toast';
 import { parseTeachingAnalysisMarkdown } from '@/lib/parse-teaching-analysis';
 import { calculateOverallScore, getGradeColor } from '@/lib/calculate-overall-score';
 import { useTeachingQuality } from '@/contexts/teaching-quality-context';
@@ -444,6 +445,7 @@ export default function TeachingQualityDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
 
   const [copiedPlan, setCopiedPlan] = useState(false);
   const [copiedTranscript, setCopiedTranscript] = useState(false);
@@ -485,7 +487,7 @@ export default function TeachingQualityDetail() {
   async function handleReanalyze() {
     if (!analysis?.attendance_id) return;
 
-    const confirmed = window.confirm('確定要重新分析此記錄嗎？這將覆蓋現有的分析結果。');
+    const confirmed = window.confirm('確定要重新分析此記錄嗎？\n\n分析將在背景執行，你可以離開此頁面繼續工作。');
     if (!confirmed) return;
 
     try {
@@ -497,24 +499,42 @@ export default function TeachingQualityDetail() {
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || '重新分析失敗');
+        throw new Error(data.error || '啟動重新分析失敗');
       }
 
-      // 重新分析成功，重新載入資料（不使用 window.location.reload）
-      alert('重新分析完成！');
-      await fetchAnalysisDetail();
+      const data = await response.json();
 
-      // 通知全域狀態管理：分析已更新
-      if (analysisId) {
-        notifyAnalysisUpdated(analysisId);
-      }
+      // Store job ID for progress tracking
+      setCurrentJobId(data.jobId);
 
-      setReanalyzing(false);
+      console.log('✅ 重新分析已在背景開始執行，Job ID:', data.jobId);
     } catch (err) {
-      console.error('Error reanalyzing:', err);
-      alert(err instanceof Error ? err.message : '重新分析失敗');
+      console.error('Error starting reanalysis:', err);
+      alert(err instanceof Error ? err.message : '啟動重新分析失敗');
       setReanalyzing(false);
+      setCurrentJobId(null);
     }
+  }
+
+  // Handle job completion
+  function handleJobComplete() {
+    setReanalyzing(false);
+    setCurrentJobId(null);
+
+    // Reload analysis data
+    void fetchAnalysisDetail();
+
+    // Notify global state
+    if (analysisId) {
+      notifyAnalysisUpdated(analysisId);
+    }
+  }
+
+  // Handle job error
+  function handleJobError(errorMessage: string) {
+    setReanalyzing(false);
+    setCurrentJobId(null);
+    alert(`重新分析失敗：${errorMessage}`);
   }
 
   const markdownOutput = useMemo(
@@ -1374,6 +1394,15 @@ export default function TeachingQualityDetail() {
           )}
         </Card>
       </div>
+
+      {/* Analysis Progress Toast */}
+      {currentJobId && (
+        <AnalysisProgressToast
+          jobId={currentJobId}
+          onComplete={handleJobComplete}
+          onError={handleJobError}
+        />
+      )}
     </DashboardLayout>
   );
 }

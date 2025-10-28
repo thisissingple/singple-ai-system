@@ -481,13 +481,13 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
     }
   });
 
-  // 0.3. Re-analyze existing analysis record
+  // 0.3. Re-analyze existing analysis record (Background execution)
   app.post('/api/teaching-quality/reanalyze/:analysisId', isAuthenticated, async (req: any, res) => {
     try {
       const { analysisId } = req.params;
       const pool = createPool('session');
 
-      // Get existing analysis record
+      // Verify analysis record exists
       const analysisResult = await pool.query(`
         SELECT tqa.*, tca.class_transcript
         FROM teaching_quality_analysis tqa
@@ -508,72 +508,65 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         return res.status(400).json({ error: 'No transcript available for re-analysis' });
       }
 
-      const transcriptText = existingAnalysis.transcript_text || existingAnalysis.class_transcript;
-
-      // Run AI analysis
-      const analysis = await teachingQualityGPT.analyzeTeachingQuality(
-        transcriptText,
-        existingAnalysis.student_name,
-        existingAnalysis.teacher_name || 'Unknown',
-        existingAnalysis.class_topic
-      );
-
-      // Parse scores from Markdown
-      // Fix: Use markdownOutput if available, otherwise fall back to summary
-      const markdownSource = analysis.conversionSuggestions?.markdownOutput || analysis.summary;
-      const parsedScores = parseScoresFromMarkdown(markdownSource);
-
-      // Update existing analysis record
-      await pool.query(`
-        UPDATE teaching_quality_analysis
-        SET overall_score = $1,
-            teaching_score = $2,
-            sales_score = $3,
-            conversion_probability = $4,
-            strengths = $5,
-            weaknesses = $6,
-            class_summary = $7,
-            suggestions = $8,
-            conversion_suggestions = $9,
-            updated_at = NOW()
-        WHERE id = $10
-      `, [
-        parsedScores.overallScore,
-        parsedScores.teachingScore,
-        parsedScores.salesScore,
-        parsedScores.conversionProbability,
-        JSON.stringify(analysis.strengths),
-        JSON.stringify(analysis.weaknesses),
-        analysis.summary,
-        JSON.stringify(analysis.suggestions),
-        analysis.conversionSuggestions ? JSON.stringify(analysis.conversionSuggestions) : null,
-        analysisId
-      ]);
-
-      // Delete old suggestion logs
-      await pool.query(`
-        DELETE FROM suggestion_execution_log
-        WHERE analysis_id = $1
-      `, [analysisId]);
-
-      // Create new suggestion logs
-      for (let i = 0; i < analysis.suggestions.length; i++) {
-        await insertAndReturn('suggestion_execution_log', {
-          analysis_id: analysisId,
-          suggestion_index: i,
-          suggestion_text: analysis.suggestions[i].suggestion,
-          is_executed: false
-        });
-      }
-
       await pool.end();
+
+      // Create analysis job
+      const { analysisJobService } = await import('./services/analysis-job-service');
+      const { startBackgroundAnalysis } = await import('./services/background-analysis-worker');
+
+      const job = await analysisJobService.createJob({
+        analysisId,
+        jobType: 'reanalysis',
+        createdBy: req.user?.id || null
+      });
+
+      // Start background analysis (non-blocking)
+      startBackgroundAnalysis({
+        jobId: job.id,
+        analysisId
+      });
+
+      // Return immediately with job ID
+      res.json({
+        success: true,
+        message: 'Re-analysis started in background',
+        jobId: job.id,
+        status: 'pending'
+      });
+    } catch (error: any) {
+      console.error('Failed to start re-analysis:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 0.4. Get analysis job status (for polling)
+  app.get('/api/teaching-quality/job-status/:jobId', isAuthenticated, async (req: any, res) => {
+    try {
+      const { jobId } = req.params;
+      const { analysisJobService } = await import('./services/analysis-job-service');
+
+      const job = await analysisJobService.getJob(jobId);
+
+      if (!job) {
+        return res.status(404).json({ error: 'Job not found' });
+      }
 
       res.json({
         success: true,
-        message: 'Re-analysis completed successfully'
+        job: {
+          id: job.id,
+          analysisId: job.analysis_id,
+          status: job.status,
+          progress: job.progress,
+          errorMessage: job.error_message,
+          result: job.result,
+          createdAt: job.created_at,
+          startedAt: job.started_at,
+          completedAt: job.completed_at
+        }
       });
     } catch (error: any) {
-      console.error('Re-analysis failed:', error);
+      console.error('Failed to get job status:', error);
       res.status(500).json({ error: error.message });
     }
   });
