@@ -133,6 +133,9 @@ export default function IncomeExpenseManager() {
   const { toast } = useToast();
   const [rows, setRows] = useState<EditableRow[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [setters, setSetters] = useState<Teacher[]>([]); // 電訪人員
+  const [consultants, setConsultants] = useState<Teacher[]>([]); // 諮詢人員
+  const [staff, setStaff] = useState<Teacher[]>([]); // 真工（填表人）
   const [summary, setSummary] = useState<MonthlySummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -330,6 +333,57 @@ export default function IncomeExpenseManager() {
     }
   };
 
+  const fetchSetters = async () => {
+    try {
+      const response = await fetch('/api/setters', {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('載入電訪人員列表失敗');
+      }
+
+      const data = await response.json();
+      setSetters(data || []);
+    } catch (error) {
+      console.error('載入電訪人員列表失敗:', error);
+    }
+  };
+
+  const fetchConsultants = async () => {
+    try {
+      const response = await fetch('/api/consultants', {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('載入諮詢人員列表失敗');
+      }
+
+      const data = await response.json();
+      setConsultants(data || []);
+    } catch (error) {
+      console.error('載入諮詢人員列表失敗:', error);
+    }
+  };
+
+  const fetchStaff = async () => {
+    try {
+      const response = await fetch('/api/staff', {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('載入真工列表失敗');
+      }
+
+      const data = await response.json();
+      setStaff(data || []);
+    } catch (error) {
+      console.error('載入真工列表失敗:', error);
+    }
+  };
+
   // 載入記錄
   const fetchRecords = async () => {
     setLoading(true);
@@ -411,6 +465,9 @@ export default function IncomeExpenseManager() {
 
   useEffect(() => {
     fetchTeachers();
+    fetchSetters();
+    fetchConsultants();
+    fetchStaff();
   }, []);
 
   useEffect(() => {
@@ -1468,9 +1525,9 @@ export default function IncomeExpenseManager() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="none">無</SelectItem>
-                                  {teachers.map((teacher) => (
-                                    <SelectItem key={teacher.id} value={teacher.id}>
-                                      {teacher.name}
+                                  {setters.map((setter) => (
+                                    <SelectItem key={setter.id} value={setter.id}>
+                                      {setter.name}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
@@ -1488,9 +1545,9 @@ export default function IncomeExpenseManager() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="none">無</SelectItem>
-                                  {teachers.map((teacher) => (
-                                    <SelectItem key={teacher.id} value={teacher.id}>
-                                      {teacher.name}
+                                  {consultants.map((consultant) => (
+                                    <SelectItem key={consultant.id} value={consultant.id}>
+                                      {consultant.name}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
@@ -1508,9 +1565,9 @@ export default function IncomeExpenseManager() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="none">系統</SelectItem>
-                                  {teachers.map((teacher) => (
-                                    <SelectItem key={teacher.id} value={teacher.id}>
-                                      {teacher.name}
+                                  {staff.map((person) => (
+                                    <SelectItem key={person.id} value={person.id}>
+                                      {person.name}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
@@ -1562,9 +1619,9 @@ export default function IncomeExpenseManager() {
                                         </SelectTrigger>
                                         <SelectContent>
                                           <SelectItem value="none">無</SelectItem>
-                                          {teachers.map((teacher) => (
-                                            <SelectItem key={teacher.id} value={teacher.id}>
-                                              {teacher.name}
+                                          {setters.map((setter) => (
+                                            <SelectItem key={setter.id} value={setter.id}>
+                                              {setter.name}
                                             </SelectItem>
                                           ))}
                                         </SelectContent>
@@ -1581,9 +1638,9 @@ export default function IncomeExpenseManager() {
                                         </SelectTrigger>
                                         <SelectContent>
                                           <SelectItem value="none">無</SelectItem>
-                                          {teachers.map((teacher) => (
-                                            <SelectItem key={teacher.id} value={teacher.id}>
-                                              {teacher.name}
+                                          {consultants.map((consultant) => (
+                                            <SelectItem key={consultant.id} value={consultant.id}>
+                                              {consultant.name}
                                             </SelectItem>
                                           ))}
                                         </SelectContent>
@@ -1600,9 +1657,9 @@ export default function IncomeExpenseManager() {
                                         </SelectTrigger>
                                         <SelectContent>
                                           <SelectItem value="none">系統</SelectItem>
-                                          {teachers.map((teacher) => (
-                                            <SelectItem key={teacher.id} value={teacher.id}>
-                                              {teacher.name}
+                                          {staff.map((person) => (
+                                            <SelectItem key={person.id} value={person.id}>
+                                              {person.name}
                                             </SelectItem>
                                           ))}
                                         </SelectContent>

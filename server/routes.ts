@@ -4986,6 +4986,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // 取得電訪人員名單（從 users 表查詢 roles 包含 'setter'）
+  app.get('/api/setters', async (req, res) => {
+    try {
+      const result = await queryDatabase(
+        `SELECT id, first_name, last_name, email, roles
+         FROM users
+         WHERE 'setter' = ANY(roles)
+         AND status = 'active'
+         ORDER BY first_name ASC`
+      );
+
+      const setters = result.rows.map(user => ({
+        id: user.id,
+        name: user.first_name || user.email || user.id,
+        roles: user.roles
+      }));
+
+      res.json(setters);
+    } catch (error: any) {
+      console.error('電訪人員名單 API 錯誤:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 取得諮詢人員名單（從 users 表查詢 roles 包含 'consultant'）
+  app.get('/api/consultants', async (req, res) => {
+    try {
+      const result = await queryDatabase(
+        `SELECT id, first_name, last_name, email, roles
+         FROM users
+         WHERE 'consultant' = ANY(roles)
+         AND status = 'active'
+         ORDER BY first_name ASC`
+      );
+
+      const consultants = result.rows.map(user => ({
+        id: user.id,
+        name: user.first_name || user.email || user.id,
+        roles: user.roles
+      }));
+
+      res.json(consultants);
+    } catch (error: any) {
+      console.error('諮詢人員名單 API 錯誤:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 取得真工名單（從 users 表查詢 roles 包含 'staff'）
+  app.get('/api/staff', async (req, res) => {
+    try {
+      const result = await queryDatabase(
+        `SELECT id, first_name, last_name, email, roles
+         FROM users
+         WHERE 'staff' = ANY(roles)
+         AND status = 'active'
+         ORDER BY first_name ASC`
+      );
+
+      const staff = result.rows.map(user => ({
+        id: user.id,
+        name: user.first_name || user.email || user.id,
+        roles: user.roles
+      }));
+
+      res.json(staff);
+    } catch (error: any) {
+      console.error('真工名單 API 錯誤:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ========================================
   // 體驗課打卡記錄 API - 已遷移至 Form Builder 系統
   // 請使用 /api/forms/custom/trial-class-form-001 系列 API
