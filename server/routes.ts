@@ -5034,13 +5034,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // 取得真工名單（從 users 表查詢 roles 包含 'staff'）
+  // 取得真工名單（從 users 表查詢 roles 包含 'employee'）
   app.get('/api/staff', async (req, res) => {
     try {
       const result = await queryDatabase(
         `SELECT id, first_name, last_name, email, roles
          FROM users
-         WHERE 'staff' = ANY(roles)
+         WHERE 'employee' = ANY(roles)
          AND status = 'active'
          ORDER BY first_name ASC`
       );

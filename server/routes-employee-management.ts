@@ -67,6 +67,9 @@ async function syncRolesToUser(userId: string): Promise<void> {
       if (identityType === 'setter' && !roles.includes('setter')) {
         roles.push('setter');
       }
+      if (identityType === 'employee' && !roles.includes('employee')) {
+        roles.push('employee');
+      }
       if (identityType === 'sales' && !roles.includes('sales')) {
         roles.push('sales');
       }
