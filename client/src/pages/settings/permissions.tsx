@@ -83,6 +83,7 @@ export default function PermissionsManagement() {
   const [loadingModules, setLoadingModules] = useState(false);
   const [loadingPermissions, setLoadingPermissions] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>('');
 
   const selectedUser = users.find((u) => u.id === selectedUserId);
   const isAdmin = selectedUser?.roles?.includes('admin') || selectedUser?.roles?.includes('super_admin');
@@ -105,14 +106,25 @@ export default function PermissionsManagement() {
     setLoadingUsers(true);
     try {
       const response = await fetch('/api/users');
+
+      // Check for authentication errors
+      if (response.status === 401 || response.status === 403) {
+        const errorMsg = '您沒有權限訪問此頁面，請先登入';
+        setError(errorMsg);
+        throw new Error(errorMsg);
+      }
+
       const data = await response.json();
 
       if (data.success) {
         setUsers(data.users || []);
+        setError(''); // Clear error on success
       } else {
         throw new Error(data.message || '載入使用者失敗');
       }
     } catch (error: any) {
+      console.error('fetchUsers error:', error);
+      setError(error.message || '載入使用者失敗');
       toast({
         title: '錯誤',
         description: error.message || '載入使用者失敗',
@@ -127,6 +139,12 @@ export default function PermissionsManagement() {
     setLoadingModules(true);
     try {
       const response = await fetch('/api/permissions/modules');
+
+      // Check for authentication errors
+      if (response.status === 401 || response.status === 403) {
+        throw new Error('您沒有權限訪問此頁面，請先登入');
+      }
+
       const data = await response.json();
 
       if (data.success) {
@@ -135,6 +153,7 @@ export default function PermissionsManagement() {
         throw new Error(data.error || '載入權限模組失敗');
       }
     } catch (error: any) {
+      console.error('fetchModules error:', error);
       toast({
         title: '錯誤',
         description: error.message || '載入權限模組失敗',
@@ -149,6 +168,12 @@ export default function PermissionsManagement() {
     setLoadingPermissions(true);
     try {
       const response = await fetch(`/api/permissions/user/${userId}`);
+
+      // Check for authentication errors
+      if (response.status === 401 || response.status === 403) {
+        throw new Error('您沒有權限訪問此頁面，請先登入');
+      }
+
       const data = await response.json();
 
       if (data.success) {
@@ -169,6 +194,7 @@ export default function PermissionsManagement() {
         throw new Error(data.error || '載入使用者權限失敗');
       }
     } catch (error: any) {
+      console.error('fetchUserPermissions error:', error);
       toast({
         title: '錯誤',
         description: error.message || '載入使用者權限失敗',
@@ -289,8 +315,23 @@ export default function PermissionsManagement() {
           </CardHeader>
         </Card>
 
+        {/* Error Message */}
+        {error && (
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-3">
+                <AlertCircle className="h-5 w-5 text-red-500" />
+                <div>
+                  <p className="font-medium text-red-900">無法載入權限管理頁面</p>
+                  <p className="text-sm text-red-700 mt-1">{error}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* User Selection */}
-        <Card>
+        {!error && <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
               <Users className="h-4 w-4" />
@@ -339,10 +380,10 @@ export default function PermissionsManagement() {
               )}
             </div>
           </CardContent>
-        </Card>
+        </Card>}
 
         {/* Permissions Configuration */}
-        {selectedUserId && (
+        {!error && selectedUserId && (
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -500,7 +541,7 @@ export default function PermissionsManagement() {
         )}
 
         {/* Instructions */}
-        {!selectedUserId && (
+        {!selectedUserId && !error && (
           <Card>
             <CardContent className="pt-6">
               <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
