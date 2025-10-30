@@ -204,7 +204,7 @@ export function DashboardLayout({
         {/* 主內容區 - 側邊欄收合時佔滿寬度 */}
         <main
           className={cn(
-            'flex-1 overflow-auto h-[calc(100vh-3.5rem)] transition-all duration-300 ease-in-out',
+            'flex-1 overflow-auto h-[calc(100vh-3.5rem)] transition-all duration-300 ease-in-out p-6',
             className
           )}
         >
