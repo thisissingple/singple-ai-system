@@ -39,6 +39,8 @@ import * as teachingQualityGPT from "./services/teaching-quality-gpt-service";
 import { registerTeachingQualityRoutes } from "./routes-teaching-quality-new";
 import { registerEmployeeManagementRoutes } from "./routes-employee-management";
 import { registerAuthRoutes } from "./routes-auth";
+import { registerKnowItAllRoutes } from "./routes-know-it-all";
+import { registerPermissionRoutes, requireModulePermission } from "./routes-permissions";
 import { buildPermissionFilter } from "./services/permission-filter-service";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -3625,7 +3627,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get trial class report data
-  app.get('/api/reports/trial-class', isAuthenticated, async (req, res) => {
+  app.get('/api/reports/trial-class', isAuthenticated, requireModulePermission('trial_class_report'), async (req, res) => {
     try{
       const period = (req.query.period as 'daily' | 'weekly' | 'lastWeek' | 'monthly') || 'daily';
       const baseDate = req.query.baseDate as string | undefined;
@@ -4783,7 +4785,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ==================== 成本獲利分析 API ====================
 
   // 取得指定月份資料
-  app.get('/api/cost-profit/records', async (req, res) => {
+  app.get('/api/cost-profit/records', isAuthenticated, requireModulePermission('cost_profit'), async (req, res) => {
     try {
       const schema = z.object({
         year: z.coerce.number().int().min(2000),
@@ -5401,7 +5403,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ========================================
 
   // GET - 查詢所有電訪記錄
-  app.get('/api/telemarketing/calls', isAuthenticated, async (req, res) => {
+  app.get('/api/telemarketing/calls', isAuthenticated, requireModulePermission('telemarketing_system'), async (req, res) => {
     try {
       if (!isSupabaseAvailable()) {
         return res.status(503).json({ error: 'Supabase 未連線' });
@@ -6089,7 +6091,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // 建立自訂表單
-  app.post('/api/forms/custom', async (req, res) => {
+  app.post('/api/forms/custom', isAuthenticated, requireAdmin, requireModulePermission('form_builder'), async (req, res) => {
     try {
       const form = await customFormService.createCustomForm(req.body);
       res.json({ success: true, form });
@@ -6260,8 +6262,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Register employee management routes
   registerEmployeeManagementRoutes(app);
 
+  // Register Know-it-all AI Advisor routes
+  registerKnowItAllRoutes(app);
+
+  // Register permission management routes
+  registerPermissionRoutes(app);
+
   // 0. Get attendance records (for creating new analysis) [DEPRECATED - use student-records instead]
-  app.get('/api/teaching-quality/attendance-records', isAuthenticated, async (req: any, res) => {
+  app.get('/api/teaching-quality/attendance-records', isAuthenticated, requireModulePermission('teaching_quality'), async (req: any, res) => {
     try {
       // 建立權限過濾條件（使用新的業務身份系統）
       const permissionFilter = await buildPermissionFilter({
@@ -6816,7 +6824,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const { incomeExpenseService } = await import('./services/income-expense-service');
 
   // 查詢收支記錄（支援多種篩選）
-  app.get('/api/income-expense/records', isAuthenticated, async (req: any, res) => {
+  app.get('/api/income-expense/records', isAuthenticated, requireModulePermission('income_expense'), async (req: any, res) => {
     try {
       // 建立額外過濾條件
       const conditions: string[] = [];

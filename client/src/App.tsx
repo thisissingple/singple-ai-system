@@ -37,6 +37,7 @@ const FormBuilderList = lazy(() => import("@/pages/settings/form-builder-list"))
 const FormBuilderEditor = lazy(() => import("@/pages/settings/form-builder-editor"));
 const UserManagement = lazy(() => import("@/pages/settings/user-management"));
 const EmployeesPage = lazy(() => import("@/pages/settings/employees"));
+const PermissionsPage = lazy(() => import("@/pages/settings/permissions"));
 const FacebookSettings = lazy(() => import("@/pages/settings/facebook-settings"));
 const TeachingQualityList = lazy(() => import("@/pages/teaching-quality/teaching-quality-list"));
 const TeachingQualityDetail = lazy(() => import("@/pages/teaching-quality/teaching-quality-detail"));
@@ -47,6 +48,8 @@ const AdPerformanceReport = lazy(() => import("@/pages/telemarketing/ad-performa
 const CallRecordsList = lazy(() => import("@/pages/telemarketing/call-records-list"));
 const StudentFollowUp = lazy(() => import("@/pages/telemarketing/student-follow-up"));
 const GoHighLevelContacts = lazy(() => import("@/pages/leads/gohighlevel-contacts"));
+const KnowItAllChat = lazy(() => import("@/pages/tools/know-it-all-chat"));
+const KnowItAllDocuments = lazy(() => import("@/pages/tools/know-it-all-documents"));
 
 // Loading 元件
 function PageLoader() {
@@ -114,6 +117,12 @@ function Router() {
       <Route path="/tools/database-browser">
         <ProtectedRoute><DatabaseBrowser /></ProtectedRoute>
       </Route>
+      <Route path="/tools/know-it-all-chat">
+        <ProtectedRoute><KnowItAllChat /></ProtectedRoute>
+      </Route>
+      <Route path="/tools/know-it-all-documents">
+        <ProtectedRoute><KnowItAllDocuments /></ProtectedRoute>
+      </Route>
       <Route path="/forms">
         <ProtectedRoute><FormsPage /></ProtectedRoute>
       </Route>
@@ -168,6 +177,9 @@ function Router() {
       </Route>
       <Route path="/settings/employees">
         <ProtectedRoute><EmployeesPage /></ProtectedRoute>
+      </Route>
+      <Route path="/settings/permissions">
+        <ProtectedRoute><PermissionsPage /></ProtectedRoute>
       </Route>
       <Route path="/settings/facebook">
         <ProtectedRoute><FacebookSettings /></ProtectedRoute>

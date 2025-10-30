@@ -24,6 +24,9 @@ import {
   PhoneCall,
   BarChart3,
   Facebook,
+  BookOpen,
+  MessageSquare,
+  Shield,
 } from 'lucide-react';
 import { SidebarSectionConfig } from '@/components/layout/sidebar';
 import type { Role } from './permissions';
@@ -240,6 +243,18 @@ export const sidebarConfig: SidebarSection[] = [
         requiredRoles: ['admin', 'manager'],
       },
       {
+        label: 'Know-it-all AI',
+        href: '/tools/know-it-all-chat',
+        icon: MessageSquare,
+        requiredRoles: ['admin'],
+      },
+      {
+        label: 'Know-it-all 文件',
+        href: '/tools/know-it-all-documents',
+        icon: BookOpen,
+        requiredRoles: ['admin'],
+      },
+      {
         label: '表單填寫',
         href: '/forms',
         icon: PenTool,
@@ -249,6 +264,12 @@ export const sidebarConfig: SidebarSection[] = [
         label: '員工管理',
         href: '/settings/employees',
         icon: UserCog,
+        requiredRoles: ['admin'],
+      },
+      {
+        label: '權限管理',
+        href: '/settings/permissions',
+        icon: Shield,
         requiredRoles: ['admin'],
       },
       {
