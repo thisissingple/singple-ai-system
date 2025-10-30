@@ -155,10 +155,11 @@ export default function KnowItAllChatPage() {
       if (!response.ok) throw new Error('載入對話列表失敗');
 
       const result = await response.json();
-      setConversations(result.data.conversations);
+      // 後端回傳 { conversations, total },所以要用 result.data.conversations
+      setConversations(result.data.conversations || []);
 
       // 如果沒有選擇對話且有對話存在，自動選擇第一個
-      if (!currentConversationId && result.data.conversations.length > 0) {
+      if (!currentConversationId && result.data.conversations && result.data.conversations.length > 0) {
         setCurrentConversationId(result.data.conversations[0].id);
       }
     } catch (error: any) {
@@ -179,7 +180,8 @@ export default function KnowItAllChatPage() {
       if (!response.ok) throw new Error('載入對話歷史失敗');
 
       const result = await response.json();
-      setMessages(result.data.messages);
+      // 後端直接回傳 messages 陣列
+      setMessages(result.data || []);
     } catch (error: any) {
       console.error('Load conversation history error:', error);
       toast({
@@ -219,7 +221,7 @@ export default function KnowItAllChatPage() {
       if (!response.ok) throw new Error('建立對話失敗');
 
       const result = await response.json();
-      const newConversation = result.data.conversation;
+      const newConversation = result.data; // 後端直接回傳 conversation
 
       setConversations([newConversation, ...conversations]);
       setCurrentConversationId(newConversation.id);
@@ -287,9 +289,9 @@ export default function KnowItAllChatPage() {
         if (!response.ok) throw new Error('建立對話失敗');
 
         const result = await response.json();
-        conversationId = result.data.conversation.id;
+        conversationId = result.data.id; // 後端直接回傳 conversation
         setCurrentConversationId(conversationId);
-        setConversations([result.data.conversation, ...conversations]);
+        setConversations([result.data, ...conversations]);
       } catch (error: any) {
         toast({
           title: '❌ 建立對話失敗',
