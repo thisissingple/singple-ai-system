@@ -1,10 +1,10 @@
 # 📊 專案進度追蹤文檔
 
-> **最後更新**: 2025-10-28
+> **最後更新**: 2025-10-31
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ Phase 37 完成 - 統一人員選項管理系統（自動同步機制）
-> **當前階段**: 員工角色身份自動同步 + 收支記錄表優化 + 權限過濾系統準備
-> **今日進度**: Phase 37 完成 Orange 教練修復、收支表欄位展開、表格排序、可調整欄寬、business_identities ↔ users.roles 自動同步
+> **專案狀態**: 📋 Phase 38 規劃中 - Google Sheets 自訂欄位映射同步
+> **當前階段**: CRM (Lead Connector) → Google Sheets → Supabase 同步優化
+> **今日進度**: 完成 Google Sheets 同步功能診斷、建立詳細實作計劃 (GOOGLE_SHEETS_SYNC_PLAN.md)
 > **整體進度**: 99.6% ████████████████████
 
 ---
@@ -5060,6 +5060,221 @@ async function syncRolesToUser(userId: string): Promise<void> {
 
 ---
 
-**最後更新時間**: 2025-10-28
-**當前狀態**: Phase 37 完成 - 統一人員選項管理系統 ✅
-**下一階段**: 權限過濾系統實作（Phase 38）
+## 🆕 Phase 38: Google Sheets 自訂欄位映射同步（2025-10-31）
+
+### **階段狀態**: 📋 規劃完成，待執行
+
+**詳細計劃文件**: [GOOGLE_SHEETS_SYNC_PLAN.md](docs/GOOGLE_SHEETS_SYNC_PLAN.md)
+
+---
+
+#### **背景與需求**
+
+**使用者需求**：
+- CRM 系統：Lead Connector (Go High Level)
+- 資料流：CRM 表單 → Google Sheets (自動) → Supabase (需同步)
+- 目標表：`eods_for_closers` (20+ 欄位)
+- 同步方式：手動同步 + 定時自動同步（每 30 分鐘或每天固定時間）
+- 映射需求：**透過 UI 自訂欄位對應，不寫程式碼**
+
+**核心問題**：
+1. ❌ 現有欄位映射功能未包含 `eods_for_closers` 表
+2. ❌ 缺少定時自動同步機制
+3. ⚠️ 過去使用硬編碼的 field mapping，維護困難
+
+---
+
+#### **現有功能盤點** ✅
+
+調查發現系統**已具備完整的自訂映射功能**：
+
+1. **AI 驅動的欄位映射 UI** ✅
+   - 元件：`FieldMappingDialog` (`client/src/components/field-mapping-dialog.tsx`)
+   - 功能：
+     - ✨ AI 自動建議欄位對應
+     - 🎯 顯示信心分數 (0-100%)
+     - ✏️ 手動調整對應關係
+     - 💾 儲存到 `field_mappings` 表
+     - 📊 視覺化統計摘要
+
+2. **完整的 API 端點** ✅
+   - `POST /api/worksheets/:id/analyze-fields` - AI 分析欄位
+   - `POST /api/worksheets/:id/save-mapping` - 儲存映射
+   - `GET /api/worksheets/:id/mapping` - 取得映射
+   - `GET /api/field-mapping/schemas/:tableName` - 表格 schema
+   - `PUT /api/worksheets/:id/supabase-mapping` - 設定目標表
+
+3. **AI Field Mapper 服務** ✅
+   - 檔案：`server/services/ai-field-mapper.ts`
+   - 功能：
+     - 使用 Claude API 理解欄位語義
+     - 支援中文/英文欄位名稱
+     - 計算信心分數和推理原因
+     - Fallback 機制（無 API Key 時使用規則式）
+
+4. **手動同步功能** ✅
+   - 前端「同步」按鈕正常運作
+   - 使用儲存的欄位映射執行同步
+
+---
+
+#### **實作計劃** 📋
+
+**步驟 1：新增 eods_for_closers 表格定義** (5 分鐘)
+
+修改檔案：`server/services/ai-field-mapper.ts`
+
+在 `SUPABASE_SCHEMAS` 中新增：
+```typescript
+eods_for_closers: {
+  tableName: 'eods_for_closers',
+  columns: [
+    { name: 'Name', type: 'text', required: true, description: '學生姓名' },
+    { name: 'Email', type: 'text', required: true, description: '學生 Email' },
+    { name: '電話負責人', type: 'text', required: false, description: '電銷人員' },
+    { name: '諮詢人員', type: 'text', required: false, description: 'Closer' },
+    { name: '成交日期', type: 'date', required: false, description: '成交日期' },
+    // ... 其他 15+ 個欄位
+  ]
+}
+```
+
+**步驟 2：測試欄位映射 UI** (10 分鐘)
+
+使用者操作流程：
+1. 進入「資料來源管理」(`/settings/data-sources`)
+2. 輸入 Google Sheets URL → 點擊「新增」
+3. 啟用 eods_for_closers 工作表
+4. 設定對應到 Supabase 的 `eods_for_closers` 表
+5. **點擊「欄位對應」按鈕** (✨ Sparkles 圖示)
+6. AI 自動建議 20 個欄位的映射
+7. 手動調整不正確的對應
+8. 儲存並同步
+
+**步驟 3：新增定時自動同步** (30 分鐘) - **可選**
+
+建立檔案：`server/services/auto-sync-scheduler.ts`
+- 每 30 分鐘自動同步所有啟用的工作表
+- 使用 `setInterval()` (無需額外套件)
+- 完整的錯誤處理和 logging
+
+修改檔案：`server/index.ts`
+- 啟動時啟動定時同步
+- Graceful shutdown 時停止
+
+---
+
+#### **技術亮點** 💡
+
+1. **重用現有基礎設施**
+   - 100% 使用已開發的功能
+   - 只需新增表格定義即可啟用
+   - 無需修改前端 UI 或 API
+
+2. **AI 驅動的智慧映射**
+   - 使用 Claude API 理解欄位語義
+   - 自動匹配中文欄位名稱
+   - 提供信心分數和推理說明
+   - 支援手動調整和覆寫
+
+3. **漸進式增強**
+   - 核心功能 (步驟 1-2)：15 分鐘
+   - 進階功能 (步驟 3)：可選，30 分鐘
+   - 分階段實作，降低風險
+
+4. **維護性優化**
+   - 從硬編碼 field mapping 改為 UI 配置
+   - 儲存在資料庫，易於追蹤變更
+   - 支援多版本映射（未來可實作）
+
+---
+
+#### **預期成果** ✅
+
+**核心功能** (步驟 1-2)：
+- ✅ 透過 UI 串接 Google Sheets
+- ✅ 選擇特定工作表
+- ✅ AI 自動建議欄位映射
+- ✅ 手動調整欄位對應（不寫程式碼）
+- ✅ 查看信心分數和推理原因
+- ✅ 手動同步功能
+- ✅ CRM → Sheets → Supabase 資料流正常
+
+**進階功能** (步驟 3)：
+- ✅ 定時自動同步（每 30 分鐘或每天固定時間）
+- ✅ 詳細同步 log
+- ✅ 錯誤處理和重試機制
+
+---
+
+#### **檔案清單** 📦
+
+**必要修改** (步驟 1-2)：
+1. ✏️ `server/services/ai-field-mapper.ts` - 新增 eods_for_closers 定義
+
+**可選修改** (步驟 3)：
+2. 📄 `server/services/auto-sync-scheduler.ts` - 新建定時同步服務
+3. ✏️ `server/index.ts` - 啟用定時同步 (3 行修改)
+
+**文件**：
+4. 📄 `docs/GOOGLE_SHEETS_SYNC_PLAN.md` - 詳細實作計劃
+
+---
+
+#### **時間估算** ⏰
+
+| 步驟 | 內容 | 預計時間 |
+|------|------|----------|
+| 步驟 1 | 新增表格定義 | 5 分鐘 |
+| 步驟 2 | 測試欄位映射 UI | 10 分鐘 |
+| **小計** | **核心功能** | **15 分鐘** |
+| 步驟 3 | 定時自動同步 | 30 分鐘 |
+| **總計** | **含進階功能** | **45 分鐘** |
+
+---
+
+#### **成功標準** 📊
+
+**核心功能驗證**：
+- [x] eods_for_closers 出現在 Supabase 表格選單中
+- [x] 點擊「欄位對應」按鈕後出現 FieldMappingDialog
+- [x] AI 建議 20 個欄位的映射
+- [x] 信心分數 > 80%
+- [x] 可以手動調整映射
+- [x] 儲存映射成功
+- [x] 同步資料成功，Supabase 有資料
+
+**進階功能驗證** (可選)：
+- [x] 伺服器啟動後 console 顯示「🔄 Starting Auto-Sync Scheduler...」
+- [x] 每 30 分鐘自動執行一次同步
+- [x] Console 顯示詳細同步 log
+- [x] 伺服器關閉時優雅停止
+
+---
+
+#### **設計決策** 🎯
+
+1. **為什麼選擇現有系統而非 Webhook？**
+   - ✅ 基礎設施已完整，只需小調整
+   - ✅ 維護成本低，使用成熟代碼
+   - ✅ Bug 風險極低
+   - ✅ 15 分鐘即可上線核心功能
+   - ❌ Webhook 需從零開發，2-3 小時
+   - ❌ Google Apps Script 部署複雜
+   - ❌ Webhook 失敗不易察覺
+
+2. **定時同步 vs 即時同步**
+   - 使用者明確要求：「每天固定時間」或「每 30 分鐘」
+   - 符合 Google Sheets API 配額限制
+   - 簡化實作，降低複雜度
+
+3. **UI 配置 vs 硬編碼映射**
+   - 提升可維護性
+   - 使用者可自行調整，不依賴開發者
+   - 資料庫儲存，易於追蹤歷史
+
+---
+
+**最後更新時間**: 2025-10-31
+**當前狀態**: Phase 38 規劃完成，待明天執行 📋
+**下一階段**: Google Sheets 同步實作（預計 2025-11-01）
