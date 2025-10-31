@@ -112,6 +112,16 @@ export const requireRole = (...roles: string[]): RequestHandler => {
       return next();
     }
 
+    // Wait for session to be loaded (if still loading)
+    await new Promise<void>((resolve) => {
+      if ((req as any).session !== undefined) {
+        resolve();
+      } else {
+        // Session not ready yet, wait a bit
+        setTimeout(resolve, 50);
+      }
+    });
+
     // Check for session-based authentication first
     const sessionUserId = (req as any).session?.userId;
     const sessionUser = (req as any).session?.user;
