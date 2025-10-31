@@ -118,6 +118,13 @@ export const requireRole = (...roles: string[]): RequestHandler => {
 
     if (!sessionUserId || !sessionUser) {
       console.log(`[AUTH] ❌ No session found for ${req.method} ${req.path}`);
+      console.log(`[AUTH] Session debug:`, {
+        hasSession: !!(req as any).session,
+        sessionId: (req as any).session?.id,
+        sessionUserId: sessionUserId,
+        hasUser: !!sessionUser,
+        cookies: req.headers.cookie ? 'present' : 'missing',
+      });
       return res.status(401).json({ message: "Unauthorized - No session" });
     }
 
