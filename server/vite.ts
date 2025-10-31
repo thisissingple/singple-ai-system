@@ -68,13 +68,20 @@ export async function setupVite(app: Express, server: Server) {
 }
 
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(import.meta.dirname, "public");
+  // Use __dirname equivalent for ESM
+  const currentDir = path.dirname(new URL(import.meta.url).pathname);
+  const distPath = path.resolve(currentDir, "public");
+
+  console.log(`[Static Server] Looking for static files in: ${distPath}`);
 
   if (!fs.existsSync(distPath)) {
+    console.error(`[Static Server] ❌ Build directory not found: ${distPath}`);
     throw new Error(
       `Could not find the build directory: ${distPath}, make sure to build the client first`,
     );
   }
+
+  console.log(`[Static Server] ✅ Serving static files from: ${distPath}`);
 
   app.use(express.static(distPath));
 
