@@ -44,6 +44,9 @@ import { registerPermissionRoutes, requireModulePermission } from "./routes-perm
 import { buildPermissionFilter } from "./services/permission-filter-service";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Setup authentication FIRST (before any routes)
+  await setupAuth(app);
+
   // Health check endpoint for Zeabur
   app.get('/health', (req, res) => {
     res.status(200).json({
@@ -184,9 +187,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Setup authentication first
-  await setupAuth(app);
-  
+  // Authentication already setup at the top of registerRoutes
+
   const httpServer = createServer(app);
   
   app.get('/api/status', async (_req, res) => {
