@@ -28,10 +28,7 @@ export function useFilteredSidebar(): SidebarSection[] {
       return sidebarConfig;
     }
 
-    // 取得可存取的模組 ID 列表
-    const accessibleModules = modules?.map(m => m.module_id) || [];
-
-    // 使用權限過濾
-    return filterSidebarByPermission(user.roles || [], accessibleModules);
+    // 傳遞完整的模組資料（包含 category）
+    return filterSidebarByPermission(user.roles || [], modules || []);
   }, [user, modules, isLoading]);
 }

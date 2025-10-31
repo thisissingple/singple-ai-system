@@ -31,6 +31,17 @@ import {
 import { SidebarSectionConfig } from '@/components/layout/sidebar';
 import type { Role } from './permissions';
 
+export interface PermissionModule {
+  id: string;
+  module_id: string;
+  module_name: string;
+  module_category: string;
+  description: string | null;
+  supports_scope: boolean;
+  display_order: number;
+  is_active: boolean;
+}
+
 export interface SidebarItem {
   label: string;
   href: string;
@@ -43,12 +54,14 @@ export interface SidebarItem {
 export interface SidebarSection {
   title: string;
   items: SidebarItem[];
+  category?: string; // 對應到 permission module category
 }
 
 export const sidebarConfig: SidebarSection[] = [
   // ==================== 教師系統 ====================
   {
     title: '教師系統',
+    category: 'teacher_system',
     items: [
       {
         label: '體驗課總覽',
@@ -82,6 +95,7 @@ export const sidebarConfig: SidebarSection[] = [
   // ==================== 電訪系統 ====================
   {
     title: '電訪系統',
+    category: 'telemarketing_system',
     items: [
       {
         label: '學生跟進',
@@ -119,6 +133,7 @@ export const sidebarConfig: SidebarSection[] = [
   // ==================== 諮詢師系統 ====================
   {
     title: '諮詢師系統',
+    category: 'consultant_system',
     items: [
       {
         label: '諮詢師報表',
@@ -144,6 +159,7 @@ export const sidebarConfig: SidebarSection[] = [
   // ==================== 管理系統 ====================
   {
     title: '管理系統',
+    category: 'management_system',
     items: [
       {
         label: '儀表板總覽',
@@ -305,11 +321,11 @@ export const sidebarConfig: SidebarSection[] = [
 /**
  * 根據使用者權限過濾側邊選單（新系統）
  * @param userRoles - 使用者角色（用於 admin 判斷和舊系統）
- * @param accessibleModules - 使用者可存取的權限模組 ID 列表
+ * @param accessibleModules - 使用者可存取的權限模組完整資料（包含 category）
  */
 export function filterSidebarByPermission(
   userRoles: Role[] | null,
-  accessibleModules: string[]
+  accessibleModules: PermissionModule[]
 ): SidebarSection[] {
   if (!userRoles || userRoles.length === 0) {
     // 未登入：只顯示首頁
@@ -328,24 +344,37 @@ export function filterSidebarByPermission(
     return sidebarConfig;
   }
 
+  // 建立模組 ID 和 category 的對照表
+  const moduleIdSet = new Set(accessibleModules.map(m => m.module_id));
+  const accessibleCategories = new Set(accessibleModules.map(m => m.module_category));
+
   // 其他使用者：根據權限模組過濾
-  return sidebarConfig.map(section => ({
-    ...section,
-    items: section.items.filter(item => {
-      // 優先檢查新系統 (requiredModule)
-      if (item.requiredModule) {
-        return accessibleModules.includes(item.requiredModule);
+  return sidebarConfig
+    .filter(section => {
+      // 先過濾 section：只保留使用者有權限的 category
+      if (section.category && !accessibleCategories.has(section.category)) {
+        return false;
       }
-
-      // 回退到舊系統 (requiredRoles) - 用於 admin 專屬工具
-      if (item.requiredRoles && item.requiredRoles.length > 0) {
-        return item.requiredRoles.some(role => userRoles.includes(role));
-      }
-
-      // 沒設定任何權限要求：全部可見
       return true;
-    }),
-  })).filter(section => section.items.length > 0); // 過濾掉空區塊
+    })
+    .map(section => ({
+      ...section,
+      items: section.items.filter(item => {
+        // 優先檢查新系統 (requiredModule)
+        if (item.requiredModule) {
+          return moduleIdSet.has(item.requiredModule);
+        }
+
+        // 回退到舊系統 (requiredRoles) - 用於 admin 專屬工具
+        if (item.requiredRoles && item.requiredRoles.length > 0) {
+          return item.requiredRoles.some(role => userRoles.includes(role));
+        }
+
+        // 沒設定任何權限要求：不顯示（改為更嚴格的預設行為）
+        return false;
+      }),
+    }))
+    .filter(section => section.items.length > 0); // 過濾掉空區塊
 }
 
 /**
