@@ -20,9 +20,9 @@ export function registerPermissionRoutes(app: Express): void {
   /**
    * GET /api/permissions/modules
    * Get all permission modules
-   * Auth: Authenticated users
+   * Auth: Public (no auth required for listing modules)
    */
-  app.get('/api/permissions/modules', isAuthenticated, async (req, res) => {
+  app.get('/api/permissions/modules', async (req, res) => {
     try {
       const includeInactive = req.query.includeInactive === 'true';
       const modules = await permissionService.getAllModules(includeInactive);
