@@ -112,6 +112,20 @@ export const requireRole = (...roles: string[]): RequestHandler => {
       return next();
     }
 
+    // Check for session-based authentication first
+    const sessionUserId = (req as any).session?.userId;
+    const sessionUser = (req as any).session?.user;
+
+    if (!sessionUserId || !sessionUser) {
+      console.log(`[AUTH] ❌ No session found for ${req.method} ${req.path}`);
+      return res.status(401).json({ message: "Unauthorized - No session" });
+    }
+
+    // Set req.user if not already set by isAuthenticated
+    if (!(req as any).user) {
+      (req as any).user = sessionUser;
+    }
+
     const user = (req as any).user;
 
     if (!user) {
