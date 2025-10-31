@@ -1635,6 +1635,38 @@ export class TotalReportService {
         return data;
       }
 
+      // 🆕 新權限系統：檢查 scope 設定
+      // 取得該資料表對應的權限模組
+      const moduleIdMap: { [key: string]: string } = {
+        'trial_class_attendance': 'trial_class_report',
+        'trial_class_purchases': 'trial_class_report',
+        'telemarketing_calls': 'telemarketing_system',
+      };
+
+      const moduleId = moduleIdMap[tableName];
+      if (moduleId) {
+        // 查詢使用者對該模組的權限 scope
+        const permissionResult = await queryDatabase(`
+          SELECT scope
+          FROM user_permissions
+          WHERE user_id = $1 AND module_id = $2 AND is_active = true
+        `, [userId, moduleId]);
+
+        if (permissionResult.rows.length > 0) {
+          const scope = permissionResult.rows[0].scope;
+          console.log(`[Permission Filter] User ${userId} has ${moduleId} permission with scope: ${scope}`);
+
+          // 如果 scope 是 'all'，直接回傳所有資料
+          if (scope === 'all') {
+            console.log(`[Permission Filter] Scope is 'all' - returning all data`);
+            return data;
+          }
+
+          // 如果 scope 是 'own_only'，繼續使用下面的過濾邏輯
+          console.log(`[Permission Filter] Scope is 'own_only' - filtering by identity`);
+        }
+      }
+
       // 取得主要角色（用於過濾邏輯）
       const primaryRole = userRoles.find(r => ['teacher', 'consultant', 'setter'].includes(r)) || userRoles[0];
 
