@@ -393,7 +393,7 @@ export class TotalReportService {
           if (userId) {
             attendanceData = await this.filterDataByPermission(attendanceData, userId, 'trial_class_attendance');
             purchaseData = await this.filterDataByPermission(purchaseData, userId, 'trial_class_purchases');
-            eodsData = await this.filterDataByPermission(eodsData, userId, 'telemarketing_calls');
+            eodsData = await this.filterDataByPermission(eodsData, userId, 'eods_for_closers');  // ✅ 修正：使用正確的表名
           }
 
           warnings.push(`使用 Supabase 資料來源（過濾後：${attendanceData.length + purchaseData.length + eodsData.length} 筆記錄）`);
@@ -1648,6 +1648,7 @@ export class TotalReportService {
       const moduleIdMap: { [key: string]: string } = {
         'trial_class_attendance': 'trial_class_report',
         'trial_class_purchases': 'trial_class_report',
+        'eods_for_closers': 'trial_class_report',  // ✅ 新增：eods_for_closers 也屬於體驗課報表
         'telemarketing_calls': 'telemarketing_system',
       };
 
