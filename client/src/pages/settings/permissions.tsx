@@ -105,7 +105,9 @@ export default function PermissionsManagement() {
   const fetchUsers = async () => {
     setLoadingUsers(true);
     try {
-      const response = await fetch('/api/users');
+      const response = await fetch('/api/users', {
+        credentials: 'include',
+      });
       const data = await response.json();
 
       if (data.success) {
@@ -130,7 +132,9 @@ export default function PermissionsManagement() {
   const fetchModules = async () => {
     setLoadingModules(true);
     try {
-      const response = await fetch('/api/permissions/modules');
+      const response = await fetch('/api/permissions/modules', {
+        credentials: 'include',
+      });
       const data = await response.json();
 
       if (data.success) {
@@ -153,7 +157,9 @@ export default function PermissionsManagement() {
   const fetchUserPermissions = async (userId: string) => {
     setLoadingPermissions(true);
     try {
-      const response = await fetch(`/api/permissions/user/${userId}`);
+      const response = await fetch(`/api/permissions/user/${userId}`, {
+        credentials: 'include',
+      });
       const data = await response.json();
 
       if (data.success) {
@@ -231,6 +237,7 @@ export default function PermissionsManagement() {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({ permissions: permissionsArray }),
       });
 
