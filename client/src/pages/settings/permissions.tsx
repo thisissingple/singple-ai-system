@@ -294,8 +294,7 @@ export default function PermissionsManagement() {
   return (
     <DashboardLayout
       title="權限管理"
-      sidebarConfig={sidebarConfig}
-      currentPath="/settings/permissions"
+      sidebarSections={sidebarConfig}
     >
       <div className="space-y-6">
         {/* Header */}
