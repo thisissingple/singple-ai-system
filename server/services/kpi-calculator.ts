@@ -273,6 +273,17 @@ export async function calculateAllKPIs(
   });
 
   console.log(`📊 體驗課學員總數: ${trialStudentEmails.size}`);
+  console.log(`📊 eods_for_closers 總筆數: ${deals.length}`);
+
+  // Debug: 檢查前 3 筆 deals 的結構
+  if (deals.length > 0) {
+    console.log('🔍 前 3 筆 deals 結構：');
+    deals.slice(0, 3).forEach((deal, idx) => {
+      console.log(`  [${idx + 1}] email: ${deal.student_email || deal.data?.student_email || 'N/A'}`);
+      console.log(`      plan: ${deal.plan || deal.data?.plan || 'N/A'}`);
+      console.log(`      actual_amount: ${deal.actual_amount || deal.data?.actual_amount || 'N/A'}`);
+    });
+  }
 
   // 在 eods_for_closers 中找到體驗課學生，且方案包含「高階一對一」
   const highLevelDeals = deals.filter(deal => {
@@ -297,7 +308,13 @@ export async function calculateAllKPIs(
       resolveField(deal.data, 'dealPackage') ||
       ''
     );
-    return plan.includes('高階一對一') || plan.includes('高音');
+    const isHighLevel = plan.includes('高階一對一') || plan.includes('高音');
+
+    if (isHighLevel) {
+      console.log(`✅ 找到高階方案: ${email} - ${plan}`);
+    }
+
+    return isHighLevel;
   });
 
   console.log(`💰 體驗課轉高階成交數: ${highLevelDeals.length}`);

@@ -1581,6 +1581,13 @@ export class TotalReportService {
         dealAmount = parseNumberField(rawAmount) || undefined;
       }
 
+      // Parse actual_amount（eods_for_closers 專用）
+      let actualAmount = row.actual_amount;
+      if (!actualAmount && row.raw_data) {
+        const rawActualAmount = resolveField(row.raw_data, 'actualAmount');
+        actualAmount = parseNumberField(rawActualAmount) || undefined;
+      }
+
       return {
         id: row.id,
         data: {
@@ -1594,6 +1601,7 @@ export class TotalReportService {
           dealDate: row.deal_date,
           courseType: row.course_type,
           dealAmount: dealAmount,  // Use parsed amount
+          actual_amount: actualAmount,  // ✅ 新增：eods_for_closers 的實收金額
           status: row.status,
           intentScore: row.intent_score,
           satisfaction: row.satisfaction,
