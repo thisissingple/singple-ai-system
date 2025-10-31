@@ -3,7 +3,7 @@
  * 定義各角色可訪問的路由和功能
  */
 
-export type Role = 'admin' | 'manager' | 'teacher' | 'consultant' | 'setter' | 'user';
+export type Role = 'admin' | 'super_admin' | 'manager' | 'teacher' | 'consultant' | 'setter' | 'user';
 
 export interface PermissionRule {
   /** 允許訪問的角色列表 */
@@ -207,6 +207,7 @@ export function filterMenuItems<T extends { href: string }>(
 export function getRoleDisplayName(role: Role): string {
   const roleNames: Record<Role, string> = {
     admin: '管理員',
+    super_admin: '超級管理員',
     manager: '部門主管',
     teacher: '教師',
     consultant: '諮詢師',

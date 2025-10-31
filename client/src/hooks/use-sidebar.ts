@@ -29,6 +29,6 @@ export function useFilteredSidebar(): SidebarSection[] {
     }
 
     // 傳遞完整的模組資料（包含 category）
-    return filterSidebarByPermission(user.roles || [], modules || []);
+    return filterSidebarByPermission((user.roles || []) as any, modules || []);
   }, [user, modules, isLoading]);
 }
