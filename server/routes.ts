@@ -59,7 +59,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ======================
 
   // 取得所有使用者
-  app.get('/api/users', isAuthenticated, async (req, res) => {
+  app.get('/api/users', requireAdmin, async (req, res) => {
     try {
       const result = await queryDatabase(
         `SELECT id, email, first_name, last_name, role, department, status, created_at, last_login_at, updated_at
@@ -1088,15 +1088,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // User management API routes (Admin only)
-  app.get('/api/users', requireAdmin, async (req, res) => {
-    try {
-      const users = await storage.listUsers();
-      res.json({ success: true, data: users });
-    } catch (error) {
-      console.error("Error fetching users:", error);
-      res.status(500).json({ success: false, error: "Failed to fetch users" });
-    }
-  });
+  // REMOVED: Duplicate /api/users route - using the one at line 62 instead
 
   app.patch('/api/users/:id/role', requireAdmin, async (req, res) => {
     try {
