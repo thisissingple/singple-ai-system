@@ -4,7 +4,7 @@
  */
 
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
-import { useFilteredSidebar } from '@/hooks/use-filtered-sidebar';
+import { useFilteredSidebar } from '@/hooks/use-sidebar';
 
 interface ReportsLayoutProps {
   children: React.ReactNode;

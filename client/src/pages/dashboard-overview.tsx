@@ -24,9 +24,11 @@ import {
   Calendar,
   Activity,
   XCircle,
+  Loader2,
 } from 'lucide-react';
 import { Link } from 'wouter';
 import ReportsLayout from './reports-layout';
+import { usePermission } from '@/hooks/use-permission';
 
 interface OverviewMetrics {
   // 體驗課數據
@@ -61,6 +63,9 @@ interface DataQualityIssue {
 
 export default function DashboardOverview() {
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // 權限檢查
+  const { data: permission, isLoading: permissionLoading } = usePermission('dashboard');
 
   // 取得總覽指標 - 使用真實 API
   const { data: metrics, isLoading, refetch } = useQuery<OverviewMetrics>({
@@ -120,6 +125,38 @@ export default function DashboardOverview() {
   const trialsTrend = weeklyTrends ? calculateTrendPercentage(weeklyTrends.trials.current, weeklyTrends.trials.previous) : 0;
   const conversionsTrend = weeklyTrends ? calculateTrendPercentage(weeklyTrends.conversions.current, weeklyTrends.conversions.previous) : 0;
   const revenueTrend = weeklyTrends ? calculateTrendPercentage(weeklyTrends.revenue.current, weeklyTrends.revenue.previous) : 0;
+
+  // 權限檢查 Loading
+  if (permissionLoading) {
+    return (
+      <ReportsLayout title="儀表板總覽">
+        <div className="flex items-center justify-center h-full">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      </ReportsLayout>
+    );
+  }
+
+  // 權限檢查失敗
+  if (!permission?.allowed) {
+    return (
+      <ReportsLayout title="儀表板總覽">
+        <Card className="max-w-2xl mx-auto mt-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              無權限存取
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground">
+              您沒有權限存取「儀表板」功能。請聯絡管理員申請權限。
+            </p>
+          </CardContent>
+        </Card>
+      </ReportsLayout>
+    );
+  }
 
   return (
     <ReportsLayout title="儀表板總覽">
