@@ -11,9 +11,12 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Eye, EyeOff, Key, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { useQuery } from '@tanstack/react-query';
 
 export default function ChangePasswordPage() {
   const [, setLocation] = useLocation();
+  const { toast } = useToast();
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -23,6 +26,16 @@ export default function ChangePasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [mustChange, setMustChange] = useState(false);
+
+  // 取得使用者權限模組，用於決定跳轉目標
+  const { data: permissionsData } = useQuery({
+    queryKey: ['user-permissions'],
+    queryFn: async () => {
+      const res = await fetch('/api/permissions/my-permissions');
+      if (!res.ok) throw new Error('Failed to fetch permissions');
+      return res.json();
+    },
+  });
 
   useEffect(() => {
     // 檢查使用者狀態
@@ -75,12 +88,60 @@ export default function ChangePasswordPage() {
         return;
       }
 
-      // 修改成功，跳轉到首頁
-      setLocation('/');
+      // ✅ 修改成功，顯示通知
+      toast({
+        title: '✅ 密碼修改成功',
+        description: '您的密碼已更新，即將跳轉...',
+        variant: 'default',
+      });
+
+      // ⏱️ 2 秒後跳轉到有權限的頁面
+      setTimeout(() => {
+        const targetPath = getRedirectPath();
+        setLocation(targetPath);
+      }, 2000);
     } catch (err: any) {
       setError('網路錯誤，請稍後再試');
       setLoading(false);
     }
+  };
+
+  // 決定跳轉目標：根據使用者權限找到第一個可訪問的頁面
+  const getRedirectPath = (): string => {
+    if (!permissionsData?.success || !permissionsData.data) {
+      return '/'; // 預設回首頁
+    }
+
+    const modules = permissionsData.data;
+
+    // 優先順序：
+    // 1. 體驗課總覽（教師最常用）
+    if (modules.some((m: any) => m.module_id === 'trial_class_report')) {
+      return '/reports/trial-overview';
+    }
+
+    // 2. 電訪系統
+    if (modules.some((m: any) => m.module_id === 'telemarketing_system')) {
+      return '/telemarketing/student-follow-up';
+    }
+
+    // 3. 諮詢師報表
+    if (modules.some((m: any) => m.module_id === 'consultant_report')) {
+      return '/reports/consultants';
+    }
+
+    // 4. 儀表板
+    if (modules.some((m: any) => m.module_id === 'dashboard')) {
+      return '/';
+    }
+
+    // 5. 表單填寫
+    if (modules.some((m: any) => m.module_id === 'form_builder')) {
+      return '/forms';
+    }
+
+    // 預設回首頁
+    return '/';
   };
 
   const passwordStrength = (password: string) => {

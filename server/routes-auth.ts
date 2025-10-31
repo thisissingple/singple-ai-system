@@ -12,6 +12,7 @@ import {
   hashPassword,
 } from './services/auth-service';
 import { queryDatabase } from './services/pg-client';
+import { sendAccountCreationEmail, sendPasswordResetEmail } from './services/email-service';
 
 export function registerAuthRoutes(app: Express) {
   /**
@@ -251,7 +252,7 @@ export function registerAuthRoutes(app: Express) {
         });
       }
 
-      const { email, firstName, lastName, password, department, roles } = req.body;
+      const { email, firstName, lastName, password, department, roles, sendEmail } = req.body;
 
       if (!email || !firstName || !password) {
         return res.status(400).json({
@@ -310,16 +311,177 @@ export function registerAuthRoutes(app: Express) {
         userRoles,
       ]);
 
+      const createdUser = result.rows[0];
+
+      // 建立員工 profile（包含自動生成員工編號）
+      try {
+        await queryDatabase(`
+          INSERT INTO employee_profiles (user_id)
+          VALUES ($1)
+        `, [createdUser.id]);
+        console.log('[建立使用者] 已建立員工 profile，員工編號將自動生成');
+      } catch (profileError: any) {
+        console.error('[建立使用者] 建立員工 profile 失敗:', profileError.message);
+        // 不影響主流程，繼續執行
+      }
+
+      // 如果勾選發送 Email，則發送帳號建立通知
+      let emailSent = false;
+      let emailError = null;
+
+      if (sendEmail === true || sendEmail === 'true') {
+        console.log('[建立使用者] 準備發送 Email 到:', email);
+        const emailResult = await sendAccountCreationEmail(
+          email,
+          firstName,
+          password // 發送原始密碼（未加密）
+        );
+
+        emailSent = emailResult.success;
+        if (!emailResult.success) {
+          emailError = emailResult.error;
+          console.error('[建立使用者] Email 發送失敗:', emailError);
+        }
+      }
+
       res.json({
         success: true,
-        user: result.rows[0],
+        user: createdUser,
         message: '使用者建立成功，首次登入需要修改密碼',
+        emailSent,
+        emailError,
       });
     } catch (error: any) {
       console.error('建立使用者 API 錯誤:', error);
       res.status(500).json({
         success: false,
         error: '建立使用者失敗',
+      });
+    }
+  });
+
+  /**
+   * POST /api/auth/request-password-reset
+   * 請求重設密碼（不需登入）
+   */
+  app.post('/api/auth/request-password-reset', async (req, res) => {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          error: '請提供 Email',
+        });
+      }
+
+      // 檢查使用者是否存在
+      const checkQuery = `SELECT id, first_name, last_name FROM users WHERE LOWER(email) = LOWER($1)`;
+      const result = await queryDatabase(checkQuery, [email]);
+
+      if (result.rows.length === 0) {
+        // 安全考量：即使找不到使用者也回傳成功（避免暴露使用者是否存在）
+        console.log(`[密碼重設請求] 使用者不存在: ${email}`);
+        return res.json({
+          success: true,
+          message: '若該帳號存在，管理員會協助處理您的請求',
+        });
+      }
+
+      const user = result.rows[0];
+
+      // 記錄重設請求到 password_reset_requests 表
+      const insertQuery = `
+        INSERT INTO password_reset_requests (
+          id,
+          user_id,
+          email,
+          status,
+          requested_at,
+          created_at
+        )
+        VALUES (
+          gen_random_uuid(),
+          $1, $2, 'pending', NOW(), NOW()
+        )
+      `;
+
+      await queryDatabase(insertQuery, [user.id, email]);
+
+      console.log(`[密碼重設請求] 已記錄請求：${email} (User ID: ${user.id})`);
+
+      res.json({
+        success: true,
+        message: '您的請求已提交，管理員會盡快處理',
+      });
+    } catch (error: any) {
+      console.error('密碼重設請求 API 錯誤:', error);
+
+      // 檢查是否是因為表不存在
+      if (error.message && error.message.includes('password_reset_requests')) {
+        console.error('⚠️ password_reset_requests 表不存在，請執行資料庫遷移');
+      }
+
+      res.status(500).json({
+        success: false,
+        error: '提交請求失敗，請稍後再試',
+      });
+    }
+  });
+
+  /**
+   * GET /api/auth/admin/password-reset-requests
+   * Admin 取得所有密碼重設請求
+   */
+  app.get('/api/auth/admin/password-reset-requests', async (req, res) => {
+    try {
+      const currentUserId = (req as any).session?.userId;
+
+      if (!currentUserId) {
+        return res.status(401).json({
+          success: false,
+          error: '未登入',
+        });
+      }
+
+      // 檢查是否為 Admin
+      const currentUser = await getUserById(currentUserId);
+      if (!currentUser || !currentUser.roles.includes('admin')) {
+        return res.status(403).json({
+          success: false,
+          error: '無權限執行此操作',
+        });
+      }
+
+      // 取得所有請求（加入使用者資訊）
+      const query = `
+        SELECT
+          pr.id,
+          pr.user_id,
+          pr.email,
+          pr.status,
+          pr.requested_at,
+          pr.processed_at,
+          pr.processed_by,
+          u.first_name,
+          u.last_name
+        FROM password_reset_requests pr
+        LEFT JOIN users u ON pr.user_id = u.id
+        ORDER BY pr.requested_at DESC
+        LIMIT 100
+      `;
+
+      const result = await queryDatabase(query);
+
+      res.json({
+        success: true,
+        requests: result.rows,
+      });
+    } catch (error: any) {
+      console.error('取得密碼重設請求錯誤:', error);
+      res.status(500).json({
+        success: false,
+        error: '取得請求失敗',
       });
     }
   });

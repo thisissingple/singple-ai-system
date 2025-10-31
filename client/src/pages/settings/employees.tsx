@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, UserPlus, Briefcase, FileText, Shield, Calendar, Key, Copy, Pencil, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Search, Eye, UserPlus, Briefcase, FileText, Shield, Calendar, Key, Copy, Pencil, ArrowUpDown, ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { sidebarConfig } from '@/config/sidebar-config';
 import { Button } from '@/components/ui/button';
@@ -98,6 +98,14 @@ export default function EmployeesPage() {
   });
   const [generatedPassword, setGeneratedPassword] = useState('');
 
+  // 帳號資訊對話框狀態
+  const [showAccountInfoDialog, setShowAccountInfoDialog] = useState(false);
+  const [accountInfo, setAccountInfo] = useState({
+    email: '',
+    password: '',
+    name: '',
+  });
+
   // 重設密碼相關狀態
   const [showResetPasswordDialog, setShowResetPasswordDialog] = useState(false);
   const [resetPasswordData, setResetPasswordData] = useState({
@@ -105,6 +113,13 @@ export default function EmployeesPage() {
     newPassword: '',
   });
   const [resetPasswordGenerated, setResetPasswordGenerated] = useState('');
+
+  // 刪除員工相關狀態
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteEmployeeData, setDeleteEmployeeData] = useState({
+    userId: '',
+    name: '',
+  });
 
   // 編輯員工相關狀態
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -395,7 +410,15 @@ export default function EmployeesPage() {
       const data = await response.json();
 
       if (data.success) {
-        alert(`員工建立成功！\n\nEmail: ${newEmployeeData.email}\n密碼: ${newEmployeeData.password}\n\n請將密碼告知員工，員工首次登入需要修改密碼。`);
+        // 設定帳號資訊並顯示對話框
+        setAccountInfo({
+          email: newEmployeeData.email,
+          password: newEmployeeData.password,
+          name: `${newEmployeeData.firstName}${newEmployeeData.lastName ? ' ' + newEmployeeData.lastName : ''}`,
+        });
+        setShowAccountInfoDialog(true);
+
+        // 關閉新增對話框並重置表單
         setShowAddEmployeeDialog(false);
         setNewEmployeeData({
           email: '',
@@ -406,6 +429,7 @@ export default function EmployeesPage() {
           roles: ['user'],
         });
         setGeneratedPassword('');
+
         // 重新載入列表
         fetchEmployees();
       } else {
@@ -437,7 +461,15 @@ export default function EmployeesPage() {
       const data = await response.json();
 
       if (data.success) {
-        alert(`密碼重設成功！\n\n新密碼: ${resetPasswordData.newPassword}\n\n請將密碼告知員工，員工下次登入需要修改密碼。`);
+        // 設定帳號資訊並顯示對話框
+        setAccountInfo({
+          email: viewingEmployee?.user.email || '',
+          password: resetPasswordData.newPassword,
+          name: `${viewingEmployee?.user.first_name || ''}${viewingEmployee?.user.last_name ? ' ' + viewingEmployee.user.last_name : ''}`,
+        });
+        setShowAccountInfoDialog(true);
+
+        // 關閉重設密碼對話框並重置表單
         setShowResetPasswordDialog(false);
         setResetPasswordData({
           userId: '',
@@ -450,6 +482,36 @@ export default function EmployeesPage() {
     } catch (error) {
       console.error('重設密碼失敗:', error);
       alert('重設失敗');
+    }
+  };
+
+  // 刪除員工
+  const handleDeleteEmployee = async () => {
+    if (!deleteEmployeeData.userId) {
+      alert('請選擇要刪除的員工');
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/employees/${deleteEmployeeData.userId}`, {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        alert(`✅ ${data.message}`);
+        setShowDeleteDialog(false);
+        setShowDetailDialog(false);
+        setDeleteEmployeeData({ userId: '', name: '' });
+        // 重新載入員工列表
+        fetchEmployees();
+      } else {
+        alert(data.message || '刪除失敗');
+      }
+    } catch (error) {
+      console.error('刪除員工失敗:', error);
+      alert('刪除失敗');
     }
   };
 
@@ -993,6 +1055,20 @@ export default function EmployeesPage() {
                     >
                       <Key className="h-4 w-4 mr-1" />
                       重設密碼
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => {
+                        setDeleteEmployeeData({
+                          userId: viewingEmployee.user.id,
+                          name: `${viewingEmployee.user.first_name} ${viewingEmployee.user.last_name || ''}`,
+                        });
+                        setShowDeleteDialog(true);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      刪除員工
                     </Button>
                   </div>
                 </div>
@@ -1633,7 +1709,7 @@ export default function EmployeesPage() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                員工首次登入需要修改密碼
+                建立成功後，系統會顯示帳號資訊供您複製給員工。員工首次登入需要修改密碼。
               </p>
             </div>
           </div>
@@ -2034,6 +2110,215 @@ export default function EmployeesPage() {
               取消
             </Button>
             <Button onClick={handleEditInsurance}>儲存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 帳號資訊對話框 */}
+      <Dialog open={showAccountInfoDialog} onOpenChange={setShowAccountInfoDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>✅ 員工帳號建立成功</DialogTitle>
+            <DialogDescription>
+              請複製以下資訊並傳送給員工 {accountInfo.name}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 mt-4">
+            <Card className="p-4 bg-muted">
+              <div className="space-y-3">
+                <div>
+                  <Label className="text-xs text-muted-foreground">員工姓名</Label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Input
+                      value={accountInfo.name}
+                      readOnly
+                      className="bg-white"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(accountInfo.name);
+                        alert('已複製姓名');
+                      }}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-xs text-muted-foreground">登入帳號 (Email)</Label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Input
+                      value={accountInfo.email}
+                      readOnly
+                      className="bg-white"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(accountInfo.email);
+                        alert('已複製 Email');
+                      }}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-xs text-muted-foreground">臨時密碼</Label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Input
+                      value={accountInfo.password}
+                      readOnly
+                      className="bg-white font-mono text-lg"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(accountInfo.password);
+                        alert('已複製密碼');
+                      }}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-xs text-muted-foreground">登入網址</Label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Input
+                      value="https://singple-ai-system.zeabur.app/login"
+                      readOnly
+                      className="bg-white text-sm"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        navigator.clipboard.writeText('https://singple-ai-system.zeabur.app/login');
+                        alert('已複製登入網址');
+                      }}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <p className="text-sm text-amber-800">
+                <strong>📌 提醒事項：</strong>
+              </p>
+              <ul className="text-sm text-amber-700 mt-2 space-y-1 list-disc list-inside">
+                <li>此為系統自動生成的臨時密碼</li>
+                <li>員工首次登入時，系統會要求修改密碼</li>
+                <li>請確保將密碼安全地傳送給員工</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  const text = `
+🎉 歡迎加入 Singple 教育機構管理系統
+
+姓名：${accountInfo.name}
+登入帳號：${accountInfo.email}
+臨時密碼：${accountInfo.password}
+登入網址：https://singple-ai-system.zeabur.app/login
+
+📌 提醒：
+• 此為臨時密碼，首次登入需修改
+• 請妥善保管您的密碼
+                  `.trim();
+                  navigator.clipboard.writeText(text);
+                  alert('已複製完整資訊');
+                }}
+              >
+                <Copy className="h-4 w-4 mr-2" />
+                複製全部資訊
+              </Button>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button onClick={() => setShowAccountInfoDialog(false)}>
+              完成
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 刪除員工確認對話框 */}
+      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-red-600">⚠️ 確認刪除員工</DialogTitle>
+            <DialogDescription>
+              此操作無法復原，將會永久刪除員工的所有資料
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 mt-4">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <p className="text-sm text-red-800 font-semibold mb-2">
+                即將刪除以下員工：
+              </p>
+              <p className="text-lg font-bold text-red-900">
+                {deleteEmployeeData.name}
+              </p>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <p className="text-sm text-amber-800 font-semibold mb-2">
+                ⚠️ 警告：此操作將會刪除
+              </p>
+              <ul className="text-sm text-amber-700 space-y-1 list-disc list-inside">
+                <li>員工基本資料（users、employee_profiles）</li>
+                <li>所有業務身份記錄（business_identities）</li>
+                <li>所有薪資記錄（salary_records）</li>
+                <li>所有勞健保記錄（insurance_records）</li>
+                <li>其他相關的業務資料</li>
+              </ul>
+              <p className="text-sm text-amber-800 font-semibold mt-3">
+                此操作無法復原，請謹慎確認！
+              </p>
+            </div>
+
+            <div className="bg-muted rounded-lg p-4">
+              <p className="text-sm text-muted-foreground">
+                如果只是要停用員工帳號，建議使用「切換狀態」功能將員工設為「離職」狀態，這樣可以保留歷史資料。
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDeleteDialog(false);
+                setDeleteEmployeeData({ userId: '', name: '' });
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteEmployee}
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              確認刪除
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

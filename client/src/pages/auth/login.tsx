@@ -4,7 +4,7 @@
  */
 
 import { useState } from 'react';
-import { useLocation } from 'wouter';
+import { useLocation, Link } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -155,10 +155,14 @@ export default function LoginPage() {
               )}
             </Button>
 
-            {/* 忘記密碼提示 */}
-            <p className="text-center text-sm text-muted-foreground mt-4">
-              忘記密碼？請聯絡系統管理員重設密碼
-            </p>
+            {/* 忘記密碼連結 */}
+            <div className="text-center text-sm mt-4">
+              <Link href="/forgot-password">
+                <a className="text-primary hover:text-primary/80 hover:underline transition-colors">
+                  忘記密碼？點此重設
+                </a>
+              </Link>
+            </div>
           </form>
 
           {/* 版本資訊 */}

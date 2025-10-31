@@ -42,6 +42,7 @@ const FacebookSettings = lazy(() => import("@/pages/settings/facebook-settings")
 const TeachingQualityList = lazy(() => import("@/pages/teaching-quality/teaching-quality-list"));
 const TeachingQualityDetail = lazy(() => import("@/pages/teaching-quality/teaching-quality-detail"));
 const ChangePasswordPage = lazy(() => import("@/pages/auth/change-password"));
+const ForgotPasswordPage = lazy(() => import("@/pages/auth/forgot-password"));
 const PublicTrialClassForm = lazy(() => import("@/pages/forms/public-trial-class-form"));
 const AdLeadsList = lazy(() => import("@/pages/telemarketing/ad-leads-list"));
 const AdPerformanceReport = lazy(() => import("@/pages/telemarketing/ad-performance-report"));
@@ -66,6 +67,7 @@ function Router() {
       <Switch>
         {/* 公開路由 - 無需登入 */}
         <Route path="/login" component={LoginPage} />
+        <Route path="/forgot-password" component={ForgotPasswordPage} />
         <Route path="/forms/share/:id" component={PublicFormPage} />
         <Route path="/forms/public/trial-class" component={PublicTrialClassForm} />
 

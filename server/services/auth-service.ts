@@ -5,6 +5,7 @@
 
 import bcrypt from 'bcryptjs';
 import { createClient } from '@supabase/supabase-js';
+import { queryDatabase } from './pg-client';
 
 const SALT_ROUNDS = 10;
 const MAX_LOGIN_ATTEMPTS = 5;

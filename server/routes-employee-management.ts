@@ -926,4 +926,100 @@ export function registerEmployeeManagementRoutes(app: Express) {
       });
     }
   });
+
+  /**
+   * DELETE /api/employees/:userId
+   * 刪除員工（完全移除）
+   *
+   * 重要：此操作會刪除以下所有相關資料：
+   * - users 記錄
+   * - employee_profiles 記錄
+   * - business_identities 記錄
+   * - salary_records 記錄
+   * - insurance_records 記錄
+   * - 所有相關的業務資料
+   *
+   * 此操作無法復原，請謹慎使用
+   */
+  app.delete('/api/employees/:userId', isAuthenticated, requireAdmin, async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: '缺少使用者 ID',
+        });
+      }
+
+      console.log(`[刪除員工] 開始刪除員工: ${userId}`);
+
+      // 1. 檢查員工是否存在
+      const userCheck = await queryDatabase(
+        `SELECT id, email, first_name, last_name FROM users WHERE id = $1`,
+        [userId]
+      );
+
+      if (userCheck.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: '找不到該員工',
+        });
+      }
+
+      const user = userCheck.rows[0];
+      console.log(`[刪除員工] 找到員工: ${user.first_name} ${user.last_name || ''} (${user.email})`);
+
+      // 2. 刪除相關資料（按照外鍵依賴順序）
+
+      // 2.1 刪除勞健保記錄
+      const insuranceResult = await queryDatabase(
+        `DELETE FROM insurance_records WHERE user_id = $1`,
+        [userId]
+      );
+      console.log(`[刪除員工] 已刪除 ${insuranceResult.rowCount || 0} 筆勞健保記錄`);
+
+      // 2.2 刪除薪資記錄
+      const salaryResult = await queryDatabase(
+        `DELETE FROM salary_records WHERE user_id = $1`,
+        [userId]
+      );
+      console.log(`[刪除員工] 已刪除 ${salaryResult.rowCount || 0} 筆薪資記錄`);
+
+      // 2.3 刪除業務身份
+      const identitiesResult = await queryDatabase(
+        `DELETE FROM business_identities WHERE user_id = $1`,
+        [userId]
+      );
+      console.log(`[刪除員工] 已刪除 ${identitiesResult.rowCount || 0} 筆業務身份`);
+
+      // 2.4 刪除員工 profile
+      const profileResult = await queryDatabase(
+        `DELETE FROM employee_profiles WHERE user_id = $1`,
+        [userId]
+      );
+      console.log(`[刪除員工] 已刪除 ${profileResult.rowCount || 0} 筆員工 profile`);
+
+      // 2.5 最後刪除使用者本身
+      const userResult = await queryDatabase(
+        `DELETE FROM users WHERE id = $1`,
+        [userId]
+      );
+      console.log(`[刪除員工] 已刪除使用者記錄`);
+
+      console.log(`[刪除員工] ✅ 員工刪除完成: ${user.first_name} ${user.last_name || ''}`);
+
+      res.json({
+        success: true,
+        message: `員工 ${user.first_name} ${user.last_name || ''} 已完全移除`,
+      });
+    } catch (error: any) {
+      console.error('[刪除員工] ❌ 錯誤:', error);
+      res.status(500).json({
+        success: false,
+        message: '刪除員工失敗',
+        error: error.message,
+      });
+    }
+  });
 }

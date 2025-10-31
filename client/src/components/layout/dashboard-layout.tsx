@@ -16,9 +16,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Menu, Bell, User, PanelLeftClose, PanelLeft, LogOut, Key, Settings } from 'lucide-react';
+import { Menu, Bell, User, PanelLeftClose, PanelLeft, LogOut, Key, Settings, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -49,6 +50,11 @@ export function DashboardLayout({
       alert('登出失敗，請稍後再試');
     }
   };
+
+  // 檢查是否有任何有效的側邊欄項目
+  const hasAnyPermissions = sidebarSections.some(section =>
+    section.items && section.items.length > 0
+  );
 
   // 拖曳相關事件處理
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -90,6 +96,107 @@ export function DashboardLayout({
       document.body.style.userSelect = '';
     };
   }, [isDragging, isSidebarOpen]);
+
+  // 如果沒有任何權限，顯示專門的無權限畫面
+  if (!hasAnyPermissions) {
+    return (
+      <div className="min-h-screen bg-background">
+        {/* 頂部導航欄（簡化版） */}
+        <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="flex h-14 items-center px-4 gap-4">
+            {/* Logo/品牌名稱 */}
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-semibold">簡單歌唱 Singple</h1>
+            </div>
+
+            {/* 右側工具列 */}
+            <div className="ml-auto flex items-center gap-2">
+              {/* 使用者選單 */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <User className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>
+                    <div className="flex flex-col space-y-1">
+                      <p className="text-sm font-medium leading-none">
+                        {user?.first_name || '使用者'} {user?.last_name || ''}
+                      </p>
+                      <p className="text-xs leading-none text-muted-foreground">
+                        {user?.email || 'user@example.com'}
+                      </p>
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setLocation('/change-password')}>
+                    <Key className="mr-2 h-4 w-4" />
+                    修改密碼
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    登出
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        </header>
+
+        {/* 無權限訊息 */}
+        <div className="flex items-center justify-center min-h-[calc(100vh-3.5rem)] p-6">
+          <Card className="max-w-md w-full">
+            <CardHeader className="text-center">
+              <div className="flex justify-center mb-4">
+                <div className="rounded-full bg-amber-100 p-3">
+                  <ShieldAlert className="h-12 w-12 text-amber-600" />
+                </div>
+              </div>
+              <CardTitle className="text-2xl">尚未設定存取權限</CardTitle>
+              <CardDescription className="text-base mt-2">
+                您的帳號目前尚未被授予任何系統權限
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="bg-muted rounded-lg p-4">
+                <p className="text-sm text-muted-foreground">
+                  請聯絡系統管理員為您的帳號分配適當的權限後，再重新登入使用系統。
+                </p>
+              </div>
+              <div className="space-y-2 text-sm">
+                <p className="font-medium">可以執行的操作：</p>
+                <ul className="list-disc list-inside space-y-1 text-muted-foreground ml-2">
+                  <li>修改密碼</li>
+                  <li>登出系統</li>
+                  <li>等待管理員分配權限</li>
+                </ul>
+              </div>
+              <div className="pt-4 flex flex-col gap-2">
+                <Button
+                  onClick={() => setLocation('/change-password')}
+                  variant="outline"
+                  className="w-full"
+                >
+                  <Key className="mr-2 h-4 w-4" />
+                  修改密碼
+                </Button>
+                <Button
+                  onClick={handleLogout}
+                  variant="destructive"
+                  className="w-full"
+                >
+                  <LogOut className="mr-2 h-4 w-4" />
+                  登出
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
