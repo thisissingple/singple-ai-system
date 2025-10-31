@@ -106,14 +106,6 @@ export default function PermissionsManagement() {
     setLoadingUsers(true);
     try {
       const response = await fetch('/api/users');
-
-      // Check for authentication errors
-      if (response.status === 401 || response.status === 403) {
-        const errorMsg = '您沒有權限訪問此頁面，請先登入';
-        setError(errorMsg);
-        throw new Error(errorMsg);
-      }
-
       const data = await response.json();
 
       if (data.success) {
@@ -139,12 +131,6 @@ export default function PermissionsManagement() {
     setLoadingModules(true);
     try {
       const response = await fetch('/api/permissions/modules');
-
-      // Check for authentication errors
-      if (response.status === 401 || response.status === 403) {
-        throw new Error('您沒有權限訪問此頁面，請先登入');
-      }
-
       const data = await response.json();
 
       if (data.success) {
@@ -168,12 +154,6 @@ export default function PermissionsManagement() {
     setLoadingPermissions(true);
     try {
       const response = await fetch(`/api/permissions/user/${userId}`);
-
-      // Check for authentication errors
-      if (response.status === 401 || response.status === 403) {
-        throw new Error('您沒有權限訪問此頁面，請先登入');
-      }
-
       const data = await response.json();
 
       if (data.success) {
