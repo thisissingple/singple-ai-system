@@ -360,6 +360,11 @@ export function filterSidebarByPermission(
     .map(section => ({
       ...section,
       items: section.items.filter(item => {
+        // 過濾掉「即將推出」的項目
+        if (item.badge === '即將推出') {
+          return false;
+        }
+
         // 優先檢查新系統 (requiredModule)
         if (item.requiredModule) {
           return moduleIdSet.has(item.requiredModule);
