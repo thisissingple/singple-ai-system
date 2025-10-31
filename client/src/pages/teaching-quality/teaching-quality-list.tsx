@@ -7,7 +7,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
-import { sidebarConfig } from '@/config/sidebar-config';
+import { useFilteredSidebar } from '@/hooks/use-sidebar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -53,6 +53,7 @@ export default function TeachingQualityList() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const { lastUpdatedAnalysisId, clearNotification } = useTeachingQuality();
+  const filteredSidebar = useFilteredSidebar();
 
   const [records, setRecords] = useState<StudentAnalysisRecord[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -425,7 +426,7 @@ export default function TeachingQualityList() {
 
   return (
     <DashboardLayout
-      sidebarSections={sidebarConfig}
+      sidebarSections={filteredSidebar}
       title="教學品質追蹤"
     >
       {content()}

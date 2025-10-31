@@ -8,7 +8,7 @@ import ReactMarkdown from 'react-markdown';
 import { useLocation, useRoute } from 'wouter';
 
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
-import { sidebarConfig } from '@/config/sidebar-config';
+import { useFilteredSidebar } from '@/hooks/use-sidebar';
 import {
   Card,
   CardContent,
@@ -631,7 +631,7 @@ export default function TeachingQualityDetail() {
 
   if (loading) {
     return (
-      <DashboardLayout sidebarSections={sidebarConfig}>
+      <DashboardLayout sidebarSections={filteredSidebar}>
         <div className="flex h-64 items-center justify-center">
           <div className="text-lg text-muted-foreground">載入中...</div>
         </div>
@@ -641,7 +641,7 @@ export default function TeachingQualityDetail() {
 
   if (error || !analysis) {
     return (
-      <DashboardLayout sidebarSections={sidebarConfig}>
+      <DashboardLayout sidebarSections={filteredSidebar}>
         <div className="flex h-64 flex-col items-center justify-center gap-4">
           <div className="text-lg text-red-600">載入失敗：{error || '找不到分析資料'}</div>
           <Button onClick={() => navigate('/reports/trial-overview?tab=analysis')}>
@@ -660,7 +660,7 @@ export default function TeachingQualityDetail() {
   const hasValidAnalysis = markdownOutput && markdownOutput.length > 0;
 
   return (
-    <DashboardLayout sidebarSections={sidebarConfig}>
+    <DashboardLayout sidebarSections={filteredSidebar}>
       <div className="mx-auto max-w-7xl space-y-6 pb-10">
         {/* Header */}
         <div className="flex flex-col gap-4">
