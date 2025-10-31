@@ -247,13 +247,36 @@ export async function calculateAllKPIs(
   // 成交記錄包含整個工作室，不只體驗課學生，無法對應是正常的
 
   // ========================================
-  // 計算已成交金額（修正邏輯）
-  // 只計算「已轉高」學生在 EODs 表中「高階一對一」或「高音」方案的實收金額
+  // 計算已成交金額（修正邏輯 2025-10-31）
+  // 新邏輯：
+  // 1. 取得所有 trial_class_purchases 中的學生 email
+  // 2. 在 eods_for_closers 中找到這些學生，且方案名稱包含「高階一對一」
+  // 3. 計算這些成交記錄的實收金額總和
   // ========================================
-  // convertedStudentEmails 已經在第 139 行定義，且已經是 lowercase
   const revenueWarnings: string[] = [];
 
-  const convertedDeals = deals.filter(deal => {
+  // 取得所有體驗課學生的 email（不管目前狀態）
+  const trialStudentEmails = new Set<string>();
+  purchases.forEach((purchase) => {
+    const email = (
+      purchase.student_email ||
+      purchase.data?.student_email ||
+      purchase.data?.email ||
+      resolveField(purchase.data, 'studentEmail') ||
+      purchase.email ||
+      ''
+    ).trim().toLowerCase();
+
+    if (email) {
+      trialStudentEmails.add(email);
+    }
+  });
+
+  console.log(`📊 體驗課學員總數: ${trialStudentEmails.size}`);
+
+  // 在 eods_for_closers 中找到體驗課學生，且方案包含「高階一對一」
+  const highLevelDeals = deals.filter(deal => {
+    // 1. 檢查這個 deal 的學生是否來自體驗課
     const email = (
       deal.student_email ||
       deal.data?.student_email ||
@@ -261,10 +284,11 @@ export async function calculateAllKPIs(
       ''
     ).trim().toLowerCase();
 
-    return convertedStudentEmails.includes(email);
-  });
+    if (!email || !trialStudentEmails.has(email)) {
+      return false; // 不是體驗課學生
+    }
 
-  const highLevelDeals = convertedDeals.filter(deal => {
+    // 2. 檢查方案名稱是否包含「高階一對一」
     const plan = (
       deal.plan ||                     // ✅ 優先：頂層欄位（從資料庫直接讀取）
       deal.data?.plan ||               // ✅ 次要：data 中的 plan
@@ -275,6 +299,8 @@ export async function calculateAllKPIs(
     );
     return plan.includes('高階一對一') || plan.includes('高音');
   });
+
+  console.log(`💰 體驗課轉高階成交數: ${highLevelDeals.length}`);
 
   const totalRevenue = highLevelDeals.reduce((sum, deal) => {
     const amountStr = (
@@ -287,6 +313,8 @@ export async function calculateAllKPIs(
     const amount = parseFloat(amountStr) || 0;
     return sum + amount;
   }, 0);
+
+  console.log(`💰 體驗課轉高階總收益: NT$ ${totalRevenue.toLocaleString()}`);
 
   // 不再警告高階方案缺失，這是正常的業務情況
 
@@ -315,7 +343,7 @@ export async function calculateAllKPIs(
         totalRevenue: totalRevenue,
         validDeals: highLevelDeals.length,
         totalDeals: deals.length,
-        convertedDeals: convertedDeals.length,
+        trialStudents: trialStudentEmails.size,
         highLevelDeals: highLevelDeals.length,
         formula: 'totalRevenue / highLevelDeals.length',
         result: avgDealAmount,
@@ -325,7 +353,8 @@ export async function calculateAllKPIs(
     totalRevenue: {
       value: totalRevenue,
       calculation: {
-        source: '已轉高學生在 EODs 中「高階一對一」或「高音」方案的實收金額總和',
+        source: '體驗課學員在 eods_for_closers 中「高階一對一」或「高音」方案的實收金額總和',
+        trialStudents: trialStudentEmails.size,
         highLevelDeals: highLevelDeals.length,
         totalAmount: totalRevenue,
       },
