@@ -9,7 +9,8 @@ import { format } from 'date-fns';
 import { useQuery } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
-import { sidebarConfig } from '@/config/sidebar-config';
+import { useFilteredSidebar } from '@/hooks/use-sidebar';
+import { usePermission } from '@/hooks/use-permission';
 import { KPIOverview } from '@/components/trial-report/kpi-overview';
 import { TeacherInsights, type TeacherClassRecord } from '@/components/trial-report/teacher-insights';
 import { StudentInsights } from '@/components/trial-report/student-insights';
@@ -67,6 +68,10 @@ export default function TrialOverview() {
   const [location, navigate] = useLocation();
   const { toast } = useToast();
   const { lastUpdatedAnalysisId, clearNotification } = useTeachingQuality();
+
+  // 權限檢查
+  const filteredSidebar = useFilteredSidebar();
+  const { data: permission, isLoading: permissionLoading } = usePermission('trial_class_report');
 
   // 從 URL 讀取當前 Tab
   const searchParams = new URLSearchParams(window.location.search);
@@ -798,9 +803,44 @@ export default function TrialOverview() {
     );
   };
 
+  // 權限檢查 Loading
+  if (permissionLoading) {
+    return (
+      <DashboardLayout sidebarSections={filteredSidebar} title="體驗課總覽">
+        <div className="flex items-center justify-center h-full">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  // 權限檢查失敗
+  if (!permission?.allowed) {
+    return (
+      <DashboardLayout sidebarSections={filteredSidebar} title="體驗課總覽">
+        <Card className="max-w-2xl mx-auto mt-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              無權限存取
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground">
+              您沒有權限存取「體驗課報表」功能。請聯絡管理員申請權限。
+            </p>
+            <p className="text-sm text-muted-foreground mt-4">
+              原因：{permission?.reason || '未授權'}
+            </p>
+          </CardContent>
+        </Card>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout
-      sidebarSections={sidebarConfig}
+      sidebarSections={filteredSidebar}
       title="體驗課總覽"
     >
       <div className="p-6">

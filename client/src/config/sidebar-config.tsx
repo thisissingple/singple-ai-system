@@ -36,7 +36,8 @@ export interface SidebarItem {
   href: string;
   icon: any;
   badge?: string;
-  requiredRoles?: Role[]; // 新增：需要的角色權限
+  requiredRoles?: Role[]; // 舊系統：角色權限（已棄用）
+  requiredModule?: string; // 新系統：權限模組 ID
 }
 
 export interface SidebarSection {
@@ -53,27 +54,27 @@ export const sidebarConfig: SidebarSection[] = [
         label: '體驗課總覽',
         href: '/reports/trial-overview',
         icon: FileText,
-        requiredRoles: ['teacher'],
+        requiredModule: 'trial_class_report',
       },
       {
         label: '完課率報表',
         href: '/reports/completion-rate',
         icon: Target,
         badge: '即將推出',
-        requiredRoles: ['teacher'],
+        requiredModule: 'trial_class_report',
       },
       {
         label: '滿意度報表',
         href: '/reports/satisfaction',
         icon: Smile,
         badge: '即將推出',
-        requiredRoles: ['teacher'],
+        requiredModule: 'trial_class_report',
       },
       {
         label: '表單填寫',
         href: '/forms',
         icon: PenTool,
-        requiredRoles: ['teacher'],
+        requiredModule: 'form_builder',
       },
     ],
   },
@@ -86,31 +87,31 @@ export const sidebarConfig: SidebarSection[] = [
         label: '學生跟進',
         href: '/telemarketing/student-follow-up',
         icon: UserCog,
-        requiredRoles: ['setter'],
+        requiredModule: 'telemarketing_system',
       },
       {
         label: '廣告名單',
         href: '/telemarketing/ad-leads',
         icon: Phone,
-        requiredRoles: ['setter'],
+        requiredModule: 'ad_leads',
       },
       {
         label: '電訪記錄',
         href: '/telemarketing/call-records',
         icon: PhoneCall,
-        requiredRoles: ['setter'],
+        requiredModule: 'telemarketing_system',
       },
       {
         label: 'GoHighLevel 聯絡人',
         href: '/leads/gohighlevel',
         icon: Users,
-        requiredRoles: ['setter'],
+        requiredModule: 'telemarketing_system',
       },
       {
         label: '表單填寫',
         href: '/forms',
         icon: PenTool,
-        requiredRoles: ['setter'],
+        requiredModule: 'form_builder',
       },
     ],
   },
@@ -123,19 +124,19 @@ export const sidebarConfig: SidebarSection[] = [
         label: '諮詢師報表',
         href: '/reports/consultants',
         icon: Users,
-        requiredRoles: ['consultant'],
+        requiredModule: 'consultant_report',
       },
       {
         label: '體驗課總覽',
         href: '/reports/trial-overview',
         icon: FileText,
-        requiredRoles: ['consultant'],
+        requiredModule: 'trial_class_report',
       },
       {
         label: '表單填寫',
         href: '/forms',
         icon: PenTool,
-        requiredRoles: ['consultant'],
+        requiredModule: 'consultant_forms',
       },
     ],
   },
@@ -148,167 +149,170 @@ export const sidebarConfig: SidebarSection[] = [
         label: '儀表板總覽',
         href: '/',
         icon: LayoutDashboard,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'dashboard',
       },
       {
         label: '體驗課總覽',
         href: '/reports/trial-overview',
         icon: FileText,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'trial_class_report',
       },
       {
         label: '成本獲利管理',
         href: '/reports/cost-profit',
         icon: DollarSign,
-        requiredRoles: ['admin'],
+        requiredModule: 'cost_profit',
       },
       {
         label: '收支記錄管理',
         href: '/reports/income-expense',
         icon: Calculator,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'income_expense',
       },
       {
         label: '諮詢師報表',
         href: '/reports/consultants',
         icon: Users,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'consultant_report',
       },
       {
         label: '完課率報表',
         href: '/reports/completion-rate',
         icon: Target,
         badge: '即將推出',
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'trial_class_report',
       },
       {
         label: '滿意度報表',
         href: '/reports/satisfaction',
         icon: Smile,
         badge: '即將推出',
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'trial_class_report',
       },
       {
         label: '廣告成效',
         href: '/telemarketing/ad-performance',
         icon: BarChart3,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'ad_leads',
       },
       {
         label: 'GoHighLevel 聯絡人',
         href: '/leads/gohighlevel',
         icon: Users,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'telemarketing_system',
       },
       {
         label: '學生跟進',
         href: '/telemarketing/student-follow-up',
         icon: UserCog,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'telemarketing_system',
       },
       {
         label: '廣告名單',
         href: '/telemarketing/ad-leads',
         icon: Phone,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'ad_leads',
       },
       {
         label: '電訪記錄',
         href: '/telemarketing/call-records',
         icon: PhoneCall,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'telemarketing_system',
       },
       {
         label: '資料庫瀏覽器',
         href: '/tools/database-browser',
         icon: Database,
-        requiredRoles: ['admin'],
+        requiredRoles: ['admin'], // 保留舊系統（admin 專屬工具）
       },
       {
         label: 'KPI 計算器',
         href: '/tools/kpi-calculator',
         icon: Calculator,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'dashboard',
       },
       {
         label: 'AI 分析',
         href: '/tools/ai-analysis',
         icon: Brain,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'dashboard',
       },
       {
         label: 'Raw Data MVP',
         href: '/tools/raw-data-mvp',
         icon: Sheet,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'dashboard',
       },
       {
         label: 'Know-it-all AI',
         href: '/tools/know-it-all-chat',
         icon: MessageSquare,
-        requiredRoles: ['admin'],
+        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
       },
       {
         label: 'Know-it-all 文件',
         href: '/tools/know-it-all-documents',
         icon: BookOpen,
-        requiredRoles: ['admin'],
+        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
       },
       {
         label: '表單填寫',
         href: '/forms',
         icon: PenTool,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'form_builder',
       },
       {
         label: '員工管理',
         href: '/settings/employees',
         icon: UserCog,
-        requiredRoles: ['admin'],
+        requiredModule: 'employee_management',
       },
       {
         label: '權限管理',
         href: '/settings/permissions',
         icon: Shield,
-        requiredRoles: ['admin'],
+        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
       },
       {
         label: '資料來源',
         href: '/settings/data-sources',
         icon: Sheet,
-        requiredRoles: ['admin'],
+        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
       },
       {
         label: '表單管理',
         href: '/settings/form-builder',
         icon: FormInput,
-        requiredRoles: ['admin', 'manager'],
+        requiredModule: 'form_builder',
       },
       {
         label: 'Facebook 整合',
         href: '/settings/facebook',
         icon: Facebook,
-        requiredRoles: ['admin'],
+        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
       },
       {
         label: '系統設定',
         href: '/settings/system',
         icon: Settings,
         badge: '即將推出',
-        requiredRoles: ['admin'],
+        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
       },
     ],
   },
 ];
 
 /**
- * 根據使用者角色過濾側邊選單
+ * 根據使用者權限過濾側邊選單（新系統）
+ * @param userRoles - 使用者角色（用於 admin 判斷和舊系統）
+ * @param accessibleModules - 使用者可存取的權限模組 ID 列表
  */
-export function filterSidebarByRole(
-  userRoles: Role[] | null
+export function filterSidebarByPermission(
+  userRoles: Role[] | null,
+  accessibleModules: string[]
 ): SidebarSection[] {
   if (!userRoles || userRoles.length === 0) {
-    // 未登入或無角色：只顯示首頁
+    // 未登入：只顯示首頁
     return [{
       title: '主要功能',
       items: [{
@@ -319,22 +323,61 @@ export function filterSidebarByRole(
     }];
   }
 
-  // Admin 看所有選單
-  if (userRoles.includes('admin')) {
+  // Admin/super_admin 看所有選單
+  if (userRoles.includes('admin') || userRoles.includes('super_admin')) {
     return sidebarConfig;
   }
 
-  // 其他角色：根據 requiredRoles 過濾
+  // 其他使用者：根據權限模組過濾
+  return sidebarConfig.map(section => ({
+    ...section,
+    items: section.items.filter(item => {
+      // 優先檢查新系統 (requiredModule)
+      if (item.requiredModule) {
+        return accessibleModules.includes(item.requiredModule);
+      }
+
+      // 回退到舊系統 (requiredRoles) - 用於 admin 專屬工具
+      if (item.requiredRoles && item.requiredRoles.length > 0) {
+        return item.requiredRoles.some(role => userRoles.includes(role));
+      }
+
+      // 沒設定任何權限要求：全部可見
+      return true;
+    }),
+  })).filter(section => section.items.length > 0); // 過濾掉空區塊
+}
+
+/**
+ * 舊函數：向後兼容（已廢棄）
+ * @deprecated 請使用 filterSidebarByPermission
+ */
+export function filterSidebarByRole(
+  userRoles: Role[] | null
+): SidebarSection[] {
+  // 回退到舊邏輯（臨時）
+  if (!userRoles || userRoles.length === 0) {
+    return [{
+      title: '主要功能',
+      items: [{
+        label: '儀表板總覽',
+        href: '/',
+        icon: LayoutDashboard,
+      }],
+    }];
+  }
+
+  if (userRoles.includes('admin') || userRoles.includes('super_admin')) {
+    return sidebarConfig;
+  }
+
   return sidebarConfig.map(section => ({
     ...section,
     items: section.items.filter(item => {
       if (!item.requiredRoles || item.requiredRoles.length === 0) {
-        // 沒設定權限要求的項目都可以看
         return true;
       }
-
-      // 檢查使用者是否有任一必要角色
       return item.requiredRoles.some(role => userRoles.includes(role));
     }),
-  })).filter(section => section.items.length > 0); // 過濾掉空區塊
+  })).filter(section => section.items.length > 0);
 }
