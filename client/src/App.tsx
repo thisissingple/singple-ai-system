@@ -35,6 +35,7 @@ const PublicFormPage = lazy(() => import("@/pages/forms/form-share"));
 const DataSourcesPage = lazy(() => import("@/pages/settings/data-sources"));
 const FormBuilderList = lazy(() => import("@/pages/settings/form-builder-list"));
 const FormBuilderEditor = lazy(() => import("@/pages/settings/form-builder-editor"));
+const GoogleSheetsSync = lazy(() => import("@/pages/settings/google-sheets-sync"));
 const UserManagement = lazy(() => import("@/pages/settings/user-management"));
 const EmployeesPage = lazy(() => import("@/pages/settings/employees"));
 const PermissionsPage = lazy(() => import("@/pages/settings/permissions"));
@@ -173,6 +174,9 @@ function Router() {
       </Route>
       <Route path="/settings/form-builder/edit/:id">
         <ProtectedRoute><FormBuilderEditor /></ProtectedRoute>
+      </Route>
+      <Route path="/settings/google-sheets-sync">
+        <ProtectedRoute><GoogleSheetsSync /></ProtectedRoute>
       </Route>
       <Route path="/settings/users">
         <ProtectedRoute><UserManagement /></ProtectedRoute>

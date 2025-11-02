@@ -1,8 +1,9 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import { storage } from "./services/legacy/storage";
-import { googleSheetsService } from "./services/legacy/google-sheets";
+// Phase 39: Replaced old Google Sheets system with stub to prevent crashes
+// Old endpoints will return error messages directing users to new /api/sheets/* endpoints
+import { storage, googleSheetsService } from "./services/legacy-stub";
 import { autoAnalysisService } from "./services/deprecated/auto-analysis";
 import { totalReportService } from "./services/reporting/total-report-service";
 import { introspectService } from "./services/reporting/introspect-service";
@@ -4222,15 +4223,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/field-mapping/schemas/:tableName', async (req, res) => {
     try {
       const { tableName } = req.params;
-      const { SUPABASE_SCHEMAS } = await import('./services/ai-field-mapper');
-      const schema = SUPABASE_SCHEMAS[tableName];
+      const { getTableColumns } = await import('./services/reporting/introspect-service');
 
-      if (!schema) {
+      // 動態讀取資料庫欄位（支援中文欄位名稱）
+      const columns = await getTableColumns(tableName);
+
+      if (!columns || columns.length === 0) {
         return res.status(404).json({
           success: false,
-          error: `Schema not found for table: ${tableName}`
+          error: `Table not found or has no columns: ${tableName}`
         });
       }
+
+      // 轉換為前端需要的格式
+      const schema = {
+        tableName: tableName,
+        columns: columns.map(col => ({
+          name: col.column_name,
+          type: col.data_type,
+          required: col.is_nullable === 'NO',
+          description: col.column_comment || ''
+        }))
+      };
 
       res.json({
         success: true,
@@ -8325,6 +8339,284 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('儲存到知識庫失敗:', error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ===================================
+  // Google Sheets 同步 API (Phase 39)
+  // ===================================
+
+  const { GoogleSheetsAPI } = await import('./services/sheets/google-sheets-api');
+  const { SyncService } = await import('./services/sheets/sync-service');
+  const { queryDatabase: qdb, insertAndReturn: iar } = await import('./services/pg-client');
+
+  // 取得 Google Sheets 憑證
+  const getGoogleCredentials = () => {
+    if (!process.env.GOOGLE_SHEETS_CREDENTIALS) {
+      throw new Error('GOOGLE_SHEETS_CREDENTIALS not configured');
+    }
+    return process.env.GOOGLE_SHEETS_CREDENTIALS;
+  };
+
+  // ===================================
+  // 資料來源管理
+  // ===================================
+
+  // 新增資料來源
+  app.post('/api/sheets/sources', async (req, res) => {
+    try {
+      const { name, sheet_url } = req.body;
+
+      if (!name || !sheet_url) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields: name, sheet_url'
+        });
+      }
+
+      // 從 URL 解析 Sheet ID
+      const sheet_id = GoogleSheetsAPI.extractSheetId(sheet_url);
+
+      const source = await iar('google_sheets_sources', {
+        name,
+        sheet_url,
+        sheet_id
+      });
+
+      res.json({ success: true, data: source });
+    } catch (error: any) {
+      console.error('Error creating source:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 列出所有資料來源
+  app.get('/api/sheets/sources', async (req, res) => {
+    try {
+      const result = await qdb('SELECT * FROM google_sheets_sources ORDER BY created_at DESC');
+      res.json({ success: true, data: result.rows });
+    } catch (error: any) {
+      console.error('Error listing sources:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 刪除資料來源
+  app.delete('/api/sheets/sources/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      await qdb('DELETE FROM google_sheets_sources WHERE id = $1', [id]);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('Error deleting source:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // ===================================
+  // 工作表管理
+  // ===================================
+
+  // 列出工作表
+  app.get('/api/sheets/:sourceId/worksheets', async (req, res) => {
+    try {
+      const { sourceId } = req.params;
+
+      // 取得資料來源
+      const result = await qdb('SELECT * FROM google_sheets_sources WHERE id = $1', [sourceId]);
+      if (result.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'Source not found' });
+      }
+
+      const source = result.rows[0];
+      const api = new GoogleSheetsAPI(getGoogleCredentials());
+      const worksheets = await api.listWorksheets(source.sheet_id);
+
+      res.json({ success: true, data: worksheets });
+    } catch (error: any) {
+      console.error('Error listing worksheets:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 讀取工作表標題
+  app.get('/api/sheets/:sourceId/worksheets/:worksheetName/headers', async (req, res) => {
+    try {
+      const { sourceId, worksheetName } = req.params;
+
+      const result = await qdb('SELECT * FROM google_sheets_sources WHERE id = $1', [sourceId]);
+      if (result.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'Source not found' });
+      }
+
+      const source = result.rows[0];
+      const api = new GoogleSheetsAPI(getGoogleCredentials());
+      const headers = await api.getWorksheetHeaders(source.sheet_id, worksheetName);
+
+      res.json({ success: true, data: headers });
+    } catch (error: any) {
+      console.error('Error reading headers:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // ===================================
+  // 映射管理
+  // ===================================
+
+  // 建立映射
+  app.post('/api/sheets/mappings', async (req, res) => {
+    try {
+      const { source_id, worksheet_name, target_table, field_mappings } = req.body;
+
+      if (!source_id || !worksheet_name || !target_table || !field_mappings) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields'
+        });
+      }
+
+      const mapping = await iar('sheet_mappings', {
+        source_id,
+        worksheet_name,
+        target_table,
+        field_mappings: JSON.stringify(field_mappings)
+      });
+
+      res.json({ success: true, data: mapping });
+    } catch (error: any) {
+      console.error('Error creating mapping:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 列出所有映射
+  app.get('/api/sheets/mappings', async (req, res) => {
+    try {
+      const result = await qdb(`
+        SELECT
+          sm.*,
+          gs.name as source_name,
+          gs.sheet_url
+        FROM sheet_mappings sm
+        JOIN google_sheets_sources gs ON sm.source_id = gs.id
+        ORDER BY sm.created_at DESC
+      `);
+      res.json({ success: true, data: result.rows });
+    } catch (error: any) {
+      console.error('Error listing mappings:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 更新映射
+  app.put('/api/sheets/mappings/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { field_mappings, is_enabled } = req.body;
+
+      const updates: string[] = [];
+      const values: any[] = [];
+      let paramIndex = 1;
+
+      if (field_mappings !== undefined) {
+        updates.push(`field_mappings = $${paramIndex}`);
+        values.push(JSON.stringify(field_mappings));
+        paramIndex++;
+      }
+
+      if (is_enabled !== undefined) {
+        updates.push(`is_enabled = $${paramIndex}`);
+        values.push(is_enabled);
+        paramIndex++;
+      }
+
+      updates.push(`updated_at = now()`);
+      values.push(id);
+
+      await qdb(`
+        UPDATE sheet_mappings
+        SET ${updates.join(', ')}
+        WHERE id = $${paramIndex}
+      `, values);
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('Error updating mapping:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 刪除映射
+  app.delete('/api/sheets/mappings/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      await qdb('DELETE FROM sheet_mappings WHERE id = $1', [id]);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('Error deleting mapping:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // ===================================
+  // 同步功能
+  // ===================================
+
+  // 手動同步
+  app.post('/api/sheets/sync/:mappingId', async (req, res) => {
+    try {
+      const { mappingId } = req.params;
+
+      const syncService = new SyncService(getGoogleCredentials());
+      await syncService.syncMapping(mappingId);
+
+      res.json({ success: true, message: 'Sync completed successfully' });
+    } catch (error: any) {
+      console.error('Error syncing:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 同步歷史記錄
+  app.get('/api/sheets/logs', async (req, res) => {
+    try {
+      const result = await qdb(`
+        SELECT
+          sl.*,
+          sm.worksheet_name,
+          sm.target_table,
+          gs.name as source_name
+        FROM sync_logs sl
+        JOIN sheet_mappings sm ON sl.mapping_id = sm.id
+        JOIN google_sheets_sources gs ON sm.source_id = gs.id
+        ORDER BY sl.synced_at DESC
+        LIMIT 100
+      `);
+      res.json({ success: true, data: result.rows });
+    } catch (error: any) {
+      console.error('Error fetching logs:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 取得表格欄位 (用於欄位映射)
+  app.get('/api/database/tables/:tableName/columns', async (req, res) => {
+    try {
+      const { tableName } = req.params;
+
+      const result = await qdb(`
+        SELECT column_name as name, data_type as type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = $1
+        ORDER BY ordinal_position
+      `, [tableName]);
+
+      res.json({ success: true, data: result.rows });
+    } catch (error: any) {
+      console.error('Error fetching table columns:', error);
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 

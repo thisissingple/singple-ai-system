@@ -6,7 +6,7 @@
 import { google } from 'googleapis';
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
-import { storage } from '../legacy-stub';
+import { storage } from '../legacy/storage';
 
 interface FieldAnalysis {
   name: string;

@@ -3,7 +3,7 @@
  * 負責整合 Google Sheets 資料，產生數據總報表
  */
 
-import { storage } from '../legacy-stub';
+import { storage } from '../legacy/storage';
 import { subDays, subWeeks, subMonths, startOfWeek, endOfWeek, startOfMonth, endOfMonth, format, eachDayOfInterval, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
 import { findField, extractStandardFields } from './field-mapping';
 import { resolveField, parseDateField, parseNumberField, FIELD_ALIASES } from './field-mapping-v2';

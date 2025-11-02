@@ -3,7 +3,8 @@
  * Provides test data for Total Report in development mode
  */
 
-import { storage, googleSheetsService } from '../legacy-stub';
+import { storage } from '../legacy/storage';
+import { googleSheetsService } from '../legacy/google-sheets';
 import { randomUUID } from 'crypto';
 import { supabaseReportRepository } from '../reporting/supabase-report-repository';
 import { isSupabaseAvailable } from '../supabase-client';

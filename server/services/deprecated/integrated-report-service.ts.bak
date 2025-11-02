@@ -1,4 +1,4 @@
-import { storage } from '../legacy-stub';
+import { storage } from '../legacy/storage';
 import { randomUUID } from 'crypto';
 
 interface GenerateReportRequest {

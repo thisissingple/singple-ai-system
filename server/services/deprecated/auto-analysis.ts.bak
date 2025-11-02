@@ -1,4 +1,5 @@
-import { storage, googleSheetsService } from '../legacy-stub';
+import { storage } from '../legacy/storage';
+import { googleSheetsService } from '../legacy/google-sheets';
 import type { Worksheet } from '@shared/schema';
 
 export interface ColumnAnalysis {

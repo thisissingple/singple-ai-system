@@ -3,7 +3,7 @@
  * Manages custom formulas and settings for report metrics
  */
 
-import { storage } from '../legacy-stub';
+import { storage } from '../legacy/storage';
 import { ReportMetricConfig, DEFAULT_METRIC_CONFIGS } from '../../../configs/report-metric-defaults';
 
 export class ReportMetricConfigService {

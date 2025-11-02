@@ -8,7 +8,7 @@
  * - 型別轉換
  */
 
-import { storage } from '../legacy-stub';
+import { storage } from '../legacy/storage';
 import {
   SheetFieldMapping,
   SheetType,

@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import dotenv from "dotenv";
 import { startAutoAnalyzer, stopAutoAnalyzer } from "./services/teaching-quality-auto-analyzer";
+import { startScheduler, stopScheduler } from "./services/sheets/scheduler";
 
 /**
  * Load environment variables from .env file
@@ -30,12 +31,14 @@ console.log(`   PORT: ${process.env.PORT || 'not set'}`);
 process.on('SIGTERM', () => {
   log('Received SIGTERM, shutting down gracefully...');
   stopAutoAnalyzer();
+  stopScheduler();
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
   log('Received SIGINT, shutting down gracefully...');
   stopAutoAnalyzer();
+  stopScheduler();
   process.exit(0);
 });
 
@@ -106,5 +109,12 @@ app.use((req, res, next) => {
     // Auto-analyzer disabled due to database connection mode incompatibility
     // Transaction mode pooler doesn't support features needed by auto-analyzer
     // startAutoAnalyzer();
+
+    // Start Google Sheets sync scheduler
+    if (process.env.GOOGLE_SHEETS_CREDENTIALS) {
+      startScheduler(process.env.GOOGLE_SHEETS_CREDENTIALS);
+    } else {
+      console.log('⚠️  Google Sheets scheduler not started (GOOGLE_SHEETS_CREDENTIALS not configured)');
+    }
   });
 })();

@@ -4,6 +4,7 @@
  */
 
 import { getSupabaseClient } from '../supabase-client';
+import { insertAndReturn } from '../pg-client';
 import type { IStorage } from './storage';
 import type {
   Spreadsheet, InsertSpreadsheet,
@@ -180,26 +181,24 @@ class SupabaseStorage implements IStorage {
       spreadsheetId: spreadsheet.spreadsheetId
     });
 
-    const { data, error } = await this.supabase.from('spreadsheets').insert({
-      name: spreadsheet.name, spreadsheet_id: spreadsheet.spreadsheetId,
-      spreadsheet_url: (spreadsheet as any).spreadsheetUrl,
-      range: spreadsheet.range || 'A1:Z1000',
-      owner_user_id: (spreadsheet as any).ownerUserId,
-      headers: spreadsheet.headers, row_count: spreadsheet.rowCount || 0,
-      sync_status: 'pending',
-    }).select().single();
+    // 使用 pg 直接連線（避免 Supabase schema cache 問題）
+    const data = await insertAndReturn(
+      'spreadsheets',
+      {
+        name: spreadsheet.name,
+        spreadsheet_id: spreadsheet.spreadsheetId,
+        spreadsheet_url: (spreadsheet as any).spreadsheetUrl,
+        range: spreadsheet.range || 'A1:Z1000',
+        owner_user_id: (spreadsheet as any).ownerUserId,
+        headers: spreadsheet.headers ? JSON.stringify(spreadsheet.headers) : null,
+        row_count: spreadsheet.rowCount || 0,
+        sync_status: 'pending',
+      }
+    );
 
-    console.log('📊 Supabase insert result:', { data, error });
-
-    if (error) throw new Error(`Failed to create spreadsheet: ${error.message}`);
-
-    if (!data) {
-      console.error('❌ No data returned from Supabase insert!');
-      throw new Error('No data returned from database');
-    }
+    console.log('✅ Spreadsheet created:', data);
 
     const mapped = this.mapSpreadsheet(data);
-    console.log('✅ Mapped spreadsheet:', mapped);
     return mapped;
   }
 

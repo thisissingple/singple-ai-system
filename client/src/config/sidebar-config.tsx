@@ -27,6 +27,7 @@ import {
   BookOpen,
   MessageSquare,
   Shield,
+  RefreshCw,
 } from 'lucide-react';
 import { SidebarSectionConfig } from '@/components/layout/sidebar';
 import type { Role } from './permissions';
@@ -300,6 +301,12 @@ export const sidebarConfig: SidebarSection[] = [
         href: '/settings/form-builder',
         icon: FormInput,
         requiredModule: 'form_builder',
+      },
+      {
+        label: 'Google Sheets 同步',
+        href: '/settings/google-sheets-sync',
+        icon: RefreshCw,
+        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
       },
       {
         label: 'Facebook 整合',
