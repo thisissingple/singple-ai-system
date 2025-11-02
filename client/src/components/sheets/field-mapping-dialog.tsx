@@ -117,8 +117,9 @@ export function FieldMappingDialog({
     try {
       const response = await fetch(`/api/database/tables/${selectedTable}/columns`);
       const data = await response.json();
-      if (data.success) {
-        setSupabaseColumns(data.data.map((col: any) => col.name));
+      // API 回傳格式: { columns: [{ column_name, data_type, ... }] }
+      if (data.columns) {
+        setSupabaseColumns(data.columns.map((col: any) => col.column_name));
       }
     } catch (error) {
       console.error('載入 Supabase 欄位失敗:', error);

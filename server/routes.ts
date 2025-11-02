@@ -8600,25 +8600,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // 取得表格欄位 (用於欄位映射)
-  app.get('/api/database/tables/:tableName/columns', async (req, res) => {
-    try {
-      const { tableName } = req.params;
-
-      const result = await qdb(`
-        SELECT column_name as name, data_type as type
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = $1
-        ORDER BY ordinal_position
-      `, [tableName]);
-
-      res.json({ success: true, data: result.rows });
-    } catch (error: any) {
-      console.error('Error fetching table columns:', error);
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
+  // 注意: /api/database/tables/:tableName/columns 端點已經在 5950 行定義
+  // 回傳格式: { columns: [{ column_name, data_type, ... }] }
 
   return httpServer;
 }
