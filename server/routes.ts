@@ -8563,15 +8563,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 同步功能
   // ===================================
 
-  // 手動同步
+  // 手動同步 (with SSE progress)
   app.post('/api/sheets/sync/:mappingId', async (req, res) => {
     try {
       const { mappingId } = req.params;
 
-      const syncService = new SyncService(getGoogleCredentials());
-      await syncService.syncMapping(mappingId);
+      // 如果客戶端要求 SSE (Server-Sent Events),使用串流回應
+      const acceptHeader = req.headers.accept || '';
+      if (acceptHeader.includes('text/event-stream')) {
+        // 設定 SSE headers
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        });
 
-      res.json({ success: true, message: 'Sync completed successfully' });
+        // 建立 SyncService 並傳入進度 callback
+        const syncService = new SyncService(getGoogleCredentials(), (progress) => {
+          // 發送進度更新
+          res.write(`data: ${JSON.stringify(progress)}\n\n`);
+        });
+
+        try {
+          await syncService.syncMapping(mappingId);
+          res.write('data: {"stage":"completed"}\n\n');
+          res.end();
+        } catch (error: any) {
+          res.write(`data: ${JSON.stringify({ stage: 'failed', message: error.message })}\n\n`);
+          res.end();
+        }
+      } else {
+        // 一般 POST 請求 (無進度更新)
+        const syncService = new SyncService(getGoogleCredentials());
+        await syncService.syncMapping(mappingId);
+        res.json({ success: true, message: 'Sync completed successfully' });
+      }
     } catch (error: any) {
       console.error('Error syncing:', error);
       res.status(500).json({ success: false, error: error.message });
