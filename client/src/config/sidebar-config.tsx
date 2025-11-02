@@ -303,7 +303,7 @@ export const sidebarConfig: SidebarSection[] = [
         requiredModule: 'form_builder',
       },
       {
-        label: 'Google Sheets 同步',
+        label: 'Google Sheets 串接 2.0',
         href: '/settings/google-sheets-sync',
         icon: RefreshCw,
         requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
