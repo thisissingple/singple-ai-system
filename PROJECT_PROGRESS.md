@@ -1,11 +1,11 @@
 # 📊 專案進度追蹤文檔
 
-> **最後更新**: 2025-10-31
+> **最後更新**: 2025-11-02
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: 📋 Phase 38 規劃中 - Google Sheets 自訂欄位映射同步
-> **當前階段**: CRM (Lead Connector) → Google Sheets → Supabase 同步優化
-> **今日進度**: 完成 Google Sheets 同步功能診斷、建立詳細實作計劃 (GOOGLE_SHEETS_SYNC_PLAN.md)
-> **整體進度**: 99.6% ████████████████████
+> **專案狀態**: 🔄 Phase 39 規劃中 - Google Sheets 同步系統重構
+> **當前階段**: 重新設計極簡 Google Sheets → Supabase 同步架構
+> **今日進度**: 完成舊系統診斷、確認新需求、設計新架構方案
+> **整體進度**: 99.7% ████████████████████
 
 ---
 
@@ -5275,6 +5275,609 @@ eods_for_closers: {
 
 ---
 
-**最後更新時間**: 2025-10-31
-**當前狀態**: Phase 38 規劃完成，待明天執行 📋
-**下一階段**: Google Sheets 同步實作（預計 2025-11-01）
+## 📋 Phase 39: Google Sheets 同步系統重構（2025-11-02）
+
+### 🎯 階段目標
+
+**重新設計並建立全新的 Google Sheets 同步系統**，取代舊有的複雜架構，提供簡單、可靠、易維護的同步功能。
+
+### 📊 背景與動機
+
+#### 舊系統問題診斷（2025-11-02 上午）
+
+**問題 1: Supabase Schema Cache 失效**
+```
+Error: Could not find the table 'public.spreadsheets' in the schema cache
+```
+- 舊系統依賴 Supabase PostgREST API
+- Schema Cache 無法識別 `spreadsheets` 表
+- 導致無法建立新的 Google Sheets 資料來源
+
+**問題 2: 資料表不存在**
+```
+error: relation "spreadsheets" does not exist
+```
+- Migration `000_drop_old_tables.sql` 刪除了 spreadsheets 表
+- 後續 migration 未正確重建
+- 舊系統依賴的表結構已不存在
+
+**問題 3: 架構過於複雜**
+- `server/services/legacy/` 資料夾包含 10+ 個舊服務
+- `server/services/etl/` ETL 流程過於複雜
+- 多層抽象導致難以維護和除錯
+- AI 欄位映射功能依賴 hardcoded SUPABASE_SCHEMAS
+
+#### 用戶需求確認
+
+經與用戶討論，確認新系統需求如下：
+
+1. **資料流向**: CRM (Lead Connector) → Google Sheets → Supabase
+2. **同步方式**: 定時自動同步 + 手動同步按鈕
+3. **欄位映射**: 手動選擇映射（不使用 AI，但保留未來擴展性）
+4. **目標表格**: 支援多個 Supabase 表（eods_for_closers + 其他）
+5. **UI 需求**: 前端 UI 完整設定介面
+
+### 🏗️ 新架構設計
+
+#### 核心概念
+
+```
+一個 Google Sheet = 一個資料來源
+一個 Worksheet = 映射到一個 Supabase 表
+手動設定欄位映射
+手動同步 + 定時自動同步
+```
+
+#### 資料表結構（極簡設計）
+
+```sql
+-- 1. Google Sheets 資料來源
+CREATE TABLE google_sheets_sources (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  sheet_url TEXT NOT NULL,
+  sheet_id TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 2. 工作表映射設定
+CREATE TABLE sheet_mappings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_id UUID REFERENCES google_sheets_sources(id) ON DELETE CASCADE,
+  worksheet_name TEXT NOT NULL,
+  target_table TEXT NOT NULL,
+  field_mappings JSONB NOT NULL DEFAULT '[]',
+  -- field_mappings 格式: [{ googleColumn: "姓名", supabaseColumn: "student_name" }, ...]
+  is_enabled BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(source_id, worksheet_name)
+);
+
+-- 3. 同步歷史記錄
+CREATE TABLE sync_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  mapping_id UUID REFERENCES sheet_mappings(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK (status IN ('success', 'failed', 'running')),
+  records_synced INTEGER DEFAULT 0,
+  error_message TEXT,
+  synced_at TIMESTAMPTZ DEFAULT now()
+);
+```
+
+#### API 端點設計（極簡）
+
+**資料來源管理**:
+```
+POST   /api/sheets/sources          # 新增資料來源
+GET    /api/sheets/sources          # 列出所有資料來源
+DELETE /api/sheets/sources/:id      # 刪除資料來源
+```
+
+**映射設定**:
+```
+GET    /api/sheets/:id/worksheets   # 取得工作表列表（從 Google Sheets API）
+POST   /api/sheets/mappings         # 建立映射
+GET    /api/sheets/mappings         # 列出所有映射
+PUT    /api/sheets/mappings/:id     # 更新映射（包含欄位映射）
+DELETE /api/sheets/mappings/:id     # 刪除映射
+```
+
+**同步功能**:
+```
+POST   /api/sheets/sync/:mappingId  # 手動同步
+GET    /api/sheets/logs             # 同步歷史
+```
+
+#### 後端服務架構
+
+```
+server/services/sheets/
+├── google-sheets-api.ts       # Google Sheets API 整合（讀取資料）
+├── sync-service.ts            # 同步邏輯（核心業務邏輯）
+└── scheduler.ts               # 定時同步排程器
+```
+
+**google-sheets-api.ts**:
+- `listWorksheets(sheetId)` - 列出所有工作表
+- `getWorksheetData(sheetId, worksheetName)` - 讀取工作表資料
+- `getWorksheetHeaders(sheetId, worksheetName)` - 讀取欄位標題
+
+**sync-service.ts**:
+- `syncMapping(mappingId)` - 執行同步
+- `transformData(rawData, fieldMappings)` - 轉換資料
+- `loadToSupabase(table, data)` - 寫入 Supabase
+
+**scheduler.ts**:
+- `startScheduler()` - 啟動定時同步
+- `stopScheduler()` - 停止定時同步
+- 每天固定時間自動同步所有 `is_enabled = true` 的映射
+
+#### 前端頁面設計
+
+```
+/settings/google-sheets
+├─ 資料來源列表
+│  ├─ 新增資料來源按鈕
+│  └─ 每個資料來源卡片
+│     ├─ 名稱、URL
+│     ├─ 編輯/刪除按鈕
+│     └─ 工作表映射列表
+│
+├─ 欄位映射設定對話框
+│  ├─ 選擇目標 Supabase 表
+│  ├─ Google Sheets 欄位 → Supabase 欄位下拉選單
+│  └─ 儲存映射按鈕
+│
+└─ 同步歷史表格
+   ├─ 時間、狀態、同步筆數
+   └─ 錯誤訊息（如有）
+```
+
+### 📋 實作計劃
+
+#### Step 1: 清理舊程式碼（5 分鐘）
+
+**移動到 archive/**:
+```bash
+mv server/services/legacy/ archive/services-legacy-2025-11-02/
+mv server/services/etl/ archive/services-etl-2025-11-02/
+```
+
+**移除舊 configs**:
+```bash
+mv configs/sheet-field-mappings-complete.ts archive/
+mv configs/sheet-mapping-defaults.ts archive/
+mv configs/supabase-columns.ts archive/
+mv configs/supabase-schema-authority.ts archive/
+```
+
+**保留**（仍需使用）:
+- `server/services/pg-client.ts` - PostgreSQL 直接連線
+- `server/services/reporting/introspect-service.ts` - 讀取表格欄位
+- `server/services/ai-field-mapper.ts` - 未來可能會用
+
+**移除舊 API endpoints**:
+- 刪除 `routes.ts` 中所有 `/api/spreadsheets/*` 端點
+- 刪除 `/api/worksheets/*` 端點
+- 刪除 `/api/field-mapping/*` 端點（除了 schemas 端點）
+
+#### Step 2: 建立新資料表（5 分鐘）
+
+**建立 Migration**:
+```bash
+touch supabase/migrations/045_create_google_sheets_sync.sql
+```
+
+**Migration 內容**:
+```sql
+-- 移除舊表（如果存在）
+DROP TABLE IF EXISTS sync_logs CASCADE;
+DROP TABLE IF EXISTS sheet_mappings CASCADE;
+DROP TABLE IF EXISTS google_sheets_sources CASCADE;
+
+-- 建立新表
+CREATE TABLE google_sheets_sources (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  sheet_url TEXT NOT NULL,
+  sheet_id TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE sheet_mappings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_id UUID REFERENCES google_sheets_sources(id) ON DELETE CASCADE,
+  worksheet_name TEXT NOT NULL,
+  target_table TEXT NOT NULL,
+  field_mappings JSONB NOT NULL DEFAULT '[]',
+  is_enabled BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(source_id, worksheet_name)
+);
+
+CREATE TABLE sync_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  mapping_id UUID REFERENCES sheet_mappings(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK (status IN ('success', 'failed', 'running')),
+  records_synced INTEGER DEFAULT 0,
+  error_message TEXT,
+  synced_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 索引
+CREATE INDEX idx_sheet_mappings_source ON sheet_mappings(source_id);
+CREATE INDEX idx_sheet_mappings_enabled ON sheet_mappings(is_enabled);
+CREATE INDEX idx_sync_logs_mapping ON sync_logs(mapping_id);
+CREATE INDEX idx_sync_logs_time ON sync_logs(synced_at DESC);
+
+-- 權限
+GRANT ALL ON google_sheets_sources TO authenticated;
+GRANT ALL ON sheet_mappings TO authenticated;
+GRANT ALL ON sync_logs TO authenticated;
+```
+
+**執行 Migration**:
+- 在 Supabase Dashboard 執行
+- 或使用 Supabase CLI: `supabase db push`
+
+#### Step 3: 後端服務實作（30-45 分鐘）
+
+**3.1 Google Sheets API 服務** (`server/services/sheets/google-sheets-api.ts`):
+```typescript
+import { google } from 'googleapis';
+
+export class GoogleSheetsAPI {
+  private sheets;
+
+  constructor(credentials: any) {
+    const auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
+    });
+    this.sheets = google.sheets({ version: 'v4', auth });
+  }
+
+  async listWorksheets(sheetId: string) {
+    const response = await this.sheets.spreadsheets.get({ spreadsheetId: sheetId });
+    return response.data.sheets?.map(s => s.properties?.title) || [];
+  }
+
+  async getWorksheetData(sheetId: string, worksheetName: string) {
+    const response = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${worksheetName}!A1:ZZ`,
+    });
+    return response.data.values || [];
+  }
+
+  async getWorksheetHeaders(sheetId: string, worksheetName: string) {
+    const data = await this.getWorksheetData(sheetId, worksheetName);
+    return data[0] || [];
+  }
+}
+```
+
+**3.2 同步服務** (`server/services/sheets/sync-service.ts`):
+```typescript
+import { GoogleSheetsAPI } from './google-sheets-api';
+import { insertAndReturn, queryDatabase } from '../pg-client';
+
+export class SyncService {
+  private api: GoogleSheetsAPI;
+
+  constructor(credentials: any) {
+    this.api = new GoogleSheetsAPI(credentials);
+  }
+
+  async syncMapping(mappingId: string) {
+    // 1. 讀取映射設定
+    const mapping = await this.getMapping(mappingId);
+
+    // 2. 從 Google Sheets 讀取資料
+    const rawData = await this.api.getWorksheetData(
+      mapping.sheet_id,
+      mapping.worksheet_name
+    );
+
+    // 3. 轉換資料
+    const transformedData = this.transformData(rawData, mapping.field_mappings);
+
+    // 4. 寫入 Supabase
+    await this.loadToSupabase(mapping.target_table, transformedData);
+
+    // 5. 記錄同步日誌
+    await this.logSync(mappingId, 'success', transformedData.length);
+  }
+
+  transformData(rawData: any[][], fieldMappings: any[]) {
+    const [headers, ...rows] = rawData;
+
+    return rows.map(row => {
+      const record: any = {};
+      fieldMappings.forEach(mapping => {
+        const googleIndex = headers.indexOf(mapping.googleColumn);
+        if (googleIndex >= 0) {
+          record[mapping.supabaseColumn] = row[googleIndex];
+        }
+      });
+      return record;
+    });
+  }
+
+  async loadToSupabase(table: string, data: any[]) {
+    // 使用 pg-client 直接寫入
+    for (const record of data) {
+      await insertAndReturn(table, record);
+    }
+  }
+}
+```
+
+**3.3 定時排程器** (`server/services/sheets/scheduler.ts`):
+```typescript
+import cron from 'node-cron';
+import { SyncService } from './sync-service';
+
+let scheduledTask: any = null;
+
+export function startScheduler(credentials: any) {
+  // 每天凌晨 2:00 執行
+  scheduledTask = cron.schedule('0 2 * * *', async () => {
+    console.log('🔄 Starting scheduled Google Sheets sync...');
+
+    const syncService = new SyncService(credentials);
+    const mappings = await getEnabledMappings();
+
+    for (const mapping of mappings) {
+      try {
+        await syncService.syncMapping(mapping.id);
+        console.log(`✅ Synced: ${mapping.worksheet_name}`);
+      } catch (error) {
+        console.error(`❌ Failed: ${mapping.worksheet_name}`, error);
+      }
+    }
+  });
+}
+
+export function stopScheduler() {
+  if (scheduledTask) {
+    scheduledTask.stop();
+  }
+}
+```
+
+**3.4 API Routes** (`server/routes.ts`):
+```typescript
+// 資料來源管理
+app.post('/api/sheets/sources', async (req, res) => {
+  const { name, sheet_url, sheet_id } = req.body;
+  const source = await insertAndReturn('google_sheets_sources', {
+    name, sheet_url, sheet_id
+  });
+  res.json({ success: true, data: source });
+});
+
+app.get('/api/sheets/sources', async (req, res) => {
+  const sources = await queryDatabase('SELECT * FROM google_sheets_sources');
+  res.json({ success: true, data: sources.rows });
+});
+
+// 映射管理
+app.post('/api/sheets/mappings', async (req, res) => {
+  const { source_id, worksheet_name, target_table, field_mappings } = req.body;
+  const mapping = await insertAndReturn('sheet_mappings', {
+    source_id, worksheet_name, target_table,
+    field_mappings: JSON.stringify(field_mappings)
+  });
+  res.json({ success: true, data: mapping });
+});
+
+// 手動同步
+app.post('/api/sheets/sync/:mappingId', async (req, res) => {
+  const { mappingId } = req.params;
+  const syncService = new SyncService(googleCredentials);
+  await syncService.syncMapping(mappingId);
+  res.json({ success: true });
+});
+```
+
+#### Step 4: 前端實作（30-45 分鐘）
+
+**4.1 Google Sheets 設定頁面** (`client/src/pages/settings/google-sheets.tsx`):
+```tsx
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card } from '@/components/ui/card';
+
+export default function GoogleSheetsPage() {
+  const [sources, setSources] = useState([]);
+  const [newSourceUrl, setNewSourceUrl] = useState('');
+
+  const addSource = async () => {
+    const response = await fetch('/api/sheets/sources', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'My Sheet',
+        sheet_url: newSourceUrl,
+        sheet_id: extractSheetId(newSourceUrl)
+      })
+    });
+    const result = await response.json();
+    setSources([...sources, result.data]);
+  };
+
+  return (
+    <div>
+      <h1>Google Sheets 資料來源</h1>
+
+      <div className="add-source">
+        <Input
+          placeholder="貼上 Google Sheets URL"
+          value={newSourceUrl}
+          onChange={(e) => setNewSourceUrl(e.target.value)}
+        />
+        <Button onClick={addSource}>新增</Button>
+      </div>
+
+      <div className="sources-list">
+        {sources.map(source => (
+          <Card key={source.id}>
+            <h3>{source.name}</h3>
+            <p>{source.sheet_url}</p>
+            <Button onClick={() => openMappingDialog(source)}>
+              設定映射
+            </Button>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+**4.2 欄位映射對話框** (`client/src/components/sheets/mapping-dialog.tsx`):
+```tsx
+import { Select } from '@/components/ui/select';
+
+export function MappingDialog({ source, worksheet, onSave }) {
+  const [supabaseTables, setSupabaseTables] = useState([]);
+  const [selectedTable, setSelectedTable] = useState('');
+  const [googleHeaders, setGoogleHeaders] = useState([]);
+  const [supabaseColumns, setSupabaseColumns] = useState([]);
+  const [mappings, setMappings] = useState([]);
+
+  // 載入可用的 Supabase 表
+  useEffect(() => {
+    fetch('/api/database/tables').then(r => r.json()).then(d => {
+      setSupabaseTables(d.data);
+    });
+  }, []);
+
+  // 載入 Google Sheets 欄位
+  useEffect(() => {
+    fetch(`/api/sheets/${source.id}/worksheets/${worksheet}/headers`)
+      .then(r => r.json())
+      .then(d => setGoogleHeaders(d.data));
+  }, []);
+
+  // 載入 Supabase 欄位
+  useEffect(() => {
+    if (selectedTable) {
+      fetch(`/api/database/tables/${selectedTable}/columns`)
+        .then(r => r.json())
+        .then(d => setSupabaseColumns(d.data));
+    }
+  }, [selectedTable]);
+
+  return (
+    <Dialog>
+      <DialogContent>
+        <h2>欄位映射設定</h2>
+
+        <Select value={selectedTable} onChange={setSelectedTable}>
+          {supabaseTables.map(t => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </Select>
+
+        <div className="mappings">
+          {googleHeaders.map(googleCol => (
+            <div key={googleCol} className="mapping-row">
+              <span>{googleCol}</span>
+              <span>→</span>
+              <Select>
+                {supabaseColumns.map(col => (
+                  <option key={col.name} value={col.name}>
+                    {col.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          ))}
+        </div>
+
+        <Button onClick={saveMappings}>儲存映射</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+```
+
+### 📦 將建立/修改的檔案
+
+#### 新建檔案
+1. 📄 `supabase/migrations/045_create_google_sheets_sync.sql` - 新資料表
+2. 📄 `server/services/sheets/google-sheets-api.ts` - Google Sheets API 整合
+3. 📄 `server/services/sheets/sync-service.ts` - 同步服務
+4. 📄 `server/services/sheets/scheduler.ts` - 定時排程器
+5. 📄 `client/src/pages/settings/google-sheets.tsx` - 前端設定頁面
+6. 📄 `client/src/components/sheets/mapping-dialog.tsx` - 映射對話框
+7. 📄 `docs/GOOGLE_SHEETS_SYNC_V2.md` - 新系統文件
+
+#### 修改檔案
+1. ✏️ `server/routes.ts` - 新增 9 個 API endpoints
+2. ✏️ `server/index.ts` - 啟動排程器
+3. ✏️ `client/src/config/sidebar-config.ts` - 新增選單項目
+
+#### 移動到 archive/
+1. 📦 `server/services/legacy/` → `archive/services-legacy-2025-11-02/`
+2. 📦 `server/services/etl/` → `archive/services-etl-2025-11-02/`
+3. 📦 `configs/sheet-*.ts` → `archive/configs-2025-11-02/`
+
+### ✅ 完成後功能
+
+#### 核心功能
+- ✅ 新增/刪除 Google Sheets 資料來源
+- ✅ 自動讀取工作表列表
+- ✅ 手動設定欄位映射（Google Sheets 欄位 → Supabase 欄位）
+- ✅ 手動同步按鈕
+- ✅ 定時自動同步（每天凌晨 2:00）
+- ✅ 同步歷史記錄
+
+#### 優勢
+- 🚀 架構極簡，易於維護
+- 🔧 使用 pg 直接連線，避免 Schema Cache 問題
+- 📊 支援多個 Supabase 表
+- 🎨 完整的前端 UI
+- 📝 詳細的同步日誌
+- 🔄 可擴展（未來可加入 AI 映射）
+
+### 🎯 成功標準
+
+- [ ] 舊程式碼成功移到 archive/
+- [ ] 新資料表建立成功
+- [ ] Google Sheets API 可正常讀取資料
+- [ ] 手動映射功能正常運作
+- [ ] 手動同步可成功寫入 Supabase
+- [ ] 定時同步每天自動執行
+- [ ] 前端 UI 完整可用
+
+### 📝 注意事項
+
+1. **Google Sheets API 配額**
+   - 免費版每日 300 次請求
+   - 需注意不要頻繁同步
+
+2. **資料安全**
+   - 確保 Google Sheets 權限正確設定
+   - 敏感資料不要放在 Google Sheets
+
+3. **錯誤處理**
+   - 網路錯誤自動重試
+   - 記錄詳細錯誤訊息到 sync_logs
+
+4. **性能考量**
+   - 大量資料使用批次插入
+   - 考慮增量同步（只同步變更資料）
+
+---
+
+**最後更新時間**: 2025-11-02
+**當前狀態**: Phase 39 規劃完成，待晚點執行 📋
+**下一階段**: Google Sheets 同步系統實作（預計 2025-11-02 晚上）
