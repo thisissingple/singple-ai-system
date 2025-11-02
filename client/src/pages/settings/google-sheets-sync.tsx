@@ -7,7 +7,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Trash2, Settings, RefreshCw, ExternalLink } from 'lucide-react';
+import { Plus, Trash2, Settings, RefreshCw, ExternalLink, Edit } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { CreateSourceDialog } from '@/components/sheets/create-source-dialog';
 import { FieldMappingDialog } from '@/components/sheets/field-mapping-dialog';
@@ -183,9 +183,17 @@ export default function GoogleSheetsSync() {
     };
   };
 
-  // 設定映射
+  // 設定映射 (新增映射)
   const handleConfigureMapping = (sourceId: string) => {
     setSelectedSource(sourceId);
+    setSelectedMapping(null); // 清空選中的映射,表示新增模式
+    setMappingDialogOpen(true);
+  };
+
+  // 編輯映射
+  const handleEditMapping = (mapping: SheetMapping) => {
+    setSelectedSource(mapping.source_id);
+    setSelectedMapping(mapping.id); // 設定選中的映射,表示編輯模式
     setMappingDialogOpen(true);
   };
 
@@ -293,14 +301,24 @@ export default function GoogleSheetsSync() {
                             </p>
                           </div>
 
-                          <Button
-                            size="sm"
-                            onClick={() => handleManualSync(mapping.id)}
-                            disabled={!mapping.is_enabled}
-                          >
-                            <RefreshCw className="w-4 h-4 mr-2" />
-                            手動同步
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEditMapping(mapping)}
+                            >
+                              <Edit className="w-4 h-4 mr-2" />
+                              編輯
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() => handleManualSync(mapping.id)}
+                              disabled={!mapping.is_enabled}
+                            >
+                              <RefreshCw className="w-4 h-4 mr-2" />
+                              手動同步
+                            </Button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -339,6 +357,7 @@ export default function GoogleSheetsSync() {
           open={mappingDialogOpen}
           onOpenChange={setMappingDialogOpen}
           sourceId={selectedSource}
+          mappingId={selectedMapping}
           onSuccess={() => {
             loadMappings();
             setMappingDialogOpen(false);

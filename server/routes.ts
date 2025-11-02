@@ -8509,6 +8509,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // 取得單一映射
+  app.get('/api/sheets/mappings/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const result = await qdb(`
+        SELECT
+          sm.*,
+          gs.name as source_name,
+          gs.sheet_url,
+          gs.sheet_id
+        FROM sheet_mappings sm
+        JOIN google_sheets_sources gs ON sm.source_id = gs.id
+        WHERE sm.id = $1
+      `, [id]);
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'Mapping not found' });
+      }
+
+      res.json({ success: true, data: result.rows[0] });
+    } catch (error: any) {
+      console.error('Error getting mapping:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // 更新映射
   app.put('/api/sheets/mappings/:id', async (req, res) => {
     try {

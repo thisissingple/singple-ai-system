@@ -28,6 +28,7 @@ interface FieldMappingDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sourceId: string;
+  mappingId?: string | null; // 如果有 mappingId 表示編輯模式,否則為新增模式
   onSuccess: () => void;
 }
 
@@ -40,6 +41,7 @@ export function FieldMappingDialog({
   open,
   onOpenChange,
   sourceId,
+  mappingId,
   onSuccess,
 }: FieldMappingDialogProps) {
   const [worksheets, setWorksheets] = useState<string[]>([]);
@@ -51,6 +53,7 @@ export function FieldMappingDialog({
   const [mappings, setMappings] = useState<FieldMapping[]>([]);
   const [isEnabled, setIsEnabled] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
   const { toast } = useToast();
 
   // 載入工作表列表
@@ -58,8 +61,17 @@ export function FieldMappingDialog({
     if (open && sourceId) {
       loadWorksheets();
       loadTables();
+
+      // 如果是編輯模式,載入現有映射資料
+      if (mappingId) {
+        setIsEditMode(true);
+        loadExistingMapping(mappingId);
+      } else {
+        setIsEditMode(false);
+        resetForm();
+      }
     }
-  }, [open, sourceId]);
+  }, [open, sourceId, mappingId]);
 
   // 當選擇工作表時,載入欄位
   useEffect(() => {
@@ -126,6 +138,40 @@ export function FieldMappingDialog({
     }
   };
 
+  // 載入現有映射資料 (編輯模式)
+  const loadExistingMapping = async (id: string) => {
+    try {
+      setLoading(true);
+      const response = await fetch(`/api/sheets/mappings/${id}`);
+      const data = await response.json();
+
+      if (data.success) {
+        const mapping = data.data;
+        setSelectedWorksheet(mapping.worksheet_name);
+        setSelectedTable(mapping.target_table);
+        setMappings(mapping.field_mappings || []);
+        setIsEnabled(mapping.is_enabled);
+      }
+    } catch (error) {
+      console.error('載入映射資料失敗:', error);
+      toast({
+        title: '載入失敗',
+        description: '無法載入映射資料',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 重置表單 (新增模式)
+  const resetForm = () => {
+    setSelectedWorksheet('');
+    setSelectedTable('');
+    setMappings([]);
+    setIsEnabled(true);
+  };
+
   const handleAddMapping = () => {
     setMappings([...mappings, { googleColumn: '', supabaseColumn: '' }]);
   };
@@ -177,30 +223,42 @@ export function FieldMappingDialog({
     setLoading(true);
 
     try {
-      const response = await fetch('/api/sheets/mappings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_id: sourceId,
-          worksheet_name: selectedWorksheet,
-          target_table: selectedTable,
-          field_mappings: mappings,
-          is_enabled: isEnabled,
-        }),
-      });
+      let response;
+
+      if (isEditMode && mappingId) {
+        // 編輯模式: PUT 更新
+        response = await fetch(`/api/sheets/mappings/${mappingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            field_mappings: mappings,
+            is_enabled: isEnabled,
+          }),
+        });
+      } else {
+        // 新增模式: POST 建立
+        response = await fetch('/api/sheets/mappings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source_id: sourceId,
+            worksheet_name: selectedWorksheet,
+            target_table: selectedTable,
+            field_mappings: mappings,
+            is_enabled: isEnabled,
+          }),
+        });
+      }
 
       const data = await response.json();
 
       if (data.success) {
         toast({
           title: '儲存成功',
-          description: '欄位映射已儲存',
+          description: isEditMode ? '映射已更新' : '映射已建立',
         });
         // 重置表單
-        setSelectedWorksheet('');
-        setSelectedTable('');
-        setMappings([]);
-        setIsEnabled(true);
+        resetForm();
         onSuccess();
       } else {
         throw new Error(data.message || '儲存失敗');
@@ -220,7 +278,7 @@ export function FieldMappingDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>設定欄位映射</DialogTitle>
+          <DialogTitle>{isEditMode ? '編輯欄位映射' : '設定欄位映射'}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-6">
@@ -231,7 +289,7 @@ export function FieldMappingDialog({
               <Select
                 value={selectedWorksheet}
                 onValueChange={setSelectedWorksheet}
-                disabled={loading}
+                disabled={loading || isEditMode}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="選擇工作表" />
@@ -244,6 +302,9 @@ export function FieldMappingDialog({
                   ))}
                 </SelectContent>
               </Select>
+              {isEditMode && (
+                <p className="text-xs text-muted-foreground">編輯模式下無法更改工作表</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -251,7 +312,7 @@ export function FieldMappingDialog({
               <Select
                 value={selectedTable}
                 onValueChange={setSelectedTable}
-                disabled={loading}
+                disabled={loading || isEditMode}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="選擇表格" />
@@ -264,6 +325,9 @@ export function FieldMappingDialog({
                   ))}
                 </SelectContent>
               </Select>
+              {isEditMode && (
+                <p className="text-xs text-muted-foreground">編輯模式下無法更改目標表格</p>
+              )}
             </div>
           </div>
 
