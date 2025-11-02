@@ -12,6 +12,7 @@ import { useToast } from '@/hooks/use-toast';
 import { CreateSourceDialog } from '@/components/sheets/create-source-dialog';
 import { FieldMappingDialog } from '@/components/sheets/field-mapping-dialog';
 import { SyncLogsDialog } from '@/components/sheets/sync-logs-dialog';
+import { SyncProgressDialog, SyncProgress } from '@/components/sheets/sync-progress-dialog';
 
 interface GoogleSheetsSource {
   id: string;
@@ -43,6 +44,8 @@ export default function GoogleSheetsSync() {
   const [logsDialogOpen, setLogsDialogOpen] = useState(false);
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [selectedMapping, setSelectedMapping] = useState<string | null>(null);
+  const [progressDialogOpen, setProgressDialogOpen] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
   const { toast } = useToast();
 
   // 載入資料來源
@@ -110,34 +113,74 @@ export default function GoogleSheetsSync() {
     }
   };
 
-  // 手動同步
+  // 手動同步 - 使用 SSE 顯示即時進度
   const handleManualSync = async (mappingId: string) => {
-    try {
-      toast({
-        title: '同步中',
-        description: '正在同步資料...',
-      });
+    // 開啟進度對話框
+    setProgressDialogOpen(true);
+    setSyncProgress({
+      mappingId,
+      stage: 'reading',
+      current: 0,
+      total: 0,
+      message: '準備同步...',
+      percentage: 0,
+    });
 
-      const response = await fetch(`/api/sheets/sync/${mappingId}`, {
-        method: 'POST',
-      });
-      const data = await response.json();
+    // 使用 EventSource 接收 SSE 進度更新
+    const eventSource = new EventSource(`/api/sheets/sync/${mappingId}`);
 
-      if (data.success) {
+    eventSource.onmessage = (event) => {
+      const progress = JSON.parse(event.data);
+      setSyncProgress(progress);
+
+      // 同步完成或失敗時關閉連線
+      if (progress.stage === 'completed') {
+        eventSource.close();
         toast({
           title: '同步成功',
-          description: `已同步 ${data.recordsSynced} 筆記錄`,
+          description: `已成功同步 ${progress.current} 筆記錄`,
         });
-      } else {
-        throw new Error(data.message);
+        // 2 秒後關閉進度對話框
+        setTimeout(() => {
+          setProgressDialogOpen(false);
+          setSyncProgress(null);
+        }, 2000);
+      } else if (progress.stage === 'failed') {
+        eventSource.close();
+        toast({
+          title: '同步失敗',
+          description: progress.message,
+          variant: 'destructive',
+        });
+        // 3 秒後關閉進度對話框
+        setTimeout(() => {
+          setProgressDialogOpen(false);
+          setSyncProgress(null);
+        }, 3000);
       }
-    } catch (error: any) {
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('SSE 連線錯誤:', error);
+      eventSource.close();
+      setSyncProgress({
+        mappingId,
+        stage: 'failed',
+        current: 0,
+        total: 0,
+        message: '連線失敗，請檢查網路或稍後再試',
+        percentage: 0,
+      });
       toast({
-        title: '同步失敗',
-        description: error.message,
+        title: '連線失敗',
+        description: '無法建立即時連線，請稍後再試',
         variant: 'destructive',
       });
-    }
+      setTimeout(() => {
+        setProgressDialogOpen(false);
+        setSyncProgress(null);
+      }, 3000);
+    };
   };
 
   // 設定映射
@@ -306,6 +349,12 @@ export default function GoogleSheetsSync() {
       <SyncLogsDialog
         open={logsDialogOpen}
         onOpenChange={setLogsDialogOpen}
+      />
+
+      <SyncProgressDialog
+        open={progressDialogOpen}
+        onOpenChange={setProgressDialogOpen}
+        progress={syncProgress}
       />
     </div>
   );
