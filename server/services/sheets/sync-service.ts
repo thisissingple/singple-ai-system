@@ -127,21 +127,34 @@ export class SyncService {
         percentage: 50,
       });
 
-      await this.loadToSupabase(mapping.target_table, transformedData, mappingId);
+      const syncResult = await this.loadToSupabase(mapping.target_table, transformedData, mappingId);
 
-      // 7. 記錄同步成功
-      await this.logSync(mappingId, 'success', transformedData.length);
+      // 7. 記錄同步結果（包含成功/失敗數量）
+      const logMessage = syncResult.errorCount > 0
+        ? `成功: ${syncResult.successCount}, 失敗: ${syncResult.errorCount}。失敗原因: ${syncResult.errors.slice(0, 3).join('; ')}${syncResult.errors.length > 3 ? '...' : ''}`
+        : null;
+
+      await this.logSync(
+        mappingId,
+        syncResult.errorCount > 0 ? 'failed' : 'success',
+        syncResult.successCount,
+        logMessage
+      );
+
+      const completionMessage = syncResult.errorCount > 0
+        ? `同步完成! 成功 ${syncResult.successCount} 筆，失敗 ${syncResult.errorCount} 筆`
+        : `同步完成! 已同步 ${syncResult.successCount} 筆資料`;
 
       this.sendProgress({
         mappingId,
         stage: 'completed',
-        current: transformedData.length,
+        current: syncResult.successCount,
         total: transformedData.length,
-        message: `同步完成! 已同步 ${transformedData.length} 筆資料`,
+        message: completionMessage,
         percentage: 100,
       });
 
-      console.log(`✅ Sync completed: ${transformedData.length} records synced`);
+      console.log(`✅ Sync completed: ${syncResult.successCount} success, ${syncResult.errorCount} failed`);
 
     } catch (error: any) {
       console.error(`❌ Sync failed:`, error.message);
@@ -200,7 +213,9 @@ export class SyncService {
       fieldMappings.forEach(mapping => {
         const googleIndex = headers.indexOf(mapping.googleColumn);
         if (googleIndex >= 0 && row[googleIndex] !== undefined) {
-          record[mapping.supabaseColumn] = row[googleIndex];
+          // 將空字串轉為 null，以符合 PostgreSQL 的 DATE/TIMESTAMP 類型
+          const value = row[googleIndex];
+          record[mapping.supabaseColumn] = value === '' ? null : value;
         }
       });
 
@@ -219,48 +234,83 @@ export class SyncService {
   /**
    * 寫入 Supabase (批次插入優化 + 進度回報)
    */
-  private async loadToSupabase(table: string, data: any[], mappingId?: string): Promise<void> {
+  private async loadToSupabase(table: string, data: any[], mappingId?: string): Promise<{
+    successCount: number;
+    errorCount: number;
+    errors: string[];
+  }> {
     console.log(`💾 Loading ${data.length} records to ${table}...`);
 
-    if (data.length === 0) return;
+    if (data.length === 0) {
+      return { successCount: 0, errorCount: 0, errors: [] };
+    }
 
     // 批次大小 (每次插入 100 筆)
     const BATCH_SIZE = 100;
     let successCount = 0;
     let errorCount = 0;
+    const errors: string[] = [];
+    const startTime = Date.now();
 
     for (let i = 0; i < data.length; i += BATCH_SIZE) {
       const batch = data.slice(i, i + BATCH_SIZE);
+      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(data.length / BATCH_SIZE);
 
       try {
         // 批次插入
         await this.batchInsert(table, batch);
         successCount += batch.length;
 
+        // 計算預估剩餘時間
+        const elapsedMs = Date.now() - startTime;
+        const avgTimePerRecord = elapsedMs / successCount;
+        const remainingRecords = data.length - successCount - errorCount;
+        const estimatedRemainingMs = avgTimePerRecord * remainingRecords;
+        const estimatedMinutes = Math.ceil(estimatedRemainingMs / 60000);
+
         // 發送進度更新
-        const percentage = 50 + Math.floor((successCount / data.length) * 50);
+        const percentage = 50 + Math.floor(((successCount + errorCount) / data.length) * 50);
         if (mappingId) {
+          const timeMessage = estimatedMinutes > 0 ? ` (預估剩餘 ${estimatedMinutes} 分鐘)` : '';
           this.sendProgress({
             mappingId,
             stage: 'inserting',
-            current: successCount,
+            current: successCount + errorCount,
             total: data.length,
-            message: `正在寫入資料: ${successCount}/${data.length}`,
+            message: `正在寫入資料: ${successCount}/${data.length}${timeMessage}`,
             percentage,
           });
         }
 
-        console.log(`✅ Batch ${Math.floor(i / BATCH_SIZE) + 1}: ${successCount}/${data.length} records inserted`);
+        console.log(`✅ Batch ${batchNumber}/${totalBatches}: ${successCount}/${data.length} records inserted`);
       } catch (error: any) {
-        console.error(`❌ Batch insert failed, falling back to individual inserts:`, error.message);
+        console.error(`❌ Batch ${batchNumber} insert failed, falling back to individual inserts:`, error.message);
 
         // 如果批次失敗,逐一插入這個批次
         for (const record of batch) {
           try {
             await insertAndReturn(table, record);
             successCount++;
+
+            // 更新進度 (逐筆插入時)
+            if (mappingId && (successCount + errorCount) % 10 === 0) {
+              const percentage = 50 + Math.floor(((successCount + errorCount) / data.length) * 50);
+              this.sendProgress({
+                mappingId,
+                stage: 'inserting',
+                current: successCount + errorCount,
+                total: data.length,
+                message: `正在寫入資料: ${successCount}/${data.length} (逐筆處理)`,
+                percentage,
+              });
+            }
           } catch (err: any) {
             errorCount++;
+            const errorMsg = `${err.message}`;
+            if (!errors.includes(errorMsg)) {
+              errors.push(errorMsg);
+            }
             console.error(`❌ Error inserting record:`, err.message);
           }
         }
@@ -268,6 +318,11 @@ export class SyncService {
     }
 
     console.log(`📊 Insert complete: ${successCount} success, ${errorCount} failed`);
+    if (errors.length > 0) {
+      console.log(`📋 Unique errors: ${errors.join(', ')}`);
+    }
+
+    return { successCount, errorCount, errors };
   }
 
   /**
