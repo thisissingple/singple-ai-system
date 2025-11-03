@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, UserPlus, Briefcase, FileText, Shield, Calendar, Key, Copy, Pencil, ArrowUpDown, ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
+import { Plus, Search, Eye, UserPlus, Briefcase, FileText, Shield, Calendar, Key, Copy, Pencil, ArrowUpDown, ArrowUp, ArrowDown, Trash2, Save, CheckCircle2, Loader2 as Loader2Icon, AlertCircle, Shield as ShieldIcon } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { sidebarConfig } from '@/config/sidebar-config';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,10 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Checkbox } from '@/components/ui/checkbox';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Separator } from '@/components/ui/separator';
+import { useToast } from '@/hooks/use-toast';
 import type {
   EmployeeData,
   BusinessIdentity,
@@ -49,6 +53,38 @@ import {
   getCommissionTypeLabel,
   formatCurrency,
 } from '@/types/employee';
+
+// 權限相關介面
+interface PermissionModule {
+  id: string;
+  module_id: string;
+  module_name: string;
+  module_category: string;
+  description: string | null;
+  supports_scope: boolean;
+  display_order: number;
+  is_active: boolean;
+}
+
+interface UserPermission {
+  module_id: string;
+  scope: 'all' | 'own_only';
+  is_active: boolean;
+}
+
+interface PermissionState {
+  [moduleId: string]: {
+    enabled: boolean;
+    scope: 'all' | 'own_only';
+  };
+}
+
+const categoryLabels: Record<string, string> = {
+  teacher_system: '教師系統',
+  telemarketing_system: '電訪系統',
+  consultant_system: '諮詢師系統',
+  management_system: '管理系統',
+};
 
 type SortField = 'employee_number' | 'first_name' | 'department' | 'hire_date';
 type SortDirection = 'asc' | 'desc';
@@ -168,6 +204,14 @@ export default function EmployeesPage() {
     notes: '',
   });
 
+  // 權限管理相關狀態
+  const { toast } = useToast();
+  const [modules, setModules] = useState<PermissionModule[]>([]);
+  const [permissions, setPermissions] = useState<PermissionState>({});
+  const [originalPermissions, setOriginalPermissions] = useState<PermissionState>({});
+  const [loadingPermissions, setLoadingPermissions] = useState(false);
+  const [savingPermissions, setSavingPermissions] = useState(false);
+
   // 載入員工列表
   const fetchEmployees = async () => {
     try {
@@ -187,7 +231,135 @@ export default function EmployeesPage() {
 
   useEffect(() => {
     fetchEmployees();
+    fetchModules();
   }, []);
+
+  // 載入權限模組列表
+  const fetchModules = async () => {
+    try {
+      const response = await fetch('/api/permissions/modules', {
+        credentials: 'include',
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        setModules(data.data || []);
+      }
+    } catch (error: any) {
+      console.error('fetchModules error:', error);
+    }
+  };
+
+  // 載入使用者權限
+  const fetchUserPermissions = async (userId: string) => {
+    setLoadingPermissions(true);
+    try {
+      const response = await fetch(`/api/permissions/user/${userId}`, {
+        credentials: 'include',
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        const userPermissions: UserPermission[] = data.data || [];
+
+        // Convert to state format
+        const permissionState: PermissionState = {};
+        userPermissions.forEach((perm) => {
+          permissionState[perm.module_id] = {
+            enabled: perm.is_active,
+            scope: perm.scope,
+          };
+        });
+
+        setPermissions(permissionState);
+        setOriginalPermissions(JSON.parse(JSON.stringify(permissionState)));
+      }
+    } catch (error: any) {
+      console.error('fetchUserPermissions error:', error);
+      toast({
+        title: '錯誤',
+        description: '載入使用者權限失敗',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingPermissions(false);
+    }
+  };
+
+  // 切換模組啟用狀態
+  const handleToggleModule = (moduleId: string, checked: boolean) => {
+    setPermissions((prev) => ({
+      ...prev,
+      [moduleId]: {
+        enabled: checked,
+        scope: prev[moduleId]?.scope || 'all',
+      },
+    }));
+  };
+
+  // 修改權限範圍
+  const handleScopeChange = (moduleId: string, scope: 'all' | 'own_only') => {
+    setPermissions((prev) => ({
+      ...prev,
+      [moduleId]: {
+        enabled: prev[moduleId]?.enabled || false,
+        scope,
+      },
+    }));
+  };
+
+  // 儲存權限
+  const handleSavePermissions = async () => {
+    if (!viewingEmployee) return;
+
+    setSavingPermissions(true);
+    try {
+      // Convert permission state to API format
+      const permissionsArray = Object.entries(permissions)
+        .filter(([_, perm]) => perm.enabled)
+        .map(([module_id, perm]) => ({
+          module_id,
+          scope: perm.scope,
+          is_active: true,
+        }));
+
+      const response = await fetch(`/api/permissions/user/${viewingEmployee.user.id}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ permissions: permissionsArray }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: '成功',
+          description: '權限設定已儲存',
+        });
+
+        // Refresh permissions
+        await fetchUserPermissions(viewingEmployee.user.id);
+      } else {
+        throw new Error(data.error || '儲存權限失敗');
+      }
+    } catch (error: any) {
+      toast({
+        title: '錯誤',
+        description: error.message || '儲存權限失敗',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingPermissions(false);
+    }
+  };
+
+  // 重置權限變更
+  const handleResetPermissions = () => {
+    setPermissions(JSON.parse(JSON.stringify(originalPermissions)));
+  };
 
   // 排序切換功能
   const handleSort = (field: SortField) => {
@@ -264,6 +436,8 @@ export default function EmployeesPage() {
       if (data.success) {
         setViewingEmployee(data.data);
         setShowDetailDialog(true);
+        // 同時載入該員工的權限
+        await fetchUserPermissions(empData.user.id);
       }
     } catch (error) {
       console.error('載入員工詳情失敗:', error);
@@ -1011,14 +1185,23 @@ export default function EmployeesPage() {
               員工詳情 - {viewingEmployee?.user.first_name} {viewingEmployee?.user.last_name}
             </DialogTitle>
             <DialogDescription>
-              查看和管理員工的角色身份、薪資、勞健保等完整資訊
+              查看和管理員工的角色身份、薪資、勞健保、權限等完整資訊
             </DialogDescription>
           </DialogHeader>
 
           {viewingEmployee && (
-            <div className="space-y-6 mt-4">
-              {/* 基本資訊卡片 */}
-              <Card className="p-4">
+            <Tabs defaultValue="basic" className="mt-4">
+              <TabsList className="grid w-full grid-cols-5">
+                <TabsTrigger value="basic">基本資訊</TabsTrigger>
+                <TabsTrigger value="identity">角色身份</TabsTrigger>
+                <TabsTrigger value="compensation">薪資資訊</TabsTrigger>
+                <TabsTrigger value="insurance">勞健保</TabsTrigger>
+                <TabsTrigger value="permissions">權限管理</TabsTrigger>
+              </TabsList>
+
+              {/* 基本資訊分頁 */}
+              <TabsContent value="basic" className="space-y-4">
+                <Card className="p-4">
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="font-semibold flex items-center gap-2">
                     <UserPlus className="h-4 w-4" />
@@ -1116,10 +1299,12 @@ export default function EmployeesPage() {
                     </Button>
                   </div>
                 </div>
-              </Card>
+                </Card>
+              </TabsContent>
 
-              {/* 角色身份管理 */}
-              <Card className="p-4">
+              {/* 角色身份分頁 */}
+              <TabsContent value="identity" className="space-y-4">
+                <Card className="p-4">
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="font-semibold flex items-center gap-2">
                     <Briefcase className="h-4 w-4" />
@@ -1194,10 +1379,12 @@ export default function EmployeesPage() {
                     尚無角色身份
                   </p>
                 )}
-              </Card>
+                </Card>
+              </TabsContent>
 
-              {/* 薪資資訊 */}
-              <Card className="p-4">
+              {/* 薪資資訊分頁 */}
+              <TabsContent value="compensation" className="space-y-4">
+                <Card className="p-4">
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="font-semibold flex items-center gap-2">
                     <FileText className="h-4 w-4" />
@@ -1268,10 +1455,12 @@ export default function EmployeesPage() {
                     </p>
                   </div>
                 )}
-              </Card>
+                </Card>
+              </TabsContent>
 
-              {/* 勞健保資訊 */}
-              <Card className="p-4">
+              {/* 勞健保資訊分頁 */}
+              <TabsContent value="insurance" className="space-y-4">
+                <Card className="p-4">
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="font-semibold flex items-center gap-2">
                     <Shield className="h-4 w-4" />
@@ -1341,8 +1530,180 @@ export default function EmployeesPage() {
                     尚未設定勞健保
                   </p>
                 )}
-              </Card>
-            </div>
+                </Card>
+              </TabsContent>
+
+              {/* 權限管理分頁 */}
+              <TabsContent value="permissions" className="space-y-4">
+                {loadingPermissions ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2Icon className="h-8 w-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : viewingEmployee.user.roles?.includes('admin') || viewingEmployee.user.roles?.includes('super_admin') ? (
+                  <Card className="p-6">
+                    <div className="flex items-center gap-3 bg-muted/50 p-4 rounded-lg">
+                      <AlertCircle className="h-5 w-5 text-blue-500" />
+                      <div>
+                        <p className="font-medium">管理員權限</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          此使用者為管理員，自動擁有所有功能的完整存取權限，無需額外設定。
+                        </p>
+                      </div>
+                    </div>
+                  </Card>
+                ) : (
+                  <>
+                    <Card className="p-4">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h3 className="font-semibold flex items-center gap-2">
+                            <ShieldIcon className="h-4 w-4" />
+                            功能權限設定
+                          </h3>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            勾選使用者可以存取的功能模組，並設定資料範圍
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          {JSON.stringify(permissions) !== JSON.stringify(originalPermissions) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleResetPermissions}
+                              disabled={savingPermissions}
+                            >
+                              重置
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            onClick={handleSavePermissions}
+                            disabled={savingPermissions || JSON.stringify(permissions) === JSON.stringify(originalPermissions)}
+                          >
+                            {savingPermissions ? (
+                              <>
+                                <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />
+                                儲存中...
+                              </>
+                            ) : (
+                              <>
+                                <Save className="mr-2 h-4 w-4" />
+                                儲存變更
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-6">
+                        {Object.entries(
+                          modules.reduce((acc, module) => {
+                            if (!acc[module.module_category]) {
+                              acc[module.module_category] = [];
+                            }
+                            acc[module.module_category].push(module);
+                            return acc;
+                          }, {} as Record<string, typeof modules>)
+                        ).map(([category, categoryModules]) => (
+                          <div key={category} className="space-y-4">
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-semibold text-base">
+                                {categoryLabels[category] || category}
+                              </h4>
+                              <Badge variant="outline">
+                                {categoryModules.length} 個模組
+                              </Badge>
+                            </div>
+
+                            <div className="space-y-3 pl-4">
+                              {categoryModules.map((module) => {
+                                const perm = permissions[module.module_id] || {
+                                  enabled: false,
+                                  scope: 'all',
+                                };
+
+                                return (
+                                  <div
+                                    key={module.module_id}
+                                    className="flex items-start gap-4 p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                                  >
+                                    <Checkbox
+                                      id={module.module_id}
+                                      checked={perm.enabled}
+                                      onCheckedChange={(checked) =>
+                                        handleToggleModule(
+                                          module.module_id,
+                                          checked as boolean
+                                        )
+                                      }
+                                      className="mt-1"
+                                    />
+                                    <div className="flex-1 space-y-2">
+                                      <Label
+                                        htmlFor={module.module_id}
+                                        className="text-sm font-medium cursor-pointer"
+                                      >
+                                        {module.module_name}
+                                      </Label>
+                                      {module.description && (
+                                        <p className="text-xs text-muted-foreground">
+                                          {module.description}
+                                        </p>
+                                      )}
+
+                                      {/* Scope Selection */}
+                                      {module.supports_scope && perm.enabled && (
+                                        <RadioGroup
+                                          value={perm.scope}
+                                          onValueChange={(value) =>
+                                            handleScopeChange(
+                                              module.module_id,
+                                              value as 'all' | 'own_only'
+                                            )
+                                          }
+                                          className="flex gap-4 pt-2"
+                                        >
+                                          <div className="flex items-center space-x-2">
+                                            <RadioGroupItem
+                                              value="all"
+                                              id={`${module.module_id}-all`}
+                                            />
+                                            <Label
+                                              htmlFor={`${module.module_id}-all`}
+                                              className="text-xs font-normal cursor-pointer"
+                                            >
+                                              查看所有資料
+                                            </Label>
+                                          </div>
+                                          <div className="flex items-center space-x-2">
+                                            <RadioGroupItem
+                                              value="own_only"
+                                              id={`${module.module_id}-own`}
+                                            />
+                                            <Label
+                                              htmlFor={`${module.module_id}-own`}
+                                              className="text-xs font-normal cursor-pointer"
+                                            >
+                                              僅查看自己的資料
+                                            </Label>
+                                          </div>
+                                        </RadioGroup>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            <Separator />
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  </>
+                )}
+              </TabsContent>
+            </Tabs>
           )}
 
           <DialogFooter>
