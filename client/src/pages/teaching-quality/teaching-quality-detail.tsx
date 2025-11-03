@@ -439,6 +439,7 @@ export default function TeachingQualityDetail() {
   const [, navigate] = useLocation();
   const analysisId = params?.id;
   const { notifyAnalysisUpdated } = useTeachingQuality();
+  const filteredSidebar = useFilteredSidebar();
 
   const [analysis, setAnalysis] =
     useState<TeachingQualityAnalysisDetail | null>(null);

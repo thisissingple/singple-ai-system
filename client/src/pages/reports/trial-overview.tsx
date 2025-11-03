@@ -321,6 +321,13 @@ export default function TrialOverview() {
     }
 
     startAnalyzing(record.attendance_id);
+
+    // 顯示開始分析的提示
+    toast({
+      title: '🤖 AI 分析中',
+      description: `正在分析 ${record.student_name} 的體驗課記錄，預計需要 30-60 秒，請稍候...`
+    });
+
     try {
       const response = await fetch(`/api/teaching-quality/analyze-single/${record.attendance_id}`, {
         method: 'POST'
@@ -332,16 +339,16 @@ export default function TrialOverview() {
       }
 
       toast({
-        title: '分析完成',
-        description: `${record.student_name} 的課程分析已生成`
+        title: '✅ 分析完成',
+        description: `${record.student_name} 的課程分析已生成，可以點擊「查看詳情」查看結果`
       });
 
       await fetchAnalysisData({ showLoader: false });
     } catch (error: any) {
       console.error('Manual analysis failed:', error);
       toast({
-        title: '分析失敗',
-        description: error.message || '發生未知錯誤',
+        title: '❌ 分析失敗',
+        description: error.message || '發生未知錯誤，請稍後再試',
         variant: 'destructive'
       });
     } finally {
