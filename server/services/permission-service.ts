@@ -72,6 +72,12 @@ export async function hasModulePermission(
   userId: string,
   moduleId: string
 ): Promise<PermissionCheckResult> {
+  // 🔓 在開發模式下跳過所有權限檢查
+  if (process.env.SKIP_AUTH === 'true') {
+    console.log(`[DEV MODE] 🔓 Skipping permission check for user ${userId} on module ${moduleId}`);
+    return { allowed: true, scope: 'all', reason: 'SKIP_AUTH mode' };
+  }
+
   const pool = createPool();
 
   try {
@@ -577,6 +583,15 @@ export async function getUserPermissionsSummary() {
  * Check which modules a user can access (returns list of module IDs)
  */
 export async function getUserAccessibleModules(userId: string): Promise<string[]> {
+  // 🔓 在開發模式下返回所有模組
+  if (process.env.SKIP_AUTH === 'true') {
+    console.log(`[DEV MODE] 🔓 Returning all modules for user ${userId}`);
+    const pool = createPool();
+    const allModulesQuery = 'SELECT module_id FROM permission_modules WHERE is_active = true';
+    const result = await pool.query(allModulesQuery, []);
+    return result.rows.map(row => row.module_id);
+  }
+
   const pool = createPool();
 
   try {
