@@ -9,33 +9,47 @@ import { ReportMetricConfig, DEFAULT_METRIC_CONFIGS } from '../../../configs/rep
 export class ReportMetricConfigService {
   /**
    * Get all metric configurations
+   * Phase 39+: Uses default configs directly (legacy storage replaced)
    */
   async getAllConfigs(): Promise<ReportMetricConfig[]> {
-    return storage.getReportMetricConfigs();
+    return Object.values(DEFAULT_METRIC_CONFIGS);
   }
 
   /**
    * Get specific metric configuration
+   * Phase 39+: Uses default configs directly (legacy storage replaced)
    */
   async getConfig(metricId: string): Promise<ReportMetricConfig | null> {
-    return storage.getReportMetricConfig(metricId);
+    return DEFAULT_METRIC_CONFIGS[metricId] || null;
   }
 
   /**
    * Update metric configuration
+   * Phase 39+: Not yet implemented (TODO: Use Supabase for custom configs)
    */
   async updateConfig(
     metricId: string,
     updates: Partial<ReportMetricConfig>
   ): Promise<ReportMetricConfig> {
-    return storage.updateReportMetricConfig(metricId, updates);
+    console.warn('[ReportMetricConfigService] updateConfig not yet implemented in Phase 39+');
+    const config = DEFAULT_METRIC_CONFIGS[metricId];
+    if (!config) {
+      throw new Error(`Metric config not found: ${metricId}`);
+    }
+    // TODO: Save custom configs to Supabase
+    return { ...config, ...updates };
   }
 
   /**
    * Reset metric configuration to default
+   * Phase 39+: Returns default config directly
    */
   async resetConfig(metricId: string): Promise<ReportMetricConfig> {
-    return storage.resetReportMetricConfig(metricId);
+    const config = DEFAULT_METRIC_CONFIGS[metricId];
+    if (!config) {
+      throw new Error(`Metric config not found: ${metricId}`);
+    }
+    return config;
   }
 
   /**
