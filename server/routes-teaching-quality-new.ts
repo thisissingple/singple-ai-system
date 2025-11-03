@@ -77,6 +77,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
       }
 
       // Get purchase data for students and calculate remaining classes dynamically
+      // Keep original emails for database queries
       const studentEmails = attendanceRecords?.map(r => r.student_email).filter(Boolean) || [];
       let purchaseMap = new Map();
 
@@ -91,9 +92,11 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
 
         if (!allAttendanceError && allAttendance) {
           allAttendance.forEach((a: any) => {
-            const records = allAttendanceByEmail.get(a.student_email) || [];
+            // Use lowercase email as Map key for case-insensitive matching
+            const normalizedEmail = a.student_email?.toLowerCase();
+            const records = allAttendanceByEmail.get(normalizedEmail) || [];
             records.push(a);
-            allAttendanceByEmail.set(a.student_email, records);
+            allAttendanceByEmail.set(normalizedEmail, records);
           });
         }
       }
@@ -116,7 +119,9 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
               totalLessons = 12;
             }
 
-            purchaseMap.set(p.student_email, {
+            // Normalize email to lowercase for consistent matching
+            const normalizedEmail = p.student_email?.toLowerCase();
+            purchaseMap.set(normalizedEmail, {
               ...p,
               total_lessons: totalLessons
             });
@@ -127,7 +132,9 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
       // Format records
       const records = attendanceRecords?.map((row: any) => {
         const analysis = analysisMap.get(row.ai_analysis_id);
-        const purchase = purchaseMap.get(row.student_email);
+        // Normalize email for lookup
+        const normalizedEmail = row.student_email?.toLowerCase();
+        const purchase = purchaseMap.get(normalizedEmail);
 
         const strengths = analysis?.strengths ? (typeof analysis.strengths === 'string' ? JSON.parse(analysis.strengths) : analysis.strengths) : [];
         const weaknesses = analysis?.weaknesses ? (typeof analysis.weaknesses === 'string' ? JSON.parse(analysis.weaknesses) : analysis.weaknesses) : [];
@@ -146,7 +153,8 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         // Calculate remaining classes AT THIS CLASS DATE
         let calculatedRemaining = null;
         if (purchase) {
-          const studentAttendance = allAttendanceByEmail.get(row.student_email) || [];
+          // Use normalized email for Map lookup
+          const studentAttendance = allAttendanceByEmail.get(normalizedEmail) || [];
           // Count classes BEFORE or ON this class date
           const classesBeforeOrOn = studentAttendance.filter((a: any) => {
             const aDate = new Date(a.class_date);
