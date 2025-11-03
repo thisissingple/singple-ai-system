@@ -101,7 +101,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
       if (studentEmails.length > 0) {
         const { data: purchaseData, error: purchaseError } = await supabase
           .from('trial_class_purchases')
-          .select('student_email, package_name, remaining_classes')
+          .select('student_email, package_name, remaining_classes, current_status')
           .in('student_email', studentEmails);
 
         if (!purchaseError && purchaseData) {
@@ -133,12 +133,14 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         const weaknesses = analysis?.weaknesses ? (typeof analysis.weaknesses === 'string' ? JSON.parse(analysis.weaknesses) : analysis.weaknesses) : [];
         const suggestions = analysis?.suggestions ? (typeof analysis.suggestions === 'string' ? JSON.parse(analysis.suggestions) : analysis.suggestions) : [];
 
-        // Determine purchase status
-        let purchaseStatus = 'pending';
-        if (purchase) {
-          purchaseStatus = 'converted';
+        // Determine conversion status from trial_class_purchases.current_status
+        // This syncs with the student list data (未開始/體驗中/已轉高/未轉高)
+        let conversionStatus = null;
+        if (purchase && purchase.current_status) {
+          // Use the actual current_status from trial_class_purchases
+          conversionStatus = purchase.current_status;
         } else if (row.no_conversion_reason && row.no_conversion_reason.trim() !== '') {
-          purchaseStatus = 'not_converted';
+          conversionStatus = '未轉高';
         }
 
         // Calculate remaining classes AT THIS CLASS DATE
@@ -179,7 +181,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
           // Purchase info (使用動態計算的剩餘堂數 - 基於該上課日期)
           package_name: purchase?.package_name || null,
           remaining_classes: calculatedRemaining !== null ? `${calculatedRemaining} 堂` : null,
-          conversion_status: analysis?.conversion_status || purchaseStatus
+          conversion_status: conversionStatus
         };
       }) || [];
 

@@ -731,13 +731,21 @@ export default function TrialOverview() {
                               )}
                             </TableCell>
                             <TableCell className="text-center">
-                              {record.package_name && !record.remaining_classes ? (
+                              {record.conversion_status === '已轉高' ? (
                                 <Badge className="bg-green-600 hover:bg-green-700">
                                   ✓ 已轉高
                                 </Badge>
-                              ) : record.package_name ? (
-                                <Badge variant="outline" className="text-muted-foreground border-gray-300">
-                                  尚未轉高
+                              ) : record.conversion_status === '體驗中' ? (
+                                <Badge variant="outline" className="text-blue-600 border-blue-300">
+                                  體驗中
+                                </Badge>
+                              ) : record.conversion_status === '未轉高' ? (
+                                <Badge variant="outline" className="text-orange-600 border-orange-300">
+                                  未轉高
+                                </Badge>
+                              ) : record.conversion_status === '未開始' ? (
+                                <Badge variant="outline" className="text-gray-600 border-gray-300">
+                                  未開始
                                 </Badge>
                               ) : (
                                 <span className="text-sm text-muted-foreground">-</span>
