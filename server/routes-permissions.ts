@@ -477,6 +477,13 @@ export function registerPermissionRoutes(app: Express): void {
 export function requireModulePermission(moduleId: string) {
   return async (req: any, res: any, next: any) => {
     try {
+      // 🔓 在開發模式下跳過權限檢查
+      if (process.env.SKIP_AUTH === 'true') {
+        console.log(`[DEV MODE] 🔓 Skipping module permission check for ${moduleId}`);
+        req.permissionScope = 'all'; // 給予完整權限
+        return next();
+      }
+
       const userId = req.user?.id;
 
       if (!userId) {
