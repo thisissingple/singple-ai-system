@@ -8,6 +8,7 @@ import { getSupabaseClient } from './services/supabase-client';
 import * as teachingQualityGPT from './services/teaching-quality-gpt-service';
 import { parseScoresFromMarkdown } from './services/parse-teaching-scores';
 import { getOrCreateStudentKB, addDataSourceRef } from './services/student-knowledge-service';
+import { parseNumberField } from './services/reporting/field-mapping-v2';
 
 export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
   // 0. Get student records with analysis status (for main list page)
@@ -129,6 +130,37 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         }
       }
 
+      // 🆕 Query eods_for_closers to calculate conversion status (same logic as total-report)
+      // This ensures consistency between "體驗課分析" and "學生跟進" pages
+      let dealAmountMap = new Map<string, number>();
+      if (studentEmails.length > 0) {
+        const { data: dealData, error: dealError } = await supabase
+          .from('eods_for_closers')
+          .select('student_email, actual_amount, package_price, plan')
+          .in('student_email', studentEmails);
+
+        if (!dealError && dealData) {
+          dealData.forEach((d: any) => {
+            const normalizedEmail = d.student_email?.toLowerCase();
+            if (!normalizedEmail) return;
+
+            // Parse amounts using parseNumberField to handle "NT$3,000.00" format
+            const actualAmount = parseNumberField(d.actual_amount) || 0;
+            const packagePrice = parseNumberField(d.package_price) || 0;
+            const dealAmount = actualAmount || packagePrice;
+
+            // Check if it's a high-level plan (高階一對一 or 高音)
+            const isHighLevelPlan = d.plan?.includes('高階一對一') || d.plan?.includes('高音');
+
+            // Only count high-level deals
+            if (isHighLevelPlan && dealAmount > 0) {
+              const currentTotal = dealAmountMap.get(normalizedEmail) || 0;
+              dealAmountMap.set(normalizedEmail, currentTotal + dealAmount);
+            }
+          });
+        }
+      }
+
       // Format records
       const records = attendanceRecords?.map((row: any) => {
         const analysis = analysisMap.get(row.ai_analysis_id);
@@ -140,14 +172,28 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         const weaknesses = analysis?.weaknesses ? (typeof analysis.weaknesses === 'string' ? JSON.parse(analysis.weaknesses) : analysis.weaknesses) : [];
         const suggestions = analysis?.suggestions ? (typeof analysis.suggestions === 'string' ? JSON.parse(analysis.suggestions) : analysis.suggestions) : [];
 
-        // Determine conversion status from trial_class_purchases.current_status
-        // This syncs with the student list data (未開始/體驗中/已轉高/未轉高)
+        // 🆕 Calculate conversion status using the same logic as total-report-service
+        // Priority: 已轉高 > 未轉高 > 體驗中 > 未開始
         let conversionStatus = null;
-        if (purchase && purchase.current_status) {
-          // Use the actual current_status from trial_class_purchases
-          conversionStatus = purchase.current_status;
-        } else if (row.no_conversion_reason && row.no_conversion_reason.trim() !== '') {
+        const hasAttendance = true; // We're already looking at an attendance record
+        const hasHighLevelDeal = (dealAmountMap.get(normalizedEmail) || 0) > 0;
+
+        // Use normalized email for Map lookup
+        const studentAttendance = allAttendanceByEmail.get(normalizedEmail) || [];
+        const noRemainingClasses = purchase?.total_lessons && studentAttendance.length >= purchase.total_lessons;
+
+        if (hasHighLevelDeal) {
+          // 1. 優先級最高：有成交記錄 → 已轉高
+          conversionStatus = '已轉高';
+        } else if (noRemainingClasses && hasAttendance) {
+          // 2. 剩餘堂數 = 0 且沒有成交 → 未轉高
           conversionStatus = '未轉高';
+        } else if (hasAttendance) {
+          // 3. 有打卡記錄 → 體驗中
+          conversionStatus = '體驗中';
+        } else {
+          // 4. 沒有打卡記錄 → 未開始 (此分支在此 API 不會執行,因為我們只查詢有出席記錄的學生)
+          conversionStatus = '未開始';
         }
 
         // Calculate remaining classes AT THIS CLASS DATE
