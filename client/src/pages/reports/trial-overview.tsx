@@ -311,30 +311,54 @@ export default function TrialOverview() {
 
   // ==================== Tab 2: 學員分析 - 輔助函數 ====================
 
-  // 🆕 持久化分析中的狀態到 localStorage
+  // 🆕 持久化分析中的狀態和進度到 localStorage
   const ANALYZING_IDS_KEY = 'trial_overview_analyzing_ids';
+  const PROGRESS_MAP_KEY = 'trial_overview_progress_map';
 
   const startAnalyzing = (attendanceId: string) => {
     setAnalyzingIds((prev) => {
       const newIds = prev.includes(attendanceId) ? prev : [...prev, attendanceId];
-      // 儲存到 localStorage
       localStorage.setItem(ANALYZING_IDS_KEY, JSON.stringify(newIds));
       return newIds;
+    });
+
+    // Initialize progress for this record
+    setProgressMap(prev => {
+      const newMap = new Map(prev);
+      newMap.set(attendanceId, {
+        percentage: 25,
+        message: '正在進行 AI 分析...（重整頁面後繼續）',
+        estimatedSecondsRemaining: 45
+      });
+      // Save to localStorage (convert Map to object)
+      const mapObj = Object.fromEntries(newMap);
+      localStorage.setItem(PROGRESS_MAP_KEY, JSON.stringify(mapObj));
+      return newMap;
     });
   };
 
   const finishAnalyzing = (attendanceId: string) => {
     setAnalyzingIds((prev) => {
       const newIds = prev.filter((id) => id !== attendanceId);
-      // 更新 localStorage
       localStorage.setItem(ANALYZING_IDS_KEY, JSON.stringify(newIds));
       return newIds;
     });
+
+    // Remove progress for this record
+    setProgressMap(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(attendanceId);
+      const mapObj = Object.fromEntries(newMap);
+      localStorage.setItem(PROGRESS_MAP_KEY, JSON.stringify(mapObj));
+      return newMap;
+    });
   };
 
-  // 🆕 頁面載入時從 localStorage 恢復分析中狀態
+  // 🆕 頁面載入時從 localStorage 恢復分析中狀態和進度
   useEffect(() => {
     const savedIds = localStorage.getItem(ANALYZING_IDS_KEY);
+    const savedProgress = localStorage.getItem(PROGRESS_MAP_KEY);
+
     if (savedIds) {
       try {
         const ids = JSON.parse(savedIds);
@@ -343,6 +367,16 @@ export default function TrialOverview() {
         }
       } catch (e) {
         console.error('Failed to parse analyzing IDs from localStorage:', e);
+      }
+    }
+
+    if (savedProgress) {
+      try {
+        const progressObj = JSON.parse(savedProgress);
+        const progressMapRestored = new Map(Object.entries(progressObj));
+        setProgressMap(progressMapRestored);
+      } catch (e) {
+        console.error('Failed to parse progress map from localStorage:', e);
       }
     }
   }, []);
@@ -359,13 +393,6 @@ export default function TrialOverview() {
 
     const attendanceId = record.attendance_id;
     startAnalyzing(attendanceId);
-
-    // Initialize progress
-    setProgressMap(prev => {
-      const newMap = new Map(prev);
-      newMap.set(attendanceId, { percentage: 0, message: '準備開始分析...' });
-      return newMap;
-    });
 
     // 顯示開始分析的提示
     toast({
@@ -424,7 +451,7 @@ export default function TrialOverview() {
               break;
             }
 
-            // Update progress
+            // Update progress and save to localStorage
             if (data.percentage !== undefined) {
               setProgressMap(prev => {
                 const newMap = new Map(prev);
@@ -433,6 +460,9 @@ export default function TrialOverview() {
                   message: data.message || '處理中...',
                   estimatedSecondsRemaining: data.estimatedSecondsRemaining
                 });
+                // Save to localStorage
+                const mapObj = Object.fromEntries(newMap);
+                localStorage.setItem(PROGRESS_MAP_KEY, JSON.stringify(mapObj));
                 return newMap;
               });
             }

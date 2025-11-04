@@ -309,6 +309,18 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
     const startTime = Date.now();
     const estimateTimeRemaining = (currentPercentage: number) => {
       const elapsed = (Date.now() - startTime) / 1000; // seconds
+
+      // Don't estimate until we're past the AI analysis phase (after 80%)
+      // Because AI analysis (25%-80%) is the longest and most variable part
+      if (currentPercentage < 80) {
+        // For the AI analysis phase, use a fixed estimate based on typical AI response time
+        // Typical analysis takes 30-60 seconds, assume 45 seconds average
+        const remainingPercentage = 100 - currentPercentage;
+        const estimatedSecondsPerPercent = 45 / 55; // 45 seconds for the 25%-80% range (55%)
+        return Math.round(remainingPercentage * estimatedSecondsPerPercent);
+      }
+
+      // After 80%, use actual elapsed time for more accurate estimation
       if (currentPercentage <= 0) return null;
       const totalEstimated = (elapsed / currentPercentage) * 100;
       return Math.round(totalEstimated - elapsed);
