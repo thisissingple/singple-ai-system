@@ -13,16 +13,9 @@ import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/auth/login";
 
 // 優化：使用 lazy loading 延遲載入其他頁面，減少初始 bundle 大小
-// 舊版頁面（用於兼容舊路由）
-const Dashboard = lazy(() => import("@/pages/dashboard"));
-const DashboardKPICalculator = lazy(() => import("@/pages/dashboard-kpi-calculator"));
-const DashboardTrialReport = lazy(() => import("@/pages/dashboard-trial-report"));
-const DashboardAIAnalysis = lazy(() => import("@/pages/dashboard-ai-analysis"));
-const DashboardRawDataMVP = lazy(() => import("@/pages/dashboard-raw-data-mvp"));
 
-// 新版頁面（包含側邊選單）
+// 主要頁面
 const DashboardOverview = lazy(() => import("@/pages/dashboard-overview"));
-const TrialReportPage = lazy(() => import("@/pages/reports/trial-report"));
 const TrialOverviewPage = lazy(() => import("@/pages/reports/trial-overview"));
 const CostProfitUnifiedPage = lazy(() => import("@/pages/reports/cost-profit-unified"));
 const IncomeExpenseManager = lazy(() => import("@/pages/reports/income-expense-manager"));
@@ -32,15 +25,12 @@ const RawDataMVPPage = lazy(() => import("@/pages/tools/raw-data-mvp"));
 const DatabaseBrowser = lazy(() => import("@/pages/tools/database-browser"));
 const FormsPage = lazy(() => import("@/pages/forms/forms-page"));
 const PublicFormPage = lazy(() => import("@/pages/forms/form-share"));
-const DataSourcesPage = lazy(() => import("@/pages/settings/data-sources"));
 const FormBuilderList = lazy(() => import("@/pages/settings/form-builder-list"));
 const FormBuilderEditor = lazy(() => import("@/pages/settings/form-builder-editor"));
 const GoogleSheetsSync = lazy(() => import("@/pages/settings/google-sheets-sync"));
 const UserManagement = lazy(() => import("@/pages/settings/user-management"));
 const EmployeesPage = lazy(() => import("@/pages/settings/employees"));
 const PermissionsPage = lazy(() => import("@/pages/settings/permissions"));
-const FacebookSettings = lazy(() => import("@/pages/settings/facebook-settings"));
-const TeachingQualityList = lazy(() => import("@/pages/teaching-quality/teaching-quality-list"));
 const TeachingQualityDetail = lazy(() => import("@/pages/teaching-quality/teaching-quality-detail"));
 const ChangePasswordPage = lazy(() => import("@/pages/auth/change-password"));
 const ForgotPasswordPage = lazy(() => import("@/pages/auth/forgot-password"));
@@ -50,8 +40,13 @@ const AdPerformanceReport = lazy(() => import("@/pages/telemarketing/ad-performa
 const CallRecordsList = lazy(() => import("@/pages/telemarketing/call-records-list"));
 const StudentFollowUp = lazy(() => import("@/pages/telemarketing/student-follow-up"));
 const GoHighLevelContacts = lazy(() => import("@/pages/leads/gohighlevel-contacts"));
-const KnowItAllChat = lazy(() => import("@/pages/tools/know-it-all-chat"));
-const KnowItAllDocuments = lazy(() => import("@/pages/tools/know-it-all-documents"));
+
+// Archive 頁面（低使用頻率，保留但移至 archive 目錄）
+const DataSourcesPage = lazy(() => import("@/pages/archive/settings/data-sources"));
+const FacebookSettings = lazy(() => import("@/pages/archive/settings/facebook-settings"));
+const KnowItAllChat = lazy(() => import("@/pages/archive/tools/know-it-all-chat"));
+const KnowItAllDocuments = lazy(() => import("@/pages/archive/tools/know-it-all-documents"));
+const TeachingQualityList = lazy(() => import("@/pages/archive/teaching-quality/teaching-quality-list"));
 
 // Loading 元件
 function PageLoader() {
@@ -191,21 +186,31 @@ function Router() {
         <ProtectedRoute><FacebookSettings /></ProtectedRoute>
       </Route>
 
-      {/* 舊路由兼容（保持原有功能） */}
+      {/* 舊路由重導向（向後兼容） */}
       <Route path="/dashboard/kpi-calculator">
-        <ProtectedRoute><DashboardKPICalculator /></ProtectedRoute>
+        <ProtectedRoute>
+          <Redirect to="/tools/kpi-calculator" />
+        </ProtectedRoute>
       </Route>
       <Route path="/dashboard/trial-report">
-        <ProtectedRoute><DashboardTrialReport /></ProtectedRoute>
+        <ProtectedRoute>
+          <Redirect to="/reports/trial-overview?tab=data" />
+        </ProtectedRoute>
       </Route>
       <Route path="/dashboard/total-report">
-        <ProtectedRoute><DashboardTrialReport /></ProtectedRoute>
+        <ProtectedRoute>
+          <Redirect to="/reports/trial-overview?tab=data" />
+        </ProtectedRoute>
       </Route>
       <Route path="/dashboard/ai-analysis">
-        <ProtectedRoute><DashboardAIAnalysis /></ProtectedRoute>
+        <ProtectedRoute>
+          <Redirect to="/tools/ai-analysis" />
+        </ProtectedRoute>
       </Route>
       <Route path="/dashboard/raw-data-mvp">
-        <ProtectedRoute><DashboardRawDataMVP /></ProtectedRoute>
+        <ProtectedRoute>
+          <Redirect to="/tools/raw-data-mvp" />
+        </ProtectedRoute>
       </Route>
 
         {/* 404 */}

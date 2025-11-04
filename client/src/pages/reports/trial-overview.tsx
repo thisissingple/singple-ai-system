@@ -6,7 +6,7 @@
 
 import { useState, useRef, useMemo, useEffect } from 'react';
 import { format } from 'date-fns';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueries } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { useFilteredSidebar } from '@/hooks/use-sidebar';
@@ -125,76 +125,78 @@ export default function TrialOverview() {
 
   // ==================== Tab 1: 整體數據 API ====================
 
-  // 取得全時間數據用於 KPI Overview
-  const {
-    data: allTimeData,
-    isLoading: isLoadingAll,
-    isError: isErrorAll,
-    error: errorAll,
-  } = useQuery<TotalReportData>({
-    queryKey: ['total-report-all', format(selectedDate, 'yyyy-MM-dd')],
-    queryFn: async () => {
-      const params = new URLSearchParams({
-        period: 'all',
-        baseDate: format(selectedDate, 'yyyy-MM-dd'),
-      });
+  // ⚡ 效能優化：使用 useQueries 並行載入兩個 API，減少等待時間
+  const queries = useQueries({
+    queries: [
+      {
+        queryKey: ['total-report-all', format(selectedDate, 'yyyy-MM-dd')],
+        queryFn: async () => {
+          const params = new URLSearchParams({
+            period: 'all',
+            baseDate: format(selectedDate, 'yyyy-MM-dd'),
+          });
 
-      const response = await fetch(`/api/reports/trial-class?${params.toString()}`, {
-        credentials: 'include',
-      });
+          const response = await fetch(`/api/reports/trial-class?${params.toString()}`, {
+            credentials: 'include',
+          });
 
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
+          if (!response.ok) {
+            throw new Error(`API error: ${response.status}`);
+          }
 
-      const json = await response.json();
-      if (!json.success) {
-        throw new Error(json.error || 'Failed to fetch report');
-      }
+          const json = await response.json();
+          if (!json.success) {
+            throw new Error(json.error || 'Failed to fetch report');
+          }
 
-      return json.data;
-    },
-    staleTime: 1000 * 60 * 5,
-    gcTime: 1000 * 60 * 10,
-    retry: 1,
-    enabled: activeMainTab === 'data', // 只在 Tab 1 時載入
+          return json.data;
+        },
+        staleTime: 1000 * 60 * 5,
+        gcTime: 1000 * 60 * 10,
+        retry: 1,
+        enabled: activeMainTab === 'data', // 只在 Tab 1 時載入
+      },
+      {
+        queryKey: ['total-report-filtered', period, format(selectedDate, 'yyyy-MM-dd')],
+        queryFn: async () => {
+          const params = new URLSearchParams({
+            period,
+            baseDate: format(selectedDate, 'yyyy-MM-dd'),
+          });
+
+          const response = await fetch(`/api/reports/trial-class?${params.toString()}`, {
+            credentials: 'include',
+          });
+
+          if (!response.ok) {
+            throw new Error(`API error: ${response.status}`);
+          }
+
+          const json = await response.json();
+          if (!json.success) {
+            throw new Error(json.error || 'Failed to fetch report');
+          }
+
+          return json.data;
+        },
+        staleTime: 1000 * 60 * 5,
+        gcTime: 1000 * 60 * 10,
+        retry: 1,
+        enabled: activeMainTab === 'data', // 只在 Tab 1 時載入
+      },
+    ],
   });
 
-  // 取得篩選後的數據用於詳細分析
-  const {
-    data: filteredData,
-    isLoading: isLoadingFiltered,
-    isError: isErrorFiltered,
-    error: errorFiltered,
-    refetch: refetchTrialReport,
-  } = useQuery<TotalReportData>({
-    queryKey: ['total-report-filtered', period, format(selectedDate, 'yyyy-MM-dd')],
-    queryFn: async () => {
-      const params = new URLSearchParams({
-        period,
-        baseDate: format(selectedDate, 'yyyy-MM-dd'),
-      });
-
-      const response = await fetch(`/api/reports/trial-class?${params.toString()}`, {
-        credentials: 'include',
-      });
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-
-      const json = await response.json();
-      if (!json.success) {
-        throw new Error(json.error || 'Failed to fetch report');
-      }
-
-      return json.data;
-    },
-    staleTime: 1000 * 60 * 5,
-    gcTime: 1000 * 60 * 10,
-    retry: 1,
-    enabled: activeMainTab === 'data', // 只在 Tab 1 時載入
-  });
+  // 解構查詢結果
+  const allTimeData = queries[0].data;
+  const filteredData = queries[1].data;
+  const isLoadingAll = queries[0].isLoading;
+  const isLoadingFiltered = queries[1].isLoading;
+  const isErrorAll = queries[0].isError;
+  const isErrorFiltered = queries[1].isError;
+  const errorAll = queries[0].error;
+  const errorFiltered = queries[1].error;
+  const refetchTrialReport = queries[1].refetch;
 
   const isLoadingData = isLoadingAll || isLoadingFiltered;
   const isErrorData = isErrorAll || isErrorFiltered;
