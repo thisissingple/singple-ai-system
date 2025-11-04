@@ -300,27 +300,9 @@ export class TotalReportService {
         ) : undefined
       );
 
-      // 整理 rawData
-      const rawData = [
-        ...attendanceData.map(d => ({
-          id: d.id,
-          data: d.data,
-          source: '體驗課上課記錄表',
-          lastUpdated: d.lastUpdated?.toISOString() || new Date().toISOString(),
-        })),
-        ...purchaseData.map(d => ({
-          id: d.id,
-          data: d.data,
-          source: '體驗課購買記錄表',
-          lastUpdated: d.lastUpdated?.toISOString() || new Date().toISOString(),
-        })),
-        ...eodsData.map(d => ({
-          id: d.id,
-          data: d.data,
-          source: 'EODs for Closers',
-          lastUpdated: d.lastUpdated?.toISOString() || new Date().toISOString(),
-        })),
-      ];
+      // 🚀 效能優化：移除 rawData 傳輸，減少 ~70% 資料量
+      // rawData 僅用於除錯，前端不需要
+      // const rawData = [...]; // 已註解
 
       return {
         mode: 'live',
@@ -334,7 +316,7 @@ export class TotalReportService {
         teacherInsights,
         studentInsights,
         aiSuggestions,
-        rawData,
+        // rawData, // 🚀 已移除以提升效能
         dataSourceMeta: {
           trialClassAttendance: {
             rows: attendanceData.length,

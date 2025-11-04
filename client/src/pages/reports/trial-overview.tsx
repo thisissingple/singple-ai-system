@@ -151,8 +151,8 @@ export default function TrialOverview() {
 
           return json.data;
         },
-        staleTime: 1000 * 60 * 5,
-        gcTime: 1000 * 60 * 10,
+        staleTime: 1000 * 60 * 15, // 🚀 延長快取時間：5分鐘 → 15分鐘
+        gcTime: 1000 * 60 * 30,     // 🚀 延長垃圾回收：10分鐘 → 30分鐘
         retry: 1,
         enabled: activeMainTab === 'data', // 只在 Tab 1 時載入
       },
@@ -179,8 +179,8 @@ export default function TrialOverview() {
 
           return json.data;
         },
-        staleTime: 1000 * 60 * 5,
-        gcTime: 1000 * 60 * 10,
+        staleTime: 1000 * 60 * 15, // 🚀 延長快取時間：5分鐘 → 15分鐘
+        gcTime: 1000 * 60 * 30,     // 🚀 延長垃圾回收：10分鐘 → 30分鐘
         retry: 1,
         enabled: activeMainTab === 'data', // 只在 Tab 1 時載入
       },
