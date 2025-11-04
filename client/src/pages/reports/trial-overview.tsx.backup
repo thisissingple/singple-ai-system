@@ -392,68 +392,84 @@ export default function TrialOverview() {
     }
 
     const attendanceId = record.attendance_id;
-    const studentName = record.student_name;
     startAnalyzing(attendanceId);
 
+    // 顯示開始分析的提示
     toast({
       title: '🤖 AI 分析中',
-      description: `正在分析 ${studentName} 的體驗課記錄，請查看進度條...`
+      description: `正在分析 ${record.student_name} 的體驗課記錄，請查看進度條...`
     });
 
-    // Progress simulation with countdown timer
-    const startTime = Date.now();
-    const estimatedTotal = 60; // 60 seconds average
-    
-    const progressInterval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      const percentage = Math.min(Math.floor((elapsed / estimatedTotal) * 79), 79);
-      const remaining = Math.max(estimatedTotal - elapsed, 1);
-
-      setProgressMap(prev => {
-        const newMap = new Map(prev);
-        newMap.set(attendanceId, {
-          percentage,
-          message: '正在進行 AI 教學品質分析...',
-          estimatedSecondsRemaining: remaining
-        });
-        const mapObj = Object.fromEntries(newMap);
-        localStorage.setItem(PROGRESS_MAP_KEY, JSON.stringify(mapObj));
-        return newMap;
-      });
-    }, 1000);
-
     try {
+      // Use fetch with streaming for progress updates
       const response = await fetch(`/api/teaching-quality/analyze-single/${attendanceId}`, {
-        method: 'POST'
+        method: 'POST',
+        headers: {
+          'Accept': 'text/event-stream'
+        }
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || '分析失敗，請稍後再試');
+        throw new Error('分析請求失敗');
       }
 
-      clearInterval(progressInterval);
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
 
-      // Show 100% completion
-      setProgressMap(prev => {
-        const newMap = new Map(prev);
-        newMap.set(attendanceId, { percentage: 100, message: '分析完成！', estimatedSecondsRemaining: 0 });
-        const mapObj = Object.fromEntries(newMap);
-        localStorage.setItem(PROGRESS_MAP_KEY, JSON.stringify(mapObj));
-        return newMap;
-      });
+      if (!reader) {
+        throw new Error('無法讀取響應流');
+      }
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      let buffer = '';
 
-      toast({
-        title: '✅ 分析完成',
-        description: `${studentName} 的課程分析已生成，可以點擊「查看詳情」查看結果`
-      });
+      while (true) {
+        const { done, value } = await reader.read();
 
-      await fetchAnalysisData({ showLoader: false });
+        if (done) break;
 
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = JSON.parse(line.substring(6));
+
+            if (data.error) {
+              throw new Error(data.error);
+            }
+
+            if (data.complete) {
+              // Analysis complete
+              toast({
+                title: '✅ 分析完成',
+                description: `${record.student_name} 的課程分析已生成，可以點擊「查看詳情」查看結果`
+              });
+
+              // Refresh the data
+              await fetchAnalysisData({ showLoader: false });
+              break;
+            }
+
+            // Update progress and save to localStorage
+            if (data.percentage !== undefined) {
+              setProgressMap(prev => {
+                const newMap = new Map(prev);
+                newMap.set(attendanceId, {
+                  percentage: data.percentage,
+                  message: data.message || '處理中...',
+                  estimatedSecondsRemaining: data.estimatedSecondsRemaining
+                });
+                // Save to localStorage
+                const mapObj = Object.fromEntries(newMap);
+                localStorage.setItem(PROGRESS_MAP_KEY, JSON.stringify(mapObj));
+                return newMap;
+              });
+            }
+          }
+        }
+      }
     } catch (error: any) {
-      clearInterval(progressInterval);
       console.error('Manual analysis failed:', error);
       toast({
         title: '❌ 分析失敗',
@@ -465,8 +481,6 @@ export default function TrialOverview() {
       setProgressMap(prev => {
         const newMap = new Map(prev);
         newMap.delete(attendanceId);
-        const mapObj = Object.fromEntries(newMap);
-        localStorage.setItem(PROGRESS_MAP_KEY, JSON.stringify(mapObj));
         return newMap;
       });
     }
