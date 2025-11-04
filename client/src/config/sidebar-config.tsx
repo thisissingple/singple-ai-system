@@ -173,12 +173,6 @@ export const sidebarConfig: SidebarSection[] = [
         requiredModule: 'form_builder',
       },
       {
-        label: '權限管理',
-        href: '/settings/permissions',
-        icon: Shield,
-        requiredRoles: ['admin'],
-      },
-      {
         label: 'Google Sheets 串接',
         href: '/settings/google-sheets-sync',
         icon: RefreshCw,

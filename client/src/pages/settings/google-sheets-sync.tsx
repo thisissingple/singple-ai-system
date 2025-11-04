@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -35,7 +36,7 @@ interface SheetMapping {
   created_at: string;
 }
 
-export default function GoogleSheetsSync() {
+function GoogleSheetsSyncContent() {
   const [sources, setSources] = useState<GoogleSheetsSource[]>([]);
   const [mappings, setMappings] = useState<SheetMapping[]>([]);
   const [loading, setLoading] = useState(true);
@@ -206,7 +207,7 @@ export default function GoogleSheetsSync() {
   }
 
   return (
-    <div className="container mx-auto py-6 space-y-6">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -376,5 +377,13 @@ export default function GoogleSheetsSync() {
         progress={syncProgress}
       />
     </div>
+  );
+}
+
+export default function GoogleSheetsSync() {
+  return (
+    <DashboardLayout title="Google Sheets 串接">
+      <GoogleSheetsSyncContent />
+    </DashboardLayout>
   );
 }
