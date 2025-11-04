@@ -71,20 +71,6 @@ export const sidebarConfig: SidebarSection[] = [
         requiredModule: 'trial_class_report',
       },
       {
-        label: '完課率報表',
-        href: '/reports/completion-rate',
-        icon: Target,
-        badge: '即將推出',
-        requiredModule: 'trial_class_report',
-      },
-      {
-        label: '滿意度報表',
-        href: '/reports/satisfaction',
-        icon: Smile,
-        badge: '即將推出',
-        requiredModule: 'trial_class_report',
-      },
-      {
         label: '表單填寫',
         href: '/forms',
         icon: PenTool,
@@ -105,21 +91,27 @@ export const sidebarConfig: SidebarSection[] = [
         requiredModule: 'telemarketing_system',
       },
       {
+        label: 'GoHighLevel 聯絡人',
+        href: '/leads/gohighlevel',
+        icon: Users,
+        requiredModule: 'telemarketing_system',
+      },
+      {
         label: '廣告名單',
         href: '/telemarketing/ad-leads',
         icon: Phone,
         requiredModule: 'ad_leads',
       },
       {
+        label: '廣告成效',
+        href: '/telemarketing/ad-performance',
+        icon: BarChart3,
+        requiredModule: 'ad_leads',
+      },
+      {
         label: '電訪記錄',
         href: '/telemarketing/call-records',
         icon: PhoneCall,
-        requiredModule: 'telemarketing_system',
-      },
-      {
-        label: 'GoHighLevel 聯絡人',
-        href: '/leads/gohighlevel',
-        icon: Users,
         requiredModule: 'telemarketing_system',
       },
       {
@@ -141,12 +133,6 @@ export const sidebarConfig: SidebarSection[] = [
         href: '/reports/consultants',
         icon: Users,
         requiredModule: 'consultant_report',
-      },
-      {
-        label: '體驗課總覽',
-        href: '/reports/trial-overview',
-        icon: FileText,
-        requiredModule: 'trial_class_report',
       },
       {
         label: '表單填寫',
@@ -175,6 +161,12 @@ export const sidebarConfig: SidebarSection[] = [
         requiredModule: 'trial_class_report',
       },
       {
+        label: '諮詢師報表',
+        href: '/reports/consultants',
+        icon: Users,
+        requiredModule: 'consultant_report',
+      },
+      {
         label: '成本獲利管理',
         href: '/reports/cost-profit',
         icon: DollarSign,
@@ -187,41 +179,15 @@ export const sidebarConfig: SidebarSection[] = [
         requiredModule: 'income_expense',
       },
       {
-        label: '諮詢師報表',
-        href: '/reports/consultants',
-        icon: Users,
-        requiredModule: 'consultant_report',
-      },
-      {
-        label: '完課率報表',
-        href: '/reports/completion-rate',
-        icon: Target,
-        badge: '即將推出',
-        requiredModule: 'trial_class_report',
-      },
-      {
-        label: '滿意度報表',
-        href: '/reports/satisfaction',
-        icon: Smile,
-        badge: '即將推出',
-        requiredModule: 'trial_class_report',
-      },
-      {
-        label: '廣告成效',
-        href: '/telemarketing/ad-performance',
-        icon: BarChart3,
-        requiredModule: 'ad_leads',
+        label: '學生跟進',
+        href: '/telemarketing/student-follow-up',
+        icon: UserCog,
+        requiredModule: 'telemarketing_system',
       },
       {
         label: 'GoHighLevel 聯絡人',
         href: '/leads/gohighlevel',
         icon: Users,
-        requiredModule: 'telemarketing_system',
-      },
-      {
-        label: '學生跟進',
-        href: '/telemarketing/student-follow-up',
-        icon: UserCog,
         requiredModule: 'telemarketing_system',
       },
       {
@@ -231,46 +197,16 @@ export const sidebarConfig: SidebarSection[] = [
         requiredModule: 'ad_leads',
       },
       {
+        label: '廣告成效',
+        href: '/telemarketing/ad-performance',
+        icon: BarChart3,
+        requiredModule: 'ad_leads',
+      },
+      {
         label: '電訪記錄',
         href: '/telemarketing/call-records',
         icon: PhoneCall,
         requiredModule: 'telemarketing_system',
-      },
-      {
-        label: '資料庫瀏覽器',
-        href: '/tools/database-browser',
-        icon: Database,
-        requiredRoles: ['admin'], // 保留舊系統（admin 專屬工具）
-      },
-      {
-        label: 'KPI 計算器',
-        href: '/tools/kpi-calculator',
-        icon: Calculator,
-        requiredModule: 'dashboard',
-      },
-      {
-        label: 'AI 分析',
-        href: '/tools/ai-analysis',
-        icon: Brain,
-        requiredModule: 'dashboard',
-      },
-      {
-        label: 'Raw Data MVP',
-        href: '/tools/raw-data-mvp',
-        icon: Sheet,
-        requiredModule: 'dashboard',
-      },
-      {
-        label: 'Know-it-all AI',
-        href: '/tools/know-it-all-chat',
-        icon: MessageSquare,
-        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
-      },
-      {
-        label: 'Know-it-all 文件',
-        href: '/tools/know-it-all-documents',
-        icon: BookOpen,
-        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
       },
       {
         label: '表單填寫',
@@ -285,41 +221,22 @@ export const sidebarConfig: SidebarSection[] = [
         requiredModule: 'employee_management',
       },
       {
-        label: '權限管理',
-        href: '/settings/permissions',
-        icon: Shield,
-        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
-      },
-      {
-        label: '資料來源',
-        href: '/settings/data-sources',
-        icon: Sheet,
-        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
-      },
-      {
         label: '表單管理',
         href: '/settings/form-builder',
         icon: FormInput,
         requiredModule: 'form_builder',
       },
       {
-        label: 'Google Sheets 串接 2.0',
+        label: '權限管理',
+        href: '/settings/permissions',
+        icon: Shield,
+        requiredRoles: ['admin'],
+      },
+      {
+        label: 'Google Sheets 串接',
         href: '/settings/google-sheets-sync',
         icon: RefreshCw,
-        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
-      },
-      {
-        label: 'Facebook 整合',
-        href: '/settings/facebook',
-        icon: Facebook,
-        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
-      },
-      {
-        label: '系統設定',
-        href: '/settings/system',
-        icon: Settings,
-        badge: '即將推出',
-        requiredRoles: ['admin'], // 保留舊系統（admin 專屬）
+        requiredRoles: ['admin'],
       },
     ],
   },
