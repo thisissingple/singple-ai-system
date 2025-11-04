@@ -39,7 +39,7 @@ import {
   Globe,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import ReportsLayout from '../reports-layout';
+import ReportsLayout from '../../reports-layout';
 
 interface KnowledgeDocument {
   id: string;

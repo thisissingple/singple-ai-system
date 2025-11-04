@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import ReactMarkdown from 'react-markdown';
-import ReportsLayout from '../reports-layout';
+import ReportsLayout from '../../reports-layout';
 
 interface Message {
   id: string;
