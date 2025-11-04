@@ -286,11 +286,39 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
     }
   });
 
-  // 0.1. Analyze single attendance record
+  // 0.1. Analyze single attendance record with SSE progress
   app.post('/api/teaching-quality/analyze-single/:attendanceId', isAuthenticated, async (req: any, res) => {
+    // Check if client wants SSE progress updates
+    const wantsSSE = req.headers.accept?.includes('text/event-stream');
+
+    // If SSE requested, set up streaming headers
+    if (wantsSSE) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+    }
+
+    // Helper to send SSE progress
+    const sendProgress = (percentage: number, message: string, estimatedSecondsRemaining?: number) => {
+      if (wantsSSE) {
+        res.write(`data: ${JSON.stringify({ percentage, message, estimatedSecondsRemaining })}\n\n`);
+      }
+    };
+
+    const startTime = Date.now();
+    const estimateTimeRemaining = (currentPercentage: number) => {
+      const elapsed = (Date.now() - startTime) / 1000; // seconds
+      if (currentPercentage <= 0) return null;
+      const totalEstimated = (elapsed / currentPercentage) * 100;
+      return Math.round(totalEstimated - elapsed);
+    };
+
     try {
       const { attendanceId } = req.params;
       const pool = createPool('session'); // Use session mode to avoid "Tenant not found" error
+
+      sendProgress(5, '正在載入課堂記錄...');
 
       // Get attendance record
       const attendanceResult = await pool.query(`
@@ -301,6 +329,10 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
 
       if (attendanceResult.rows.length === 0) {
         await pool.end();
+        if (wantsSSE) {
+          res.write(`data: ${JSON.stringify({ error: 'Attendance record not found' })}\n\n`);
+          return res.end();
+        }
         return res.status(404).json({ error: 'Attendance record not found' });
       }
 
@@ -309,12 +341,20 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
       // Check if already analyzed
       if (attendance.ai_analysis_id) {
         await pool.end();
+        if (wantsSSE) {
+          res.write(`data: ${JSON.stringify({ error: 'This record has already been analyzed' })}\n\n`);
+          return res.end();
+        }
         return res.status(400).json({ error: 'This record has already been analyzed' });
       }
 
       // Check if has transcript
       if (!attendance.class_transcript || attendance.class_transcript.trim().length === 0) {
         await pool.end();
+        if (wantsSSE) {
+          res.write(`data: ${JSON.stringify({ error: 'No transcript available for this record' })}\n\n`);
+          return res.end();
+        }
         return res.status(400).json({ error: 'No transcript available for this record' });
       }
 
@@ -325,12 +365,20 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
           const teacherName = `${userResult.rows[0].first_name} ${userResult.rows[0].last_name}`.trim();
           if (teacherName !== attendance.teacher_name) {
             await pool.end();
+            if (wantsSSE) {
+              res.write(`data: ${JSON.stringify({ error: 'Permission denied' })}\n\n`);
+              return res.end();
+            }
             return res.status(403).json({ error: 'Permission denied' });
           }
         }
       }
 
+      sendProgress(15, '正在解析課堂逐字稿...', estimateTimeRemaining(15));
+
       // Run AI analysis
+      sendProgress(25, '正在進行 AI 教學品質分析...', estimateTimeRemaining(25));
+
       const analysis = await teachingQualityGPT.analyzeTeachingQuality(
         attendance.class_transcript,
         attendance.student_name,
@@ -338,12 +386,21 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         null // No specific class topic
       );
 
+      sendProgress(80, '正在處理分析結果...', estimateTimeRemaining(80));
+
       // Parse scores from Markdown (Phase 32-33: Dual score system)
       // Fix: Use markdownOutput if available, otherwise fall back to summary
       const markdownSource = analysis.conversionSuggestions?.markdownOutput || analysis.summary;
       const parsedScores = parseScoresFromMarkdown(markdownSource);
 
+      sendProgress(85, '正在儲存分析結果到資料庫...', estimateTimeRemaining(85));
+
       // Save to database
+      // Fix: Validate analyzed_by is a valid UUID before saving
+      const analyzedBy = req.user?.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.user.id)
+        ? req.user.id
+        : null;
+
       const result = await insertAndReturn('teaching_quality_analysis', {
         attendance_id: attendanceId,
         teacher_id: null,
@@ -364,8 +421,10 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         conversion_suggestions: analysis.conversionSuggestions ? JSON.stringify(analysis.conversionSuggestions) : null,  // 儲存完整的推課建議內容
         // Check if student has purchased by joining with trial_class_purchases
         conversion_status: attendance.no_conversion_reason ? 'not_converted' : 'pending',
-        analyzed_by: req.user?.id || null
+        analyzed_by: analyzedBy
       });
+
+      sendProgress(90, '正在更新課堂記錄...', estimateTimeRemaining(90));
 
       // Update attendance record with analysis reference
       await pool.query(`
@@ -373,6 +432,8 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         SET ai_analysis_id = $1
         WHERE id = $2
       `, [result.id, attendanceId]);
+
+      sendProgress(95, '正在建立建議執行記錄...', estimateTimeRemaining(95));
 
       // Create suggestion execution log entries
       for (let i = 0; i < analysis.suggestions.length; i++) {
@@ -383,6 +444,8 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
           is_executed: false
         });
       }
+
+      sendProgress(98, '正在儲存到學生知識庫...', estimateTimeRemaining(98));
 
       // Auto-save analysis to student knowledge base
       try {
@@ -402,7 +465,9 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
 
       await pool.end();
 
-      res.json({
+      sendProgress(100, '分析完成！', 0);
+
+      const responseData = {
         success: true,
         data: {
           ...result,
@@ -410,10 +475,23 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
           weaknesses: analysis.weaknesses,
           suggestions: analysis.suggestions
         }
-      });
+      };
+
+      // Send final result and close connection
+      if (wantsSSE) {
+        res.write(`data: ${JSON.stringify({ ...responseData, complete: true })}\n\n`);
+        res.end();
+      } else {
+        res.json(responseData);
+      }
     } catch (error: any) {
       console.error('Single analysis failed:', error);
-      res.status(500).json({ error: error.message });
+      if (wantsSSE) {
+        res.write(`data: ${JSON.stringify({ error: error.message, complete: true })}\n\n`);
+        res.end();
+      } else {
+        res.status(500).json({ error: error.message });
+      }
     }
   });
 

@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
 import { useTeachingQuality } from '@/contexts/teaching-quality-context';
 import {
@@ -107,6 +108,14 @@ export default function TrialOverview() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(true);
   const [analyzingIds, setAnalyzingIds] = useState<string[]>([]);
+
+  // 🆕 Progress tracking for each analyzing record
+  type ProgressInfo = {
+    percentage: number;
+    message: string;
+    estimatedSecondsRemaining?: number;
+  };
+  const [progressMap, setProgressMap] = useState<Map<string, ProgressInfo>>(new Map());
 
   // 處理 Tab 切換時更新 URL
   const handleMainTabChange = (newTab: 'data' | 'analysis') => {
@@ -302,13 +311,41 @@ export default function TrialOverview() {
 
   // ==================== Tab 2: 學員分析 - 輔助函數 ====================
 
+  // 🆕 持久化分析中的狀態到 localStorage
+  const ANALYZING_IDS_KEY = 'trial_overview_analyzing_ids';
+
   const startAnalyzing = (attendanceId: string) => {
-    setAnalyzingIds((prev) => (prev.includes(attendanceId) ? prev : [...prev, attendanceId]));
+    setAnalyzingIds((prev) => {
+      const newIds = prev.includes(attendanceId) ? prev : [...prev, attendanceId];
+      // 儲存到 localStorage
+      localStorage.setItem(ANALYZING_IDS_KEY, JSON.stringify(newIds));
+      return newIds;
+    });
   };
 
   const finishAnalyzing = (attendanceId: string) => {
-    setAnalyzingIds((prev) => prev.filter((id) => id !== attendanceId));
+    setAnalyzingIds((prev) => {
+      const newIds = prev.filter((id) => id !== attendanceId);
+      // 更新 localStorage
+      localStorage.setItem(ANALYZING_IDS_KEY, JSON.stringify(newIds));
+      return newIds;
+    });
   };
+
+  // 🆕 頁面載入時從 localStorage 恢復分析中狀態
+  useEffect(() => {
+    const savedIds = localStorage.getItem(ANALYZING_IDS_KEY);
+    if (savedIds) {
+      try {
+        const ids = JSON.parse(savedIds);
+        if (Array.isArray(ids) && ids.length > 0) {
+          setAnalyzingIds(ids);
+        }
+      } catch (e) {
+        console.error('Failed to parse analyzing IDs from localStorage:', e);
+      }
+    }
+  }, []);
 
   const handleManualAnalyze = async (record: StudentAnalysisRecord) => {
     if (!record.has_transcript) {
@@ -320,30 +357,88 @@ export default function TrialOverview() {
       return;
     }
 
-    startAnalyzing(record.attendance_id);
+    const attendanceId = record.attendance_id;
+    startAnalyzing(attendanceId);
+
+    // Initialize progress
+    setProgressMap(prev => {
+      const newMap = new Map(prev);
+      newMap.set(attendanceId, { percentage: 0, message: '準備開始分析...' });
+      return newMap;
+    });
 
     // 顯示開始分析的提示
     toast({
       title: '🤖 AI 分析中',
-      description: `正在分析 ${record.student_name} 的體驗課記錄，預計需要 30-60 秒，請稍候...`
+      description: `正在分析 ${record.student_name} 的體驗課記錄，請查看進度條...`
     });
 
     try {
-      const response = await fetch(`/api/teaching-quality/analyze-single/${record.attendance_id}`, {
-        method: 'POST'
+      // Use fetch with streaming for progress updates
+      const response = await fetch(`/api/teaching-quality/analyze-single/${attendanceId}`, {
+        method: 'POST',
+        headers: {
+          'Accept': 'text/event-stream'
+        }
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || '分析失敗，請稍後再試');
+        throw new Error('分析請求失敗');
       }
 
-      toast({
-        title: '✅ 分析完成',
-        description: `${record.student_name} 的課程分析已生成，可以點擊「查看詳情」查看結果`
-      });
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
 
-      await fetchAnalysisData({ showLoader: false });
+      if (!reader) {
+        throw new Error('無法讀取響應流');
+      }
+
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = JSON.parse(line.substring(6));
+
+            if (data.error) {
+              throw new Error(data.error);
+            }
+
+            if (data.complete) {
+              // Analysis complete
+              toast({
+                title: '✅ 分析完成',
+                description: `${record.student_name} 的課程分析已生成，可以點擊「查看詳情」查看結果`
+              });
+
+              // Refresh the data
+              await fetchAnalysisData({ showLoader: false });
+              break;
+            }
+
+            // Update progress
+            if (data.percentage !== undefined) {
+              setProgressMap(prev => {
+                const newMap = new Map(prev);
+                newMap.set(attendanceId, {
+                  percentage: data.percentage,
+                  message: data.message || '處理中...',
+                  estimatedSecondsRemaining: data.estimatedSecondsRemaining
+                });
+                return newMap;
+              });
+            }
+          }
+        }
+      }
     } catch (error: any) {
       console.error('Manual analysis failed:', error);
       toast({
@@ -352,7 +447,12 @@ export default function TrialOverview() {
         variant: 'destructive'
       });
     } finally {
-      finishAnalyzing(record.attendance_id);
+      finishAnalyzing(attendanceId);
+      setProgressMap(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(attendanceId);
+        return newMap;
+      });
     }
   };
 
@@ -762,23 +862,36 @@ export default function TrialOverview() {
                                   查看詳情
                                 </Button>
                               ) : record.has_transcript ? (
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleManualAnalyze(record)}
-                                  disabled={analyzingIds.includes(record.attendance_id)}
-                                >
+                                <>
                                   {analyzingIds.includes(record.attendance_id) ? (
-                                    <>
-                                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                      分析中…
-                                    </>
+                                    <div className="w-48 space-y-1">
+                                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                        <span>{progressMap.get(record.attendance_id)?.message || '分析中...'}</span>
+                                      </div>
+                                      <Progress
+                                        value={progressMap.get(record.attendance_id)?.percentage || 0}
+                                        className="h-2"
+                                      />
+                                      <div className="flex justify-between text-xs text-muted-foreground">
+                                        <span>{progressMap.get(record.attendance_id)?.percentage || 0}%</span>
+                                        {progressMap.get(record.attendance_id)?.estimatedSecondsRemaining !== undefined && (
+                                          <span>
+                                            剩餘 {progressMap.get(record.attendance_id)?.estimatedSecondsRemaining}秒
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
                                   ) : (
-                                    <>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleManualAnalyze(record)}
+                                    >
                                       <Wand2 className="h-3 w-3 mr-1" />
                                       手動分析
-                                    </>
+                                    </Button>
                                   )}
-                                </Button>
+                                </>
                               ) : (
                                 <span className="text-xs text-gray-400">無逐字稿</span>
                               )}
