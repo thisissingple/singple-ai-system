@@ -54,11 +54,14 @@ function GoogleSheetsSyncContent() {
     try {
       const response = await fetch('/api/sheets/sources');
       const data = await response.json();
-      if (data.success) {
-        setSources(data.data);
+      if (data.success && data.data) {
+        setSources(Array.isArray(data.data) ? data.data : []);
+      } else {
+        setSources([]);
       }
     } catch (error) {
       console.error('載入資料來源失敗:', error);
+      setSources([]);
     }
   };
 
@@ -67,11 +70,14 @@ function GoogleSheetsSyncContent() {
     try {
       const response = await fetch('/api/sheets/mappings');
       const data = await response.json();
-      if (data.success) {
-        setMappings(data.data);
+      if (data.success && data.data) {
+        setMappings(Array.isArray(data.data) ? data.data : []);
+      } else {
+        setMappings([]);
       }
     } catch (error) {
       console.error('載入映射設定失敗:', error);
+      setMappings([]);
     }
   };
 
