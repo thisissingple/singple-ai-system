@@ -7,6 +7,7 @@ import { storage, googleSheetsService } from "./services/legacy-stub";
 import { autoAnalysisService } from "./services/deprecated/auto-analysis";
 import { totalReportService } from "./services/reporting/total-report-service";
 import { introspectService } from "./services/reporting/introspect-service";
+import { generateConsultantReport, getConsultationList, type ConsultantReportParams, type PeriodType, type DealStatus, type TrendGrouping } from "./services/consultant-report-service";
 import { devSeedService } from "./services/deprecated/dev-seed-service";
 import { reportMetricConfigService } from "./services/reporting/report-metric-config-service";
 import { formulaEngine } from "./services/reporting/formula-engine";
@@ -3697,6 +3698,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: false,
         error: 'Internal server error',
         message: '產生報表時發生錯誤',
+      });
+    }
+  });
+
+  // Consultant Report API - 諮詢師報表
+  app.get('/api/reports/consultants', isAuthenticated, requireModulePermission('consultant_report'), async (req, res) => {
+    try {
+      // 解析查詢參數
+      const params: ConsultantReportParams = {
+        period: (req.query.period as PeriodType) || 'month',
+        startDate: req.query.startDate as string | undefined,
+        endDate: req.query.endDate as string | undefined,
+        consultantName: req.query.consultantName as string | undefined,
+        leadSource: req.query.leadSource
+          ? (req.query.leadSource as string).split(',').filter(s => s.trim())
+          : undefined,
+        planType: req.query.planType
+          ? (req.query.planType as string).split(',').filter(s => s.trim())
+          : undefined,
+        dealStatus: (req.query.dealStatus as DealStatus) || 'all',
+        compareWithPrevious: req.query.compareWithPrevious === 'true',
+        compareWithLastYear: req.query.compareWithLastYear === 'true',
+        trendGrouping: req.query.trendGrouping as TrendGrouping | undefined,
+      };
+
+      // 驗證 period 參數
+      const validPeriods: PeriodType[] = ['today', 'week', 'month', 'quarter', 'year', 'all', 'custom'];
+      if (!validPeriods.includes(params.period)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid period',
+          message: `期間類型無效。必須為: ${validPeriods.join(', ')}`,
+        });
+      }
+
+      // 驗證 custom 期間必須提供日期
+      if (params.period === 'custom' && (!params.startDate || !params.endDate)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing date range',
+          message: '自訂期間必須提供 startDate 和 endDate 參數',
+        });
+      }
+
+      // 驗證 dealStatus 參數
+      const validStatuses: DealStatus[] = ['all', 'closed', 'in_progress', 'lost'];
+      if (!validStatuses.includes(params.dealStatus)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid deal status',
+          message: `成交狀態無效。必須為: ${validStatuses.join(', ')}`,
+        });
+      }
+
+      console.log('[Consultant Report] Generating report with params:', params);
+
+      // 生成報表
+      const report = await generateConsultantReport(params);
+
+      res.json({
+        success: true,
+        data: report,
+      });
+    } catch (error: any) {
+      console.error('[Consultant Report] Error generating report:', error);
+
+      // 處理 PostgreSQL 連線錯誤
+      const errorMessage = error?.message || String(error);
+      const isDbError = errorMessage.includes('database') ||
+                       errorMessage.includes('connection') ||
+                       errorMessage.includes('ECONNREFUSED');
+
+      if (isDbError) {
+        return res.status(503).json({
+          success: false,
+          error: 'Database connection error',
+          message: '資料庫連線失敗，請稍後再試',
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        message: '產生諮詢師報表時發生錯誤',
+        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+      });
+    }
+  });
+
+  // Consultant Report - 諮詢名單詳情 API
+  app.get('/api/reports/consultants/consultation-list', isAuthenticated, requireModulePermission('consultant_report'), async (req, res) => {
+    try {
+      // 解析查詢參數（與主報表相同）
+      const params: ConsultantReportParams & { setterName?: string } = {
+        period: (req.query.period as PeriodType) || 'month',
+        startDate: req.query.startDate as string | undefined,
+        endDate: req.query.endDate as string | undefined,
+        consultantName: req.query.consultantName as string | undefined,
+        setterName: req.query.setterName as string | undefined,
+        dealStatus: (req.query.dealStatus as DealStatus) || 'all',
+      };
+
+      console.log('[Consultation List] Fetching consultation list with params:', params);
+
+      // 查詢諮詢名單
+      const consultationList = await getConsultationList(params);
+
+      res.json({
+        success: true,
+        data: consultationList,
+      });
+    } catch (error: any) {
+      console.error('[Consultation List] Error fetching consultation list:', error);
+
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        message: '查詢諮詢名單時發生錯誤',
       });
     }
   });
