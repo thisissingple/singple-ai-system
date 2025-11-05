@@ -96,6 +96,9 @@ export const routePermissions: Record<string, PermissionRule> = {
   '/settings/data-sources': {
     roles: ['admin'],
   },
+  '/settings/google-sheets-sync': {
+    roles: ['admin'],
+  },
   '/settings/form-builder': {
     roles: ['admin', 'manager'],
   },
