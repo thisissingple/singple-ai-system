@@ -14,6 +14,7 @@ import { CreateSourceDialog } from '@/components/sheets/create-source-dialog';
 import { FieldMappingDialog } from '@/components/sheets/field-mapping-dialog';
 import { SyncLogsDialog } from '@/components/sheets/sync-logs-dialog';
 import { SyncProgressDialog, SyncProgress } from '@/components/sheets/sync-progress-dialog';
+import { sidebarConfig } from '@/config/sidebar-config';
 
 interface GoogleSheetsSource {
   id: string;
@@ -388,7 +389,7 @@ function GoogleSheetsSyncContent() {
 
 export default function GoogleSheetsSync() {
   return (
-    <DashboardLayout title="Google Sheets 串接">
+    <DashboardLayout sidebarSections={sidebarConfig} title="Google Sheets 串接">
       <GoogleSheetsSyncContent />
     </DashboardLayout>
   );
