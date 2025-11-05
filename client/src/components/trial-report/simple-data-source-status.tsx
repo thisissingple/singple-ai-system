@@ -57,13 +57,13 @@ export function SimpleDataSourceStatus({
   const totalCount = attendanceCount + purchasesCount + dealsCount;
 
   return (
-    <Link href="/dashboard?tab=sheets">
+    <div className="flex gap-2">
+      {/* 主要資料來源狀態卡片 */}
       <div
         className={cn(
-          'group flex items-center justify-between p-4 rounded-lg border transition-all cursor-pointer',
+          'flex-1 flex items-center justify-between p-4 rounded-lg border',
           config.bgColor,
-          config.borderColor,
-          'hover:shadow-md hover:scale-[1.01]'
+          config.borderColor
         )}
       >
         <div className="flex items-center gap-3">
@@ -87,12 +87,27 @@ export function SimpleDataSourceStatus({
             </span>
           </div>
         </div>
-
-        <div className="flex items-center gap-2 text-sm text-muted-foreground group-hover:text-foreground transition-colors">
-          <span>管理資料來源</span>
-          <ChevronRight className="h-4 w-4" />
-        </div>
       </div>
-    </Link>
+
+      {/* 管理資料來源按鈕 */}
+      <div className="flex gap-2">
+        <Link href="/settings/google-sheets-sync">
+          <div
+            className="group flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-background hover:bg-accent hover:shadow-md transition-all cursor-pointer h-full"
+          >
+            <span className="text-sm font-medium whitespace-nowrap">Google Sheets 同步</span>
+            <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+          </div>
+        </Link>
+        <Link href="/tools/database-browser">
+          <div
+            className="group flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-background hover:bg-accent hover:shadow-md transition-all cursor-pointer h-full"
+          >
+            <span className="text-sm font-medium whitespace-nowrap">資料庫瀏覽器</span>
+            <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+          </div>
+        </Link>
+      </div>
+    </div>
   );
 }
