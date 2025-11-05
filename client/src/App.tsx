@@ -40,6 +40,7 @@ const AdPerformanceReport = lazy(() => import("@/pages/telemarketing/ad-performa
 const CallRecordsList = lazy(() => import("@/pages/telemarketing/call-records-list"));
 const StudentFollowUp = lazy(() => import("@/pages/telemarketing/student-follow-up"));
 const GoHighLevelContacts = lazy(() => import("@/pages/leads/gohighlevel-contacts"));
+const ConsultantsPage = lazy(() => import("@/pages/reports/consultants"));
 
 // Archive 頁面（低使用頻率，保留但移至 archive 目錄）
 const DataSourcesPage = lazy(() => import("@/pages/archive/settings/data-sources"));
@@ -100,6 +101,9 @@ function Router() {
       </Route>
       <Route path="/reports/income-expense">
         <ProtectedRoute><IncomeExpenseManager /></ProtectedRoute>
+      </Route>
+      <Route path="/reports/consultants">
+        <ProtectedRoute><ConsultantsPage /></ProtectedRoute>
       </Route>
 
       {/* 工具路由（新，包含側邊選單） */}
