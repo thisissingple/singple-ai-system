@@ -120,207 +120,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
   });
 
   // ============================================================================
-  // 2. GET /api/consultation-quality/:eodId
-  // Get single consultation with analysis details
-  // ============================================================================
-  app.get('/api/consultation-quality/:eodId', isAuthenticated, async (req: any, res) => {
-    try {
-      const { eodId } = req.params;
-      const pool = createPool();
-
-      // Get consultation record
-      const consultationQuery = `
-        SELECT
-          e.*,
-          cqa.id AS analysis_id,
-          cqa.overall_rating,
-          cqa.overall_comment,
-          cqa.strengths,
-          cqa.improvements,
-          cqa.recommendations,
-          cqa.rapport_building_score,
-          cqa.rapport_building_comment,
-          cqa.needs_analysis_score,
-          cqa.needs_analysis_comment,
-          cqa.objection_handling_score,
-          cqa.objection_handling_comment,
-          cqa.closing_technique_score,
-          cqa.closing_technique_comment,
-          cqa.analyzed_at,
-          cqa.analysis_version
-        FROM eods_for_closers e
-        LEFT JOIN consultation_quality_analysis cqa ON e.id = cqa.eod_id
-        WHERE e.id = $1
-      `;
-
-      const result = await pool.query(consultationQuery, [eodId]);
-
-      if (result.rows.length === 0) {
-        await pool.end();
-        return res.status(404).json({ error: 'Consultation record not found' });
-      }
-
-      const record = result.rows[0];
-
-      await pool.end();
-
-      res.json({
-        success: true,
-        data: record,
-      });
-    } catch (error: any) {
-      console.error('Failed to fetch consultation detail:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // ============================================================================
-  // 3. POST /api/consultation-quality/:eodId/analyze
-  // Manually trigger AI analysis for a consultation (not automatic!)
-  // ============================================================================
-  app.post('/api/consultation-quality/:eodId/analyze', isAuthenticated, async (req: any, res) => {
-    try {
-      const { eodId } = req.params;
-      const pool = createPool();
-
-      // Get consultation record
-      const consultationQuery = `
-        SELECT
-          e.id,
-          e.student_name,
-          e.closer_name,
-          e.consultation_date,
-          e.consultation_transcript
-        FROM eods_for_closers e
-        WHERE e.id = $1
-      `;
-
-      const result = await pool.query(consultationQuery, [eodId]);
-
-      if (result.rows.length === 0) {
-        await pool.end();
-        return res.status(404).json({ error: 'Consultation record not found' });
-      }
-
-      const consultation = result.rows[0];
-
-      // Check if transcript exists
-      if (!consultation.consultation_transcript || consultation.consultation_transcript.trim().length === 0) {
-        await pool.end();
-        return res.status(400).json({ error: '此諮詢記錄沒有轉錄內容，無法進行 AI 分析' });
-      }
-
-      // Check if analysis already exists
-      const existingAnalysisQuery = `
-        SELECT id FROM consultation_quality_analysis WHERE eod_id = $1
-      `;
-      const existingResult = await pool.query(existingAnalysisQuery, [eodId]);
-
-      if (existingResult.rows.length > 0) {
-        await pool.end();
-        return res.status(400).json({ error: '此諮詢記錄已有 AI 分析，請先刪除舊分析後再重新分析' });
-      }
-
-      // Perform AI analysis
-      console.log(`Analyzing consultation for ${consultation.student_name}...`);
-      const analysis = await consultationQualityGPTService.analyzeConsultationQuality(
-        consultation.consultation_transcript
-      );
-
-      // Insert analysis result
-      const insertQuery = `
-        INSERT INTO consultation_quality_analysis (
-          eod_id,
-          student_name,
-          closer_name,
-          consultation_date,
-          overall_rating,
-          overall_comment,
-          strengths,
-          improvements,
-          recommendations,
-          rapport_building_score,
-          rapport_building_comment,
-          needs_analysis_score,
-          needs_analysis_comment,
-          objection_handling_score,
-          objection_handling_comment,
-          closing_technique_score,
-          closing_technique_comment
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
-        )
-        RETURNING *
-      `;
-
-      const insertResult = await pool.query(insertQuery, [
-        eodId,
-        consultation.student_name,
-        consultation.closer_name,
-        consultation.consultation_date,
-        analysis.overallScore,
-        analysis.overallComment,
-        analysis.strengths,  // Already an array, PostgreSQL will handle it
-        analysis.weaknesses,  // Already an array, PostgreSQL will handle it
-        analysis.suggestions,  // Already an array, PostgreSQL will handle it
-        analysis.rapportBuildingScore,
-        analysis.rapportBuildingComment,
-        analysis.needsAnalysisScore,
-        analysis.needsAnalysisComment,
-        analysis.objectionHandlingScore,
-        analysis.objectionHandlingComment,
-        analysis.closingTechniqueScore,
-        analysis.closingTechniqueComment,
-      ]);
-
-      await pool.end();
-
-      res.json({
-        success: true,
-        data: insertResult.rows[0],
-        message: 'AI 分析完成',
-      });
-    } catch (error: any) {
-      console.error('Failed to analyze consultation:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // ============================================================================
-  // 4. DELETE /api/consultation-quality/:eodId/analysis
-  // Delete AI analysis for a consultation
-  // ============================================================================
-  app.delete('/api/consultation-quality/:eodId/analysis', isAuthenticated, async (req: any, res) => {
-    try {
-      const { eodId } = req.params;
-      const pool = createPool();
-
-      const deleteQuery = `
-        DELETE FROM consultation_quality_analysis
-        WHERE eod_id = $1
-        RETURNING id
-      `;
-
-      const result = await pool.query(deleteQuery, [eodId]);
-
-      await pool.end();
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({ error: '找不到此諮詢記錄的 AI 分析' });
-      }
-
-      res.json({
-        success: true,
-        message: 'AI 分析已刪除',
-      });
-    } catch (error: any) {
-      console.error('Failed to delete consultation analysis:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // ============================================================================
-  // 5. GET /api/consultation-quality/config
+  // 2. GET /api/consultation-quality/config
   // Get AI analysis configuration (admin only)
   // ============================================================================
   app.get('/api/consultation-quality/config', requireAdmin, async (req: any, res) => {
@@ -349,7 +149,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
   });
 
   // ============================================================================
-  // 6. PUT /api/consultation-quality/config
+  // 3. PUT /api/consultation-quality/config
   // Update AI analysis configuration (admin only)
   // ============================================================================
   app.put('/api/consultation-quality/config', requireAdmin, async (req: any, res) => {
@@ -403,7 +203,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
   });
 
   // ============================================================================
-  // 7. POST /api/consultation-quality/config/reset
+  // 4. POST /api/consultation-quality/config/reset
   // Reset configuration to defaults (admin only)
   // ============================================================================
   app.post('/api/consultation-quality/config/reset', requireAdmin, async (req: any, res) => {
@@ -631,4 +431,205 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
       res.status(500).json({ error: error.message });
     }
   });
+
+  // ============================================================================
+  // 5. GET /api/consultation-quality/:eodId
+  // Get single consultation with analysis details
+  // ============================================================================
+  app.get('/api/consultation-quality/:eodId', isAuthenticated, async (req: any, res) => {
+    try {
+      const { eodId } = req.params;
+      const pool = createPool();
+
+      // Get consultation record
+      const consultationQuery = `
+        SELECT
+          e.*,
+          cqa.id AS analysis_id,
+          cqa.overall_rating,
+          cqa.overall_comment,
+          cqa.strengths,
+          cqa.improvements,
+          cqa.recommendations,
+          cqa.rapport_building_score,
+          cqa.rapport_building_comment,
+          cqa.needs_analysis_score,
+          cqa.needs_analysis_comment,
+          cqa.objection_handling_score,
+          cqa.objection_handling_comment,
+          cqa.closing_technique_score,
+          cqa.closing_technique_comment,
+          cqa.analyzed_at,
+          cqa.analysis_version
+        FROM eods_for_closers e
+        LEFT JOIN consultation_quality_analysis cqa ON e.id = cqa.eod_id
+        WHERE e.id = $1
+      `;
+
+      const result = await pool.query(consultationQuery, [eodId]);
+
+      if (result.rows.length === 0) {
+        await pool.end();
+        return res.status(404).json({ error: 'Consultation record not found' });
+      }
+
+      const record = result.rows[0];
+
+      await pool.end();
+
+      res.json({
+        success: true,
+        data: record,
+      });
+    } catch (error: any) {
+      console.error('Failed to fetch consultation detail:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // 3. POST /api/consultation-quality/:eodId/analyze
+  // Manually trigger AI analysis for a consultation (not automatic!)
+  // ============================================================================
+  app.post('/api/consultation-quality/:eodId/analyze', isAuthenticated, async (req: any, res) => {
+    try {
+      const { eodId } = req.params;
+      const pool = createPool();
+
+      // Get consultation record
+      const consultationQuery = `
+        SELECT
+          e.id,
+          e.student_name,
+          e.closer_name,
+          e.consultation_date,
+          e.consultation_transcript
+        FROM eods_for_closers e
+        WHERE e.id = $1
+      `;
+
+      const result = await pool.query(consultationQuery, [eodId]);
+
+      if (result.rows.length === 0) {
+        await pool.end();
+        return res.status(404).json({ error: 'Consultation record not found' });
+      }
+
+      const consultation = result.rows[0];
+
+      // Check if transcript exists
+      if (!consultation.consultation_transcript || consultation.consultation_transcript.trim().length === 0) {
+        await pool.end();
+        return res.status(400).json({ error: '此諮詢記錄沒有轉錄內容，無法進行 AI 分析' });
+      }
+
+      // Check if analysis already exists
+      const existingAnalysisQuery = `
+        SELECT id FROM consultation_quality_analysis WHERE eod_id = $1
+      `;
+      const existingResult = await pool.query(existingAnalysisQuery, [eodId]);
+
+      if (existingResult.rows.length > 0) {
+        await pool.end();
+        return res.status(400).json({ error: '此諮詢記錄已有 AI 分析，請先刪除舊分析後再重新分析' });
+      }
+
+      // Perform AI analysis
+      console.log(`Analyzing consultation for ${consultation.student_name}...`);
+      const analysis = await consultationQualityGPTService.analyzeConsultationQuality(
+        consultation.consultation_transcript
+      );
+
+      // Insert analysis result
+      const insertQuery = `
+        INSERT INTO consultation_quality_analysis (
+          eod_id,
+          student_name,
+          closer_name,
+          consultation_date,
+          overall_rating,
+          overall_comment,
+          strengths,
+          improvements,
+          recommendations,
+          rapport_building_score,
+          rapport_building_comment,
+          needs_analysis_score,
+          needs_analysis_comment,
+          objection_handling_score,
+          objection_handling_comment,
+          closing_technique_score,
+          closing_technique_comment
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+        )
+        RETURNING *
+      `;
+
+      const insertResult = await pool.query(insertQuery, [
+        eodId,
+        consultation.student_name,
+        consultation.closer_name,
+        consultation.consultation_date,
+        analysis.overallScore,
+        analysis.overallComment,
+        analysis.strengths,  // Already an array, PostgreSQL will handle it
+        analysis.weaknesses,  // Already an array, PostgreSQL will handle it
+        analysis.suggestions,  // Already an array, PostgreSQL will handle it
+        analysis.rapportBuildingScore,
+        analysis.rapportBuildingComment,
+        analysis.needsAnalysisScore,
+        analysis.needsAnalysisComment,
+        analysis.objectionHandlingScore,
+        analysis.objectionHandlingComment,
+        analysis.closingTechniqueScore,
+        analysis.closingTechniqueComment,
+      ]);
+
+      await pool.end();
+
+      res.json({
+        success: true,
+        data: insertResult.rows[0],
+        message: 'AI 分析完成',
+      });
+    } catch (error: any) {
+      console.error('Failed to analyze consultation:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // 4. DELETE /api/consultation-quality/:eodId/analysis
+  // Delete AI analysis for a consultation
+  // ============================================================================
+  app.delete('/api/consultation-quality/:eodId/analysis', isAuthenticated, async (req: any, res) => {
+    try {
+      const { eodId } = req.params;
+      const pool = createPool();
+
+      const deleteQuery = `
+        DELETE FROM consultation_quality_analysis
+        WHERE eod_id = $1
+        RETURNING id
+      `;
+
+      const result = await pool.query(deleteQuery, [eodId]);
+
+      await pool.end();
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: '找不到此諮詢記錄的 AI 分析' });
+      }
+
+      res.json({
+        success: true,
+        message: 'AI 分析已刪除',
+      });
+    } catch (error: any) {
+      console.error('Failed to delete consultation analysis:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
 }
