@@ -58,6 +58,9 @@ export const routePermissions: Record<string, PermissionRule> = {
   '/reports/consultants': {
     roles: ['admin', 'manager', 'consultant'],
   },
+  '/consultation-quality/:eodId': {
+    roles: ['admin', 'manager', 'consultant'],
+  },
 
   // 管理系統 - 報表
   '/reports/cost-profit': {

@@ -178,6 +178,12 @@ export const sidebarConfig: SidebarSection[] = [
         icon: RefreshCw,
         requiredRoles: ['admin'],
       },
+      {
+        label: '諮詢分析 AI 設定',
+        href: '/settings/consultation-analysis-config',
+        icon: Settings,
+        requiredRoles: ['admin'],
+      },
     ],
   },
 ];

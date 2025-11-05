@@ -9,6 +9,7 @@ import { useFilteredSidebar } from '@/hooks/use-sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useQuery } from '@tanstack/react-query';
 import {
   TrendingUp,
@@ -1001,12 +1002,201 @@ function ConsultantReportContent() {
   );
 }
 
+// AI Analysis Tab Component
+function ConsultationAnalysisTab() {
+  const [subTab, setSubTab] = useState<'all' | 'analyzed'>('all');
+  const [analyzing, setAnalyzing] = useState<string | null>(null);
+
+  // Query consultation records
+  const { data, isLoading, error, refetch } = useQuery<{ success: boolean; data: { records: any[]; closers: any[] } }>({
+    queryKey: ['consultation-analysis-list', subTab],
+    queryFn: async () => {
+      const analyzed = subTab === 'analyzed' ? 'true' : 'all';
+      const response = await fetch(`/api/consultation-quality/list?analyzed=${analyzed}`);
+      if (!response.ok) throw new Error('Failed to fetch consultation records');
+      return response.json();
+    },
+    staleTime: 2 * 60 * 1000, // 2 minutes
+  });
+
+  const records = data?.data?.records || [];
+
+  // Handle AI analysis trigger
+  const handleAnalyze = async (eodId: string) => {
+    if (analyzing) return;
+
+    try {
+      setAnalyzing(eodId);
+      const response = await fetch(`/api/consultation-quality/${eodId}/analyze`, {
+        method: 'POST',
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'AI 分析失敗');
+      }
+
+      // Refetch list to update status
+      await refetch();
+      alert('AI 分析完成！');
+    } catch (error: any) {
+      alert(error.message);
+    } finally {
+      setAnalyzing(null);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-muted-foreground">載入中...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-destructive">載入資料時發生錯誤</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div>
+        <h2 className="text-2xl font-bold">AI 分析紀錄</h2>
+        <p className="text-muted-foreground mt-1">
+          手動觸發諮詢品質 AI 分析（需要諮詢轉錄文字）
+        </p>
+      </div>
+
+      {/* Sub Tabs */}
+      <div className="flex gap-2">
+        <Button
+          variant={subTab === 'all' ? 'default' : 'outline'}
+          onClick={() => setSubTab('all')}
+        >
+          全部諮詢 ({records.length})
+        </Button>
+        <Button
+          variant={subTab === 'analyzed' ? 'default' : 'outline'}
+          onClick={() => setSubTab('analyzed')}
+        >
+          已分析 ({records.filter(r => r.has_analysis).length})
+        </Button>
+      </div>
+
+      {/* Records Table */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-3 px-4">學員姓名</th>
+                  <th className="text-left py-3 px-4">諮詢師</th>
+                  <th className="text-left py-3 px-4">諮詢日期</th>
+                  <th className="text-center py-3 px-4">轉錄狀態</th>
+                  <th className="text-center py-3 px-4">分析狀態</th>
+                  <th className="text-center py-3 px-4">總分</th>
+                  <th className="text-center py-3 px-4">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                      沒有資料
+                    </td>
+                  </tr>
+                ) : (
+                  records.map((record: any) => (
+                    <tr key={record.eod_id} className="border-b hover:bg-muted/50">
+                      <td className="py-3 px-4">{record.student_name}</td>
+                      <td className="py-3 px-4">{record.closer_name}</td>
+                      <td className="py-3 px-4">
+                        {record.consultation_date
+                          ? new Date(record.consultation_date).toLocaleDateString('zh-TW')
+                          : '-'}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        {record.has_transcript ? (
+                          <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded">有</span>
+                        ) : (
+                          <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">無</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        {record.has_analysis ? (
+                          <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded">已分析</span>
+                        ) : (
+                          <span className="px-2 py-1 bg-yellow-100 text-yellow-700 text-xs rounded">未分析</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        {record.overall_rating ? (
+                          <span className="font-semibold">{record.overall_rating} / 10</span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        {!record.has_transcript ? (
+                          <Button size="sm" variant="outline" disabled>
+                            無轉錄內容
+                          </Button>
+                        ) : record.has_analysis ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => window.location.href = `/consultation-quality/${record.eod_id}`}
+                          >
+                            查看分析
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            onClick={() => handleAnalyze(record.eod_id)}
+                            disabled={analyzing === record.eod_id}
+                          >
+                            {analyzing === record.eod_id ? '分析中...' : '生成分析'}
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function ConsultantsPage() {
   const filteredSidebar = useFilteredSidebar();
 
   return (
     <DashboardLayout sidebarSections={filteredSidebar} title="諮詢師報表">
-      <ConsultantReportContent />
+      <Tabs defaultValue="report" className="w-full">
+        <TabsList className="mb-4">
+          <TabsTrigger value="report">報表</TabsTrigger>
+          <TabsTrigger value="ai-analysis">AI 分析紀錄</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="report">
+          <ConsultantReportContent />
+        </TabsContent>
+
+        <TabsContent value="ai-analysis">
+          <ConsultationAnalysisTab />
+        </TabsContent>
+      </Tabs>
     </DashboardLayout>
   );
 }

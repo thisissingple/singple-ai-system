@@ -40,7 +40,7 @@ export function getSession() {
   }
 
   return session({
-    secret: process.env.SESSION_SECRET!,
+    secret: process.env.SESSION_SECRET || 'dev-session-secret-' + Math.random().toString(36).substring(7),
     store: sessionStore,
     resave: false,
     saveUninitialized: false,

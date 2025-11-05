@@ -31,6 +31,7 @@ const GoogleSheetsSync = lazy(() => import("@/pages/settings/google-sheets-sync"
 const UserManagement = lazy(() => import("@/pages/settings/user-management"));
 const EmployeesPage = lazy(() => import("@/pages/settings/employees"));
 const PermissionsPage = lazy(() => import("@/pages/settings/permissions"));
+const ConsultationAnalysisConfig = lazy(() => import("@/pages/settings/consultation-analysis-config"));
 const TeachingQualityDetail = lazy(() => import("@/pages/teaching-quality/teaching-quality-detail"));
 const ChangePasswordPage = lazy(() => import("@/pages/auth/change-password"));
 const ForgotPasswordPage = lazy(() => import("@/pages/auth/forgot-password"));
@@ -41,6 +42,7 @@ const CallRecordsList = lazy(() => import("@/pages/telemarketing/call-records-li
 const StudentFollowUp = lazy(() => import("@/pages/telemarketing/student-follow-up"));
 const GoHighLevelContacts = lazy(() => import("@/pages/leads/gohighlevel-contacts"));
 const ConsultantsPage = lazy(() => import("@/pages/reports/consultants"));
+const ConsultationQualityDetail = lazy(() => import("@/pages/consultation-quality/consultation-quality-detail"));
 
 // Archive 頁面（低使用頻率，保留但移至 archive 目錄）
 const DataSourcesPage = lazy(() => import("@/pages/archive/settings/data-sources"));
@@ -104,6 +106,11 @@ function Router() {
       </Route>
       <Route path="/reports/consultants">
         <ProtectedRoute><ConsultantsPage /></ProtectedRoute>
+      </Route>
+
+      {/* 諮詢品質分析詳情頁 */}
+      <Route path="/consultation-quality/:eodId">
+        <ProtectedRoute><ConsultationQualityDetail /></ProtectedRoute>
       </Route>
 
       {/* 工具路由（新，包含側邊選單） */}
@@ -185,6 +192,9 @@ function Router() {
       </Route>
       <Route path="/settings/permissions">
         <ProtectedRoute><PermissionsPage /></ProtectedRoute>
+      </Route>
+      <Route path="/settings/consultation-analysis-config">
+        <ProtectedRoute><ConsultationAnalysisConfig /></ProtectedRoute>
       </Route>
       <Route path="/settings/facebook">
         <ProtectedRoute><FacebookSettings /></ProtectedRoute>
