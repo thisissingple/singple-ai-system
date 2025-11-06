@@ -1,6 +1,7 @@
 /**
  * 諮詢分析 AI 配置頁面
  * 允許 admin 調整 AI 模型、溫度、輸出長度和完整 Prompt
+ * 包含：分析 Prompt 和聊天助手 Prompt
  */
 
 import { useState, useEffect } from 'react';
@@ -14,12 +15,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { Save, RotateCcw, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { sidebarConfig } from '@/config/sidebar-config';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface AnalysisConfig {
   ai_model: string;
   temperature: number;
   max_tokens: number;
   analysis_prompt: string;
+  chat_ai_model: string;
+  chat_temperature: number;
+  chat_max_tokens: number;
+  chat_system_prompt: string;
   updated_at: string;
   updated_by: string;
 }
@@ -36,6 +42,10 @@ function ConsultationAnalysisConfigContent() {
     temperature: 0.7,
     max_tokens: 4000,
     analysis_prompt: '',
+    chat_ai_model: 'gpt-4o',
+    chat_temperature: 0.7,
+    chat_max_tokens: 2000,
+    chat_system_prompt: '',
   });
 
   // 載入配置
@@ -55,6 +65,10 @@ function ConsultationAnalysisConfigContent() {
           temperature: data.data.temperature,
           max_tokens: data.data.max_tokens,
           analysis_prompt: data.data.analysis_prompt,
+          chat_ai_model: data.data.chat_ai_model,
+          chat_temperature: data.data.chat_temperature,
+          chat_max_tokens: data.data.chat_max_tokens,
+          chat_system_prompt: data.data.chat_system_prompt,
         });
       } else {
         setMessage({ type: 'error', text: '載入配置失敗' });
@@ -131,6 +145,10 @@ function ConsultationAnalysisConfigContent() {
           temperature: data.data.temperature,
           max_tokens: data.data.max_tokens,
           analysis_prompt: data.data.analysis_prompt,
+          chat_ai_model: data.data.chat_ai_model,
+          chat_temperature: data.data.chat_temperature,
+          chat_max_tokens: data.data.chat_max_tokens,
+          chat_system_prompt: data.data.chat_system_prompt,
         });
         toast({
           title: '重置成功',
@@ -171,7 +189,7 @@ function ConsultationAnalysisConfigContent() {
       <div>
         <h1 className="text-3xl font-bold">諮詢分析 AI 配置</h1>
         <p className="text-muted-foreground mt-1">
-          調整 OpenAI GPT 模型參數和分析 Prompt，影響諮詢品質分析結果
+          調整 OpenAI GPT 模型參數和 Prompt，影響諮詢品質分析結果和聊天助手回應
         </p>
       </div>
 
@@ -187,100 +205,209 @@ function ConsultationAnalysisConfigContent() {
         </Alert>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>模型參數設定</CardTitle>
-          <CardDescription>
-            配置 OpenAI API 的模型和參數，影響分析的速度、成本和品質
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* AI 模型選擇 */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">AI 模型</label>
-            <select
-              className="w-full border rounded-md px-3 py-2 bg-background"
-              value={formData.ai_model}
-              onChange={(e) => setFormData({ ...formData, ai_model: e.target.value })}
-            >
-              <option value="gpt-4o">gpt-4o (推薦 - 最新、最強)</option>
-              <option value="gpt-4-turbo">gpt-4-turbo (快速)</option>
-              <option value="gpt-4">gpt-4 (標準)</option>
-              <option value="gpt-3.5-turbo">gpt-3.5-turbo (經濟)</option>
-            </select>
-            <p className="text-xs text-muted-foreground">
-              不同模型的回應品質、速度和成本各異
-            </p>
-          </div>
+      {/* Tabs for different configurations */}
+      <Tabs defaultValue="analysis" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="analysis">諮詢分析設定</TabsTrigger>
+          <TabsTrigger value="chat">聊天助手設定</TabsTrigger>
+        </TabsList>
 
-          {/* Temperature */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">
-                Temperature (創意度)
-              </label>
-              <Badge variant="outline">{formData.temperature}</Badge>
-            </div>
-            <Slider
-              value={[formData.temperature]}
-              onValueChange={(values) => setFormData({ ...formData, temperature: values[0] })}
-              min={0}
-              max={1}
-              step={0.1}
-              className="w-full"
-            />
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>0 = 精確、一致</span>
-              <span>1 = 創意、多樣</span>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              推薦值：0.7 (兼顧準確性和多樣性)
-            </p>
-          </div>
+        {/* 諮詢分析設定 */}
+        <TabsContent value="analysis" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>分析模型參數設定</CardTitle>
+              <CardDescription>
+                配置 OpenAI API 的模型和參數，影響諮詢分析的速度、成本和品質
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* AI 模型選擇 */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">AI 模型</label>
+                <select
+                  className="w-full border rounded-md px-3 py-2 bg-background"
+                  value={formData.ai_model}
+                  onChange={(e) => setFormData({ ...formData, ai_model: e.target.value })}
+                >
+                  <option value="gpt-4o">gpt-4o (推薦 - 最新、最強)</option>
+                  <option value="gpt-4-turbo">gpt-4-turbo (快速)</option>
+                  <option value="gpt-4">gpt-4 (標準)</option>
+                  <option value="gpt-3.5-turbo">gpt-3.5-turbo (經濟)</option>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  不同模型的回應品質、速度和成本各異
+                </p>
+              </div>
 
-          {/* Max Tokens */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">Max Tokens (輸出長度)</label>
-              <Badge variant="outline">{formData.max_tokens} tokens</Badge>
-            </div>
-            <input
-              type="number"
-              min={1000}
-              max={8000}
-              step={100}
-              value={formData.max_tokens}
-              onChange={(e) => setFormData({ ...formData, max_tokens: parseInt(e.target.value) })}
-              className="w-full border rounded-md px-3 py-2 bg-background"
-            />
-            <p className="text-xs text-muted-foreground">
-              範圍：1000-8000 tokens，推薦值：4000 (約 3000 字)
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+              {/* Temperature */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">
+                    Temperature (創意度)
+                  </label>
+                  <Badge variant="outline">{formData.temperature}</Badge>
+                </div>
+                <Slider
+                  value={[formData.temperature]}
+                  onValueChange={(values) => setFormData({ ...formData, temperature: values[0] })}
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>0 = 精確、一致</span>
+                  <span>1 = 創意、多樣</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  推薦值：0.7 (兼顧準確性和多樣性)
+                </p>
+              </div>
 
-      {/* Prompt 編輯器 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>AI Prompt 設定</CardTitle>
-          <CardDescription>
-            完整的 System Prompt，定義 AI 分析的角色、任務和輸出格式
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Textarea
-            value={formData.analysis_prompt}
-            onChange={(e) => setFormData({ ...formData, analysis_prompt: e.target.value })}
-            className="font-mono text-sm min-h-[400px]"
-            placeholder="輸入 AI 分析的完整 prompt..."
-          />
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Prompt 長度: {formData.analysis_prompt.length} 字元</span>
-            <span>約 {Math.ceil(formData.analysis_prompt.length / 4)} tokens</span>
-          </div>
-        </CardContent>
-      </Card>
+              {/* Max Tokens */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">Max Tokens (輸出長度)</label>
+                  <Badge variant="outline">{formData.max_tokens} tokens</Badge>
+                </div>
+                <input
+                  type="number"
+                  min={1000}
+                  max={8000}
+                  step={100}
+                  value={formData.max_tokens}
+                  onChange={(e) => setFormData({ ...formData, max_tokens: parseInt(e.target.value) })}
+                  className="w-full border rounded-md px-3 py-2 bg-background"
+                />
+                <p className="text-xs text-muted-foreground">
+                  範圍：1000-8000 tokens，推薦值：4000 (約 3000 字)
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Prompt 編輯器 */}
+          <Card>
+            <CardHeader>
+              <CardTitle>AI 分析 Prompt 設定</CardTitle>
+              <CardDescription>
+                完整的 System Prompt，定義 AI 分析的角色、任務和輸出格式
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Textarea
+                value={formData.analysis_prompt}
+                onChange={(e) => setFormData({ ...formData, analysis_prompt: e.target.value })}
+                className="font-mono text-sm min-h-[400px]"
+                placeholder="輸入 AI 分析的完整 prompt..."
+              />
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Prompt 長度: {formData.analysis_prompt.length} 字元</span>
+                <span>約 {Math.ceil(formData.analysis_prompt.length / 4)} tokens</span>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* 聊天助手設定 */}
+        <TabsContent value="chat" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>聊天助手模型參數設定</CardTitle>
+              <CardDescription>
+                配置諮詢詳情頁面中 AI 聊天助手的模型和參數
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* AI 模型選擇 */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">AI 模型</label>
+                <select
+                  className="w-full border rounded-md px-3 py-2 bg-background"
+                  value={formData.chat_ai_model}
+                  onChange={(e) => setFormData({ ...formData, chat_ai_model: e.target.value })}
+                >
+                  <option value="gpt-4o">gpt-4o (推薦 - 最新、最強)</option>
+                  <option value="gpt-4-turbo">gpt-4-turbo (快速)</option>
+                  <option value="gpt-4">gpt-4 (標準)</option>
+                  <option value="gpt-3.5-turbo">gpt-3.5-turbo (經濟)</option>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  聊天助手的即時問答模型
+                </p>
+              </div>
+
+              {/* Temperature */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">
+                    Temperature (創意度)
+                  </label>
+                  <Badge variant="outline">{formData.chat_temperature}</Badge>
+                </div>
+                <Slider
+                  value={[formData.chat_temperature]}
+                  onValueChange={(values) => setFormData({ ...formData, chat_temperature: values[0] })}
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>0 = 精確、一致</span>
+                  <span>1 = 創意、多樣</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  推薦值：0.7 (兼顧準確性和多樣性)
+                </p>
+              </div>
+
+              {/* Max Tokens */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">Max Tokens (單次回應長度)</label>
+                  <Badge variant="outline">{formData.chat_max_tokens} tokens</Badge>
+                </div>
+                <input
+                  type="number"
+                  min={500}
+                  max={4000}
+                  step={100}
+                  value={formData.chat_max_tokens}
+                  onChange={(e) => setFormData({ ...formData, chat_max_tokens: parseInt(e.target.value) })}
+                  className="w-full border rounded-md px-3 py-2 bg-background"
+                />
+                <p className="text-xs text-muted-foreground">
+                  範圍：500-4000 tokens，推薦值：2000 (約 1500 字)
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Chat Prompt 編輯器 */}
+          <Card>
+            <CardHeader>
+              <CardTitle>聊天助手 Prompt 設定</CardTitle>
+              <CardDescription>
+                定義聊天助手的角色、回應風格和行為準則
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Textarea
+                value={formData.chat_system_prompt}
+                onChange={(e) => setFormData({ ...formData, chat_system_prompt: e.target.value })}
+                className="font-mono text-sm min-h-[300px]"
+                placeholder="輸入聊天助手的 system prompt..."
+              />
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Prompt 長度: {formData.chat_system_prompt.length} 字元</span>
+                <span>約 {Math.ceil(formData.chat_system_prompt.length / 4)} tokens</span>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* 操作按鈕 */}
       <div className="flex gap-3">

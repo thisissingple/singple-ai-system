@@ -55,6 +55,9 @@ export interface ConsultationQualityAnalysis {
   objectionHandlingComment: string;
   closingTechniqueScore: number;             // 成交技巧 (1-10)
   closingTechniqueComment: string;
+
+  // Raw AI output (for display purposes)
+  rawMarkdownOutput: string;                 // AI 生成的原始 Markdown 輸出
 }
 
 // ============================================================================
@@ -402,7 +405,14 @@ export class ConsultationQualityGPTService {
           analysis_prompt: CONSULTATION_QUALITY_ANALYSIS_PROMPT,
         };
       } else {
-        this.config = result.rows[0];
+        const row = result.rows[0];
+        // Convert temperature and max_tokens from database strings to numbers
+        this.config = {
+          ai_model: row.ai_model,
+          temperature: parseFloat(row.temperature),
+          max_tokens: parseInt(row.max_tokens, 10),
+          analysis_prompt: row.analysis_prompt,
+        };
       }
 
       return this.config;
@@ -442,7 +452,11 @@ export class ConsultationQualityGPTService {
       }
 
       const analysis = parseAnalysisOutput(content);
-      return analysis;
+      // Add raw markdown output
+      return {
+        ...analysis,
+        rawMarkdownOutput: content,
+      };
     } catch (error) {
       console.error('Error analyzing consultation quality:', error);
       throw error;

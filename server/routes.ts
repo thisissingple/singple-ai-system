@@ -6617,9 +6617,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const analysis = result.rows[0];
 
-      // Permission check
-      if (req.user && req.user.role === 'teacher' && analysis.teacher_id !== req.user.id) {
-        return res.status(403).json({ error: 'Permission denied' });
+      // Permission check for teachers
+      if (req.user && req.user.role === 'teacher') {
+        // Get teacher's name from user ID
+        const userResult = await queryDatabase(`
+          SELECT first_name, last_name FROM users WHERE id = $1
+        `, [req.user.id]);
+
+        if (userResult.rows.length > 0) {
+          const teacherName = `${userResult.rows[0].first_name} ${userResult.rows[0].last_name}`.trim();
+          if (teacherName !== analysis.teacher_name) {
+            return res.status(403).json({ error: 'Permission denied' });
+          }
+        } else {
+          return res.status(403).json({ error: 'Permission denied' });
+        }
       }
 
       // Calculate remaining lessons dynamically based on class date
@@ -8792,6 +8804,140 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // 注意: /api/database/tables/:tableName/columns 端點已經在 5950 行定義
   // 回傳格式: { columns: [{ column_name, data_type, ... }] }
+
+  // ============================================================================
+  // User Impersonation API (Admin only)
+  // ============================================================================
+
+  // Start impersonating a user
+  app.post('/api/admin/impersonate/:userId', requireAdmin, async (req: any, res) => {
+    try {
+      const { userId } = req.params;
+      const adminUser = (req as any).user;
+
+      // Store original user in session
+      if (!(req as any).session.originalUser) {
+        (req as any).session.originalUser = adminUser;
+      }
+
+      // Fetch target user
+      const pool = createPool();
+      const result = await pool.query(`
+        SELECT id, email, first_name, last_name, role, roles, status
+        FROM users
+        WHERE id = $1
+      `, [userId]);
+
+      await pool.end();
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      const targetUser = result.rows[0];
+
+      // Update session to impersonate target user
+      (req as any).session.userId = targetUser.id;
+      (req as any).session.user = {
+        id: targetUser.id,
+        email: targetUser.email,
+        first_name: targetUser.first_name,
+        last_name: targetUser.last_name,
+        role: targetUser.role,
+        roles: targetUser.roles || [targetUser.role],
+        status: targetUser.status,
+        isImpersonating: true,
+      };
+
+      (req as any).session.save((err: any) => {
+        if (err) {
+          console.error('Session save error:', err);
+          return res.status(500).json({ error: 'Failed to save session' });
+        }
+
+        res.json({
+          success: true,
+          message: `Now impersonating ${targetUser.email}`,
+          user: (req as any).session.user,
+        });
+      });
+    } catch (error: any) {
+      console.error('Impersonation error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Stop impersonating and return to admin
+  app.post('/api/admin/stop-impersonate', isAuthenticated, async (req: any, res) => {
+    try {
+      const originalUser = (req as any).session.originalUser;
+
+      if (!originalUser) {
+        return res.status(400).json({ error: 'Not currently impersonating' });
+      }
+
+      // Restore original admin user
+      (req as any).session.userId = originalUser.id;
+      (req as any).session.user = originalUser;
+      delete (req as any).session.originalUser;
+
+      (req as any).session.save((err: any) => {
+        if (err) {
+          console.error('Session save error:', err);
+          return res.status(500).json({ error: 'Failed to save session' });
+        }
+
+        res.json({
+          success: true,
+          message: 'Stopped impersonation',
+          user: (req as any).session.user,
+        });
+      });
+    } catch (error: any) {
+      console.error('Stop impersonation error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get list of users for impersonation
+  app.get('/api/admin/users-list', requireAdmin, async (req: any, res) => {
+    try {
+      const pool = createPool();
+      const result = await pool.query(`
+        SELECT
+          id,
+          email,
+          first_name,
+          last_name,
+          role,
+          roles,
+          status
+        FROM users
+        WHERE status = 'active'
+        ORDER BY
+          CASE role
+            WHEN 'admin' THEN 1
+            WHEN 'manager' THEN 2
+            WHEN 'teacher' THEN 3
+            WHEN 'consultant' THEN 4
+            WHEN 'setter' THEN 5
+            ELSE 6
+          END,
+          first_name,
+          last_name
+      `);
+
+      await pool.end();
+
+      res.json({
+        success: true,
+        data: result.rows,
+      });
+    } catch (error: any) {
+      console.error('Failed to fetch users list:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   return httpServer;
 }

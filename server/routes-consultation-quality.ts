@@ -5,6 +5,9 @@
 
 import { createPool } from './services/pg-client';
 import { consultationQualityGPTService } from './services/consultation-quality-gpt-service';
+import { streamText } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { getOrCreateStudentKB, addDataSourceRef } from './services/student-knowledge-service';
 
 export function registerConsultationQualityRoutes(app: any, isAuthenticated: any, requireAdmin: any) {
   // ============================================================================
@@ -127,7 +130,10 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
     try {
       const pool = createPool();
       const query = `
-        SELECT ai_model, temperature, max_tokens, analysis_prompt, updated_at, updated_by
+        SELECT
+          ai_model, temperature, max_tokens, analysis_prompt,
+          chat_ai_model, chat_temperature, chat_max_tokens, chat_system_prompt,
+          updated_at, updated_by
         FROM consultation_analysis_config
         WHERE id = '00000000-0000-0000-0000-000000000001'::UUID
       `;
@@ -154,15 +160,22 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
   // ============================================================================
   app.put('/api/consultation-quality/config', requireAdmin, async (req: any, res) => {
     try {
-      const { ai_model, temperature, max_tokens, analysis_prompt } = req.body;
+      const {
+        ai_model, temperature, max_tokens, analysis_prompt,
+        chat_ai_model, chat_temperature, chat_max_tokens, chat_system_prompt
+      } = req.body;
       const userEmail = req.session?.user?.email || 'unknown';
 
       // Validation
       if (!ai_model || temperature == null || !max_tokens || !analysis_prompt) {
-        return res.status(400).json({ error: '所有欄位都是必填的' });
+        return res.status(400).json({ error: '所有分析欄位都是必填的' });
       }
 
-      if (temperature < 0 || temperature > 1) {
+      if (!chat_ai_model || chat_temperature == null || !chat_max_tokens || !chat_system_prompt) {
+        return res.status(400).json({ error: '所有聊天助手欄位都是必填的' });
+      }
+
+      if (temperature < 0 || temperature > 1 || chat_temperature < 0 || chat_temperature > 1) {
         return res.status(400).json({ error: 'Temperature 必須在 0-1 之間' });
       }
 
@@ -174,8 +187,12 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
           temperature = $2,
           max_tokens = $3,
           analysis_prompt = $4,
+          chat_ai_model = $5,
+          chat_temperature = $6,
+          chat_max_tokens = $7,
+          chat_system_prompt = $8,
           updated_at = NOW(),
-          updated_by = $5
+          updated_by = $9
         WHERE id = '00000000-0000-0000-0000-000000000001'::UUID
         RETURNING *
       `;
@@ -184,6 +201,10 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
         temperature,
         max_tokens,
         analysis_prompt,
+        chat_ai_model,
+        chat_temperature,
+        chat_max_tokens,
+        chat_system_prompt,
         userEmail,
       ]);
       await pool.end();
@@ -403,6 +424,14 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
 - 所有時間戳必須準確引用逐字稿中的時間
 - 不要編造不存在的對話內容`;
 
+      const defaultChatPrompt = `你是一位專業的諮詢分析助手。你的任務是根據提供的諮詢逐字稿和 AI 分析結果，回答使用者的問題。
+
+請根據以上資訊，用專業、友善的方式回答問題。如果資訊不足以回答問題，請誠實告知。回答時請：
+1. 直接回答問題，不要重複問題
+2. 引用具體的對話內容或分析結果作為依據
+3. 提供洞察和建議
+4. 保持簡潔明確`;
+
       const query = `
         UPDATE consultation_analysis_config
         SET
@@ -410,12 +439,16 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
           temperature = 0.7,
           max_tokens = 4000,
           analysis_prompt = $1,
+          chat_ai_model = 'gpt-4o',
+          chat_temperature = 0.7,
+          chat_max_tokens = 2000,
+          chat_system_prompt = $2,
           updated_at = NOW(),
-          updated_by = $2
+          updated_by = $3
         WHERE id = '00000000-0000-0000-0000-000000000001'::UUID
         RETURNING *
       `;
-      const result = await pool.query(query, [defaultPrompt, userEmail]);
+      const result = await pool.query(query, [defaultPrompt, defaultChatPrompt, userEmail]);
       await pool.end();
 
       // Clear GPT service cache
@@ -459,6 +492,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
           cqa.objection_handling_comment,
           cqa.closing_technique_score,
           cqa.closing_technique_comment,
+          cqa.raw_markdown_output,
           cqa.analyzed_at,
           cqa.analysis_version
         FROM eods_for_closers e
@@ -475,6 +509,10 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
 
       const record = result.rows[0];
 
+      // DEBUG: Log what's being retrieved
+      console.log('📤 [DEBUG] GET detail - raw_markdown_output length:', record.raw_markdown_output?.length || 0);
+      console.log('📤 [DEBUG] GET detail - has_analysis:', record.analysis_id ? 'YES' : 'NO');
+
       await pool.end();
 
       res.json({
@@ -488,7 +526,71 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
   });
 
   // ============================================================================
-  // 3. POST /api/consultation-quality/:eodId/analyze
+  // 6. POST /api/consultation-quality/:eodId/save-to-kb
+  // Save consultation analysis to student knowledge base
+  // ============================================================================
+  app.post('/api/consultation-quality/:eodId/save-to-kb', isAuthenticated, async (req: any, res) => {
+    try {
+      const { eodId } = req.params;
+      const pool = createPool();
+
+      // Get consultation record with analysis ID
+      const consultationQuery = `
+        SELECT
+          e.student_name,
+          e.student_email,
+          e.closer_name,
+          e.consultation_date,
+          cqa.id as analysis_id,
+          cqa.overall_rating,
+          cqa.analyzed_at
+        FROM eods_for_closers e
+        LEFT JOIN consultation_quality_analysis cqa ON e.id = cqa.eod_id
+        WHERE e.id = $1 AND cqa.id IS NOT NULL
+      `;
+
+      const result = await pool.query(consultationQuery, [eodId]);
+
+      if (result.rows.length === 0) {
+        await pool.end();
+        return res.status(404).json({ error: '找不到諮詢分析記錄' });
+      }
+
+      const record = result.rows[0];
+
+      // Validate student email
+      if (!record.student_email) {
+        await pool.end();
+        return res.status(400).json({ error: '該諮詢記錄缺少學員 email，無法儲存至知識庫' });
+      }
+
+      await pool.end();
+
+      // Ensure student knowledge base exists
+      await getOrCreateStudentKB(record.student_email, record.student_name);
+
+      // Add this analysis to student's data_sources.ai_analyses
+      await addDataSourceRef(record.student_email, 'ai_analyses', record.analysis_id);
+
+      console.log(`✅ Saved consultation analysis ${record.analysis_id} to knowledge base for ${record.student_name} (${record.student_email})`);
+
+      res.json({
+        success: true,
+        data: {
+          studentEmail: record.student_email,
+          studentName: record.student_name,
+          analysisId: record.analysis_id,
+          message: `已成功儲存至 ${record.student_name} 的知識庫`,
+        },
+      });
+    } catch (error: any) {
+      console.error('Failed to save to knowledge base:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // 7. POST /api/consultation-quality/:eodId/analyze
   // Manually trigger AI analysis for a consultation (not automatic!)
   // ============================================================================
   app.post('/api/consultation-quality/:eodId/analyze', isAuthenticated, async (req: any, res) => {
@@ -559,12 +661,17 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
           objection_handling_score,
           objection_handling_comment,
           closing_technique_score,
-          closing_technique_comment
+          closing_technique_comment,
+          raw_markdown_output
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
         )
         RETURNING *
       `;
+
+      // DEBUG: Log raw markdown output before saving
+      console.log('🔍 [DEBUG] Raw markdown output length:', analysis.rawMarkdownOutput?.length || 0);
+      console.log('🔍 [DEBUG] Raw markdown preview:', analysis.rawMarkdownOutput?.substring(0, 200));
 
       const insertResult = await pool.query(insertQuery, [
         eodId,
@@ -584,7 +691,11 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
         analysis.objectionHandlingComment,
         analysis.closingTechniqueScore,
         analysis.closingTechniqueComment,
+        analysis.rawMarkdownOutput,  // Raw AI markdown output
       ]);
+
+      // DEBUG: Log what was saved
+      console.log('✅ [DEBUG] Saved to DB - raw_markdown_output length:', insertResult.rows[0]?.raw_markdown_output?.length || 0);
 
       await pool.end();
 
@@ -629,6 +740,74 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
     } catch (error: any) {
       console.error('Failed to delete consultation analysis:', error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // 5. POST /api/consultation-quality/chat
+  // AI Chat interface for consultation Q&A (streaming)
+  // ============================================================================
+  app.post('/api/consultation-quality/chat', isAuthenticated, async (req: any, res) => {
+    try {
+      const { messages, eodId, consultationTranscript, aiAnalysis } = req.body;
+
+      if (!process.env.OPENAI_API_KEY) {
+        return res.status(500).json({ error: 'OpenAI API key not configured' });
+      }
+
+      // Fetch chat configuration from database
+      const pool = createPool();
+      const configQuery = `
+        SELECT chat_ai_model, chat_temperature, chat_max_tokens, chat_system_prompt
+        FROM consultation_analysis_config
+        WHERE id = '00000000-0000-0000-0000-000000000001'::UUID
+      `;
+      const configResult = await pool.query(configQuery);
+      await pool.end();
+
+      if (configResult.rows.length === 0) {
+        return res.status(500).json({ error: '無法讀取聊天配置' });
+      }
+
+      const config = configResult.rows[0];
+
+      // Convert database values to correct types (PostgreSQL returns DECIMAL as string)
+      const temperature = parseFloat(config.chat_temperature);
+      const maxTokens = parseInt(config.chat_max_tokens, 10);
+
+      // Build system message with consultation context
+      const systemMessage = `${config.chat_system_prompt}
+
+## 諮詢逐字稿
+${consultationTranscript || '（無逐字稿）'}
+
+## AI 分析結果
+${aiAnalysis || '（無分析結果）'}`;
+
+      // Set headers for streaming
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Transfer-Encoding', 'chunked');
+
+      // Call AI SDK with streaming using config values
+      const result = await streamText({
+        model: openai(config.chat_ai_model),
+        system: systemMessage,
+        messages,
+        temperature,
+        maxTokens,
+      });
+
+      // Stream the text chunks to response
+      for await (const chunk of result.textStream) {
+        res.write(chunk);
+      }
+
+      res.end();
+    } catch (error: any) {
+      console.error('Chat error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: error.message });
+      }
     }
   });
 

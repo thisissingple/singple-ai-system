@@ -369,9 +369,24 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         ? req.user.id
         : null;
 
+      // Get teacher_id from teacher_name
+      let teacherId = null;
+      if (attendance.teacher_name) {
+        const teacherResult = await pool.query(`
+          SELECT id FROM users
+          WHERE CONCAT(first_name, ' ', last_name) = $1
+          AND 'teacher' = ANY(roles)
+          LIMIT 1
+        `, [attendance.teacher_name]);
+
+        if (teacherResult.rows.length > 0) {
+          teacherId = teacherResult.rows[0].id;
+        }
+      }
+
       const result = await insertAndReturn('teaching_quality_analysis', {
         attendance_id: attendanceId,
-        teacher_id: null,
+        teacher_id: teacherId,
         teacher_name: attendance.teacher_name,
         student_name: attendance.student_name,
         class_date: attendance.class_date,

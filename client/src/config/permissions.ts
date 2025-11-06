@@ -105,6 +105,9 @@ export const routePermissions: Record<string, PermissionRule> = {
   '/settings/form-builder': {
     roles: ['admin', 'manager'],
   },
+  '/settings/user-impersonation': {
+    roles: ['admin'],
+  },
   '/settings/facebook': {
     roles: ['admin'],
   },

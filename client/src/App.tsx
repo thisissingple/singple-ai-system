@@ -32,6 +32,7 @@ const UserManagement = lazy(() => import("@/pages/settings/user-management"));
 const EmployeesPage = lazy(() => import("@/pages/settings/employees"));
 const PermissionsPage = lazy(() => import("@/pages/settings/permissions"));
 const ConsultationAnalysisConfig = lazy(() => import("@/pages/settings/consultation-analysis-config"));
+const UserImpersonationPage = lazy(() => import("@/pages/settings/user-impersonation"));
 const TeachingQualityDetail = lazy(() => import("@/pages/teaching-quality/teaching-quality-detail"));
 const ChangePasswordPage = lazy(() => import("@/pages/auth/change-password"));
 const ForgotPasswordPage = lazy(() => import("@/pages/auth/forgot-password"));
@@ -195,6 +196,9 @@ function Router() {
       </Route>
       <Route path="/settings/consultation-analysis-config">
         <ProtectedRoute><ConsultationAnalysisConfig /></ProtectedRoute>
+      </Route>
+      <Route path="/settings/user-impersonation">
+        <ProtectedRoute><UserImpersonationPage /></ProtectedRoute>
       </Route>
       <Route path="/settings/facebook">
         <ProtectedRoute><FacebookSettings /></ProtectedRoute>
