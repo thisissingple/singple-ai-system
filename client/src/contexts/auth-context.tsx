@@ -18,6 +18,7 @@ export interface User {
   must_change_password: boolean;
   profile_image_url: string | null;
   business_identities?: BusinessIdentity[];
+  isImpersonating?: boolean;
 }
 
 interface AuthContextType {

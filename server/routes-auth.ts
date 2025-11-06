@@ -97,6 +97,7 @@ export function registerAuthRoutes(app: Express) {
   app.get('/api/auth/me', async (req, res) => {
     try {
       const userId = (req as any).session?.userId;
+      const sessionUser = (req as any).session?.user;
 
       if (!userId) {
         return res.status(401).json({
@@ -114,9 +115,15 @@ export function registerAuthRoutes(app: Express) {
         });
       }
 
+      // Include isImpersonating flag from session if present
+      const userWithImpersonationFlag = {
+        ...user,
+        isImpersonating: sessionUser?.isImpersonating || false,
+      };
+
       res.json({
         success: true,
-        user,
+        user: userWithImpersonationFlag,
       });
     } catch (error: any) {
       console.error('取得使用者資料錯誤:', error);

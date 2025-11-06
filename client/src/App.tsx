@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/auth-context";
 import { TeachingQualityProvider } from "@/contexts/teaching-quality-context";
 import { ProtectedRoute } from "@/components/auth/protected-route";
+import { ImpersonationBanner } from "@/components/impersonation-banner";
 
 // 只有這些頁面需要立即載入（登入頁面和 404）
 import NotFound from "@/pages/not-found";
@@ -243,6 +244,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
+        <ImpersonationBanner />
         <Switch>
           {/* 完全公開的路由 - 不需要 AuthProvider */}
           <Route path="/forms/share/:id" component={PublicFormPage} />
