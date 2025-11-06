@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, UserPlus, Briefcase, FileText, Shield, Calendar, Key, Copy, Pencil, ArrowUpDown, ArrowUp, ArrowDown, Trash2, Save, CheckCircle2, Loader2 as Loader2Icon, AlertCircle, Shield as ShieldIcon } from 'lucide-react';
+import { Plus, Search, Eye, UserPlus, Briefcase, FileText, Shield, Calendar, Key, Copy, Pencil, ArrowUpDown, ArrowUp, ArrowDown, Trash2, Save, CheckCircle2, Loader2 as Loader2Icon, AlertCircle, Shield as ShieldIcon, LogIn } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { sidebarConfig } from '@/config/sidebar-config';
 import { Button } from '@/components/ui/button';
@@ -233,6 +233,36 @@ export default function EmployeesPage() {
     fetchEmployees();
     fetchModules();
   }, []);
+
+  // 模擬用戶視角
+  const handleImpersonate = async (userId: string, userName: string) => {
+    try {
+      const response = await fetch(`/api/admin/impersonate/${userId}`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('切換視角失敗');
+      }
+
+      const data = await response.json();
+
+      toast({
+        title: '成功',
+        description: `已切換為 ${userName} 的視角`,
+      });
+
+      // Refresh to apply new user context
+      window.location.href = '/';
+    } catch (error: any) {
+      toast({
+        title: '錯誤',
+        description: error.message || '切換視角失敗',
+        variant: 'destructive',
+      });
+    }
+  };
 
   // 載入權限模組列表
   const fetchModules = async () => {
@@ -1160,15 +1190,30 @@ export default function EmployeesPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleViewDetail(empData)}
-                      title="查看詳情"
-                    >
-                      <Eye className="h-4 w-4 mr-1" />
-                      詳情
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleViewDetail(empData)}
+                        title="查看詳情"
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        詳情
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleImpersonate(
+                          empData.user.id,
+                          `${empData.user.first_name} ${empData.user.last_name}`
+                        )}
+                        title="切換到此用戶的視角"
+                        className="text-primary hover:bg-primary/10"
+                      >
+                        <LogIn className="h-4 w-4 mr-1" />
+                        切換視角
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
