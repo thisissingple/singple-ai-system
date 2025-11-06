@@ -184,12 +184,6 @@ export const sidebarConfig: SidebarSection[] = [
         icon: Settings,
         requiredRoles: ['admin'],
       },
-      {
-        label: '用戶模擬',
-        href: '/settings/user-impersonation',
-        icon: Users,
-        requiredRoles: ['admin'],
-      },
     ],
   },
 ];
