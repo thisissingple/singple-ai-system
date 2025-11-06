@@ -10,6 +10,7 @@ import { useParams, useLocation } from 'wouter';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   ArrowLeft,
   Bot,
@@ -17,9 +18,13 @@ import {
   Trash2,
   Save,
   Loader2,
+  FileText,
+  History,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useToast } from '@/hooks/use-toast';
+import { getGrade, getGradeColor } from '@/lib/calculate-overall-score';
+import { cn } from '@/lib/utils';
 
 interface ChatMessage {
   id: string;
@@ -38,6 +43,10 @@ function ConsultationQualityDetailContent() {
   const [inputMessage, setInputMessage] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [generatingRecap, setGeneratingRecap] = useState(false);
+  const [showRecapsModal, setShowRecapsModal] = useState(false);
+  const [recaps, setRecaps] = useState<any[]>([]);
+  const chatSessionStart = useRef(new Date());
   const messageIdCounter = useRef(0);
 
   // Fetch consultation data
@@ -128,6 +137,68 @@ function ConsultationQualityDetailContent() {
       setInputMessage(currentInput); // Restore input
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Handle generating chat recap
+  const handleGenerateRecap = async () => {
+    if (chatMessages.length === 0) {
+      toast({
+        title: '無對話記錄',
+        description: '請先進行對話後再生成摘要',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setGeneratingRecap(true);
+    try {
+      const response = await fetch(`/api/consultation-quality/${eodId}/chat/generate-recap`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatHistory: chatMessages,
+          chatSessionStart: chatSessionStart.current,
+        }),
+      });
+
+      if (!response.ok) throw new Error('生成摘要失敗');
+
+      const result = await response.json();
+      toast({
+        title: '✅ 摘要生成成功',
+        description: '對話摘要已儲存',
+      });
+
+      // Clear current chat after generating recap
+      setChatMessages([]);
+      chatSessionStart.current = new Date();
+    } catch (error: any) {
+      toast({
+        title: '❌ 失敗',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setGeneratingRecap(false);
+    }
+  };
+
+  // Handle viewing recap history
+  const handleViewRecaps = async () => {
+    try {
+      const response = await fetch(`/api/consultation-quality/${eodId}/chat/recaps`);
+      if (!response.ok) throw new Error('獲取歷史摘要失敗');
+
+      const result = await response.json();
+      setRecaps(result.data);
+      setShowRecapsModal(true);
+    } catch (error: any) {
+      toast({
+        title: '❌ 失敗',
+        description: error.message,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -223,25 +294,167 @@ function ConsultationQualityDetailContent() {
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="max-w-5xl mx-auto space-y-6">
 
+          {/* Overall Score Card */}
+          {record?.overall_rating && (
+            <Card className="border-2 border-primary/20 shadow-lg">
+              <CardHeader className="bg-gradient-to-r from-primary/5 to-primary/10">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-2xl">🏆 諮詢品質戰績報告</CardTitle>
+                    <div className="flex items-center gap-3 mt-2 text-sm text-muted-foreground">
+                      <span>👤 學員：{record.student_name}</span>
+                      <span>|</span>
+                      <span>👨‍💼 諮詢師：{record.closer_name}</span>
+                      <span>|</span>
+                      <span>📅 {new Date(record.consultation_date || record.analyzed_at).toLocaleDateString('zh-TW')}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <div className="text-sm text-muted-foreground">整體評分</div>
+                      <div className="text-4xl font-bold">{Math.round(record.overall_rating * 10)}/100</div>
+                    </div>
+                    <Badge className={cn("h-16 px-6 text-2xl font-bold", getGradeColor(getGrade(record.overall_rating * 10)))}>
+                      {getGrade(record.overall_rating * 10)}
+                    </Badge>
+                  </div>
+                </div>
+              </CardHeader>
+            </Card>
+          )}
+
+          {/* Four Dimension Score Cards */}
+          {(record?.rapport_building_score || record?.needs_analysis_score ||
+            record?.objection_handling_score || record?.closing_technique_score) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Rapport Building */}
+              {record?.rapport_building_score && (
+                <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white hover:shadow-lg transition-shadow">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-blue-700">
+                      🤝 建立關係
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-4xl font-bold text-blue-600">{record.rapport_building_score}/10</div>
+                    {record.rapport_building_comment && (
+                      <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
+                        {record.rapport_building_comment}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Needs Analysis */}
+              {record?.needs_analysis_score && (
+                <Card className="border-2 border-green-200 bg-gradient-to-br from-green-50 to-white hover:shadow-lg transition-shadow">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-green-700">
+                      🔍 需求分析
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-4xl font-bold text-green-600">{record.needs_analysis_score}/10</div>
+                    {record.needs_analysis_comment && (
+                      <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
+                        {record.needs_analysis_comment}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Objection Handling */}
+              {record?.objection_handling_score && (
+                <Card className="border-2 border-yellow-200 bg-gradient-to-br from-yellow-50 to-white hover:shadow-lg transition-shadow">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-yellow-700">
+                      🛡️ 異議處理
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-4xl font-bold text-yellow-600">{record.objection_handling_score}/10</div>
+                    {record.objection_handling_comment && (
+                      <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
+                        {record.objection_handling_comment}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Closing Technique */}
+              {record?.closing_technique_score && (
+                <Card className="border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-white hover:shadow-lg transition-shadow">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-purple-700">
+                      🎯 成交技巧
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-4xl font-bold text-purple-600">{record.closing_technique_score}/10</div>
+                    {record.closing_technique_comment && (
+                      <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
+                        {record.closing_technique_comment}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+
+          {/* Status and Actions */}
+          {record?.analyzed_at && (
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div className="flex items-center gap-3 text-sm flex-wrap">
+                    <Badge className="bg-green-100 text-green-700">✅ 已分析</Badge>
+                    <span className="text-muted-foreground">
+                      📊 v{record.analysis_version || '1.0'}
+                    </span>
+                    <span className="text-muted-foreground">
+                      🕐 {new Date(record.analyzed_at).toLocaleString('zh-TW')}
+                    </span>
+                    {record.strengths && (
+                      <span className="text-muted-foreground">
+                        ✨ {Array.isArray(record.strengths) ? record.strengths.length : 0} 條亮點
+                      </span>
+                    )}
+                    {record.improvements && (
+                      <span className="text-muted-foreground">
+                        📝 {Array.isArray(record.improvements) ? record.improvements.length : 0} 條改進建議
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => saveToKBMutation.mutate()}
+                      disabled={saveToKBMutation.isPending}
+                      size="sm"
+                      variant="outline"
+                    >
+                      {saveToKBMutation.isPending ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" />儲存中</>
+                      ) : (
+                        <><Save className="h-4 w-4 mr-2" />存入知識庫</>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Section 1: AI Analysis Result */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Bot className="h-5 w-5 text-blue-600" />
                 AI 分析結果
               </CardTitle>
-              <Button
-                onClick={() => saveToKBMutation.mutate()}
-                disabled={saveToKBMutation.isPending}
-                size="sm"
-                variant="outline"
-              >
-                {saveToKBMutation.isPending ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />儲存中</>
-                ) : (
-                  <><Save className="h-4 w-4 mr-2" />存入知識庫</>
-                )}
-              </Button>
             </CardHeader>
             <CardContent>
               {record?.raw_markdown_output ? (
@@ -351,39 +564,151 @@ function ConsultationQualityDetailContent() {
               </div>
 
               {/* Input Area */}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="輸入你的問題..."
-                  className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey && inputMessage.trim() && !isLoading) {
-                      e.preventDefault();
-                      handleSendMessage();
-                    }
-                  }}
-                  disabled={isLoading}
-                />
-                <button
-                  type="button"
-                  onClick={handleSendMessage}
-                  disabled={isLoading || !inputMessage.trim()}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isLoading ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <span className="text-sm font-medium">送出</span>
-                  )}
-                </button>
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="輸入你的問題..."
+                    className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && inputMessage.trim() && !isLoading) {
+                        e.preventDefault();
+                        handleSendMessage();
+                      }
+                    }}
+                    disabled={isLoading}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSendMessage}
+                    disabled={isLoading || !inputMessage.trim()}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isLoading ? (
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <span className="text-sm font-medium">送出</span>
+                    )}
+                  </button>
+                </div>
+
+                {/* Recap Action Buttons */}
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    onClick={handleGenerateRecap}
+                    disabled={generatingRecap || chatMessages.length === 0}
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                  >
+                    {generatingRecap ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        儲存中...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" />
+                        存入知識庫
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleViewRecaps}
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                  >
+                    <History className="h-4 w-4 mr-2" />
+                    查看歷史摘要
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
 
         </div>
       </div>
+
+      {/* Recaps History Modal */}
+      {showRecapsModal && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+          onClick={() => setShowRecapsModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="border-b px-6 py-4 flex items-center justify-between">
+              <h2 className="text-xl font-semibold flex items-center gap-2">
+                <History className="h-5 w-5 text-blue-600" />
+                歷史對話摘要
+              </h2>
+              <button
+                onClick={() => setShowRecapsModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <span className="text-2xl">&times;</span>
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {recaps.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <History className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                  <p>尚無歷史摘要記錄</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {recaps.map((recap) => (
+                    <Card key={recap.id}>
+                      <CardHeader>
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <CardTitle className="text-base">
+                              對話摘要 #{recap.id.slice(0, 8)}
+                            </CardTitle>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              {new Date(recap.generated_at).toLocaleString('zh-TW', {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                hour12: false,
+                              })} |{' '}
+                              {recap.total_messages} 則訊息 | {recap.total_questions} 個提問
+                            </p>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="prose prose-lg max-w-none">
+                          <ReactMarkdown>{recap.recap_summary}</ReactMarkdown>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="border-t px-6 py-4">
+              <Button onClick={() => setShowRecapsModal(false)} className="w-full">
+                關閉
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

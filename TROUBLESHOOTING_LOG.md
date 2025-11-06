@@ -219,3 +219,297 @@ ADD COLUMN IF NOT EXISTS raw_markdown_output TEXT;
 
 **文件狀態：** 本機專用（不推送至 GitHub）
 **完成時間：** 2025-11-05 22:35 (UTC+8)
+
+---
+
+## 2025-11-06: 諮詢品質系統 - 知識庫儲存與評分展示
+
+### 問題描述
+
+1. **知識庫儲存失敗**
+   - AI 分析結果和諮詢助手的「存入知識庫」功能顯示「儲存失敗」錯誤
+   - 根本原因：SQL 查詢使用不存在的 `users.name` 欄位
+
+2. **對話摘要功能需求**
+   - 需要自動儲存對話摘要到知識庫
+   - 按鈕名稱需更改為「存入知識庫」
+   - 摘要文字顯示太小
+   - 時間顯示格式不正確
+   - 歷史摘要模態框有重複內容
+
+3. **評分展示缺失**
+   - 諮詢品質詳細頁面需要評分區塊
+   - 需要與體驗課使用相同的評級系統 (SSS/A/B/C/D/E)
+
+### 排查與修復過程
+
+#### 1. 知識庫儲存失敗修復
+
+**問題診斷：**
+- 創建測試腳本 `scripts/test-consultant-lookup.ts`
+- 發現錯誤：`column "name" does not exist`
+- `users` 表只有 `first_name` 和 `last_name` 欄位
+
+**解決方案：**
+
+修改檔案：`server/routes-consultation-quality.ts`
+
+位置 1 - Line 569-582（save-to-kb endpoint）：
+```typescript
+const userQuery = await pool.query(`
+  SELECT email FROM users
+  WHERE (
+    first_name = $1
+    OR CONCAT(first_name, ' ', COALESCE(last_name, '')) = $1
+    OR CONCAT(first_name, last_name) = $1
+  )
+  AND 'consultant' = ANY(roles)
+  LIMIT 1
+`, [record.closer_name]);
+```
+
+位置 2 - Line 876-916（generate-recap endpoint）：
+```typescript
+// 同樣的 SQL 查詢邏輯
+// 額外新增：自動儲存對話摘要到學員和諮詢師知識庫
+if (record.student_email) {
+  await getOrCreateStudentKB(record.student_email, record.student_name);
+  await addDataSourceRef(record.student_email, 'chat_recaps', recap.id);
+}
+
+if (consultantEmail) {
+  await getOrCreateConsultantKB(consultantEmail, record.closer_name);
+  await addConsultantDataSourceRef(consultantEmail, 'chat_recaps', recap.id);
+}
+```
+
+**測試結果：**
+- ✅ "Vicky" 成功查找到 `ashinvicky1988@gmail.com`
+- ✅ 知識庫儲存功能恢復正常
+
+#### 2. 對話摘要 UI 優化
+
+**修改檔案：** `client/src/pages/consultation-quality/consultation-quality-detail.tsx`
+
+**變更內容：**
+
+1. **按鈕文字更新** (Line 469-470)
+```typescript
+<Save className="h-4 w-4 mr-2" />
+存入知識庫
+```
+
+2. **字體大小調整** (Line 541)
+```typescript
+<div className="prose prose-lg max-w-none">
+```
+變更歷程：`prose-sm` → `prose-base` → `prose-lg`
+
+3. **時間格式修正** (Lines 534-541)
+```typescript
+{new Date(recap.generated_at).toLocaleString('zh-TW', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})}
+```
+
+4. **移除重複內容** (Lines 545-589 刪除)
+- 移除歷史摘要模態框中的結構化資料重複顯示
+- 保留清晰的 Markdown 摘要顯示
+
+#### 3. 評分展示實作
+
+**研究成果：**
+- 找到評分函數：`client/src/lib/calculate-overall-score.ts`
+- 評級系統：SSS (90-100), SS (85-89), S (80-84), A (75-79), B (70-74), C (60-69), D (50-59), E (0-49)
+- 參考設計：`client/src/pages/teaching-quality-detail.tsx`
+
+**實作內容：**
+
+**修改檔案：** `client/src/pages/consultation-quality/consultation-quality-detail.tsx`
+
+**新增導入** (Lines 8-27)：
+```typescript
+import { Badge } from '@/components/ui/badge';
+import { getGrade, getGradeColor } from '@/lib/calculate-overall-score';
+import { cn } from '@/lib/utils';
+```
+
+**新增區塊 1：整體評分卡片** (Lines 297-324)
+```typescript
+{/* Overall Score Card */}
+{record?.overall_rating && (
+  <Card className="border-2 border-primary/20 shadow-lg">
+    <CardHeader className="bg-gradient-to-r from-primary/5 to-primary/10">
+      <div className="flex items-center justify-between">
+        <div>
+          <CardTitle className="text-2xl">🏆 諮詢品質戰績報告</CardTitle>
+          <div className="flex items-center gap-3 mt-2">
+            <span>👤 學員：{record.student_name}</span>
+            <span>|</span>
+            <span>👨‍💼 諮詢師：{record.closer_name}</span>
+            <span>|</span>
+            <span>📅 {new Date(...).toLocaleDateString('zh-TW')}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-4xl font-bold">
+            {Math.round(record.overall_rating * 10)}/100
+          </div>
+          <Badge className={cn("h-16 px-6 text-2xl font-bold",
+            getGradeColor(getGrade(record.overall_rating * 10)))}>
+            {getGrade(record.overall_rating * 10)}
+          </Badge>
+        </div>
+      </div>
+    </CardHeader>
+  </Card>
+)}
+```
+
+**新增區塊 2：四大評分維度卡片** (Lines 326-406)
+```typescript
+<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+  {/* 1. 建立關係 - 藍色漸層 */}
+  {record?.rapport_building_score && (
+    <Card className="border-2 border-blue-200 bg-gradient-to-br from-blue-50 to-white">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-blue-700">
+          🤝 建立關係
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="text-4xl font-bold text-blue-600">
+          {record.rapport_building_score}/10
+        </div>
+        {record.rapport_building_comment && (
+          <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
+            {record.rapport_building_comment}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  )}
+
+  {/* 2. 需求分析 - 綠色漸層 */}
+  {/* 3. 異議處理 - 橙色漸層 */}
+  {/* 4. 成交技巧 - 紫色漸層 */}
+</div>
+```
+
+**新增區塊 3：狀態與操作列** (Lines 408-449)
+```typescript
+{record?.analyzed_at && (
+  <Card>
+    <CardContent className="pt-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3 text-sm flex-wrap">
+          <Badge className="bg-green-100 text-green-700">✅ 已分析</Badge>
+          <span className="text-muted-foreground">
+            📊 v{record.analysis_version || '1.0'}
+          </span>
+          <span className="text-muted-foreground">
+            🕐 {new Date(record.analyzed_at).toLocaleString('zh-TW')}
+          </span>
+          {record.strengths?.length > 0 && (
+            <span>💪 優勢 {record.strengths.length} 項</span>
+          )}
+          {record.areas_for_improvement?.length > 0 && (
+            <span>📈 可改進 {record.areas_for_improvement.length} 項</span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={() => saveToKBMutation.mutate()}>
+            <Save className="h-4 w-4 mr-2" />存入知識庫
+          </Button>
+        </div>
+      </div>
+    </CardContent>
+  </Card>
+)}
+```
+
+**移除重複按鈕** (Lines 453-470)
+- 從 AI 分析結果卡片標題移除「存入知識庫」按鈕
+- 按鈕已整合到狀態與操作列
+
+### 技術細節
+
+#### 分數轉換邏輯
+```typescript
+// 1-10 分制 → 100 分制
+const score100 = Math.round(record.overall_rating * 10);
+
+// 100 分制 → 等級
+const grade = getGrade(score100);
+
+// 範例：8.5/10 → 85/100 → S 級
+```
+
+#### 評級系統配色
+```typescript
+SSS: 'bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500'
+SS:  'bg-gradient-to-r from-purple-500 to-pink-500'
+S:   'bg-gradient-to-r from-blue-500 to-cyan-500'
+A:   'bg-green-500'
+B:   'bg-lime-500'
+C:   'bg-yellow-500'
+D:   'bg-orange-500'
+E:   'bg-red-500'
+```
+
+#### 雙重知識庫儲存架構
+```
+AI 分析 / 對話摘要
+    ↓
+    ├─→ 學員知識庫 (student_knowledge_base)
+    │   └─ data_source_refs: ['analyses', 'chat_recaps']
+    │
+    └─→ 諮詢師知識庫 (consultant_knowledge_base)
+        └─ data_source_refs: ['analyses', 'chat_recaps']
+```
+
+### 完成清單
+
+- ✅ 修復知識庫儲存功能（consultant email 查詢）
+- ✅ 對話摘要自動儲存到知識庫
+- ✅ 按鈕文字更新為「存入知識庫」
+- ✅ 摘要字體放大至 `prose-lg`
+- ✅ 時間格式修正（zh-TW locale）
+- ✅ 移除歷史摘要重複內容
+- ✅ 新增整體評分卡片（100 分制 + 等級徽章）
+- ✅ 新增四大維度評分卡片（建立關係、需求分析、異議處理、成交技巧）
+- ✅ 新增狀態與操作列（分析元數據 + 存入知識庫按鈕）
+- ✅ 移除重複的存入知識庫按鈕
+
+### 相關檔案
+
+**後端：**
+- `server/routes-consultation-quality.ts` (Lines 569-582, 876-916)
+- `server/services/consultation-chat-recap-service.ts`
+
+**前端：**
+- `client/src/pages/consultation-quality/consultation-quality-detail.tsx`
+- `client/src/lib/calculate-overall-score.ts`
+
+**測試腳本：**
+- `scripts/test-consultant-lookup.ts`
+- `scripts/check-users-schema.ts`
+- `scripts/test-save-to-kb.ts`
+
+### 使用者回饋
+
+1. "知識庫不能用" → ✅ 已修復
+2. "摘要字太小看不到" → ✅ 調整為 prose-lg
+3. "再大一點，還是看不太到" → ✅ "可以先這樣"（使用者滿意）
+4. "查看歷史摘要爲什麼要分上下兩塊？" → ✅ 移除重複區塊
+5. "要跟體驗課的評等一樣" → ✅ 使用相同評級系統
+
+---
+
+**完成時間：** 2025-11-06 (UTC+8)
+**狀態：** ✅ 所有功能已完成並準備推送

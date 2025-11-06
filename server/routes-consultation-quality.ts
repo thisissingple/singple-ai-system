@@ -8,6 +8,8 @@ import { consultationQualityGPTService } from './services/consultation-quality-g
 import { streamText } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { getOrCreateStudentKB, addDataSourceRef } from './services/student-knowledge-service';
+import { getOrCreateConsultantKB, addConsultantDataSourceRef } from './services/consultant-knowledge-service';
+import { generateChatRecap, getChatRecapsForConsultation } from './services/consultation-chat-recap-service';
 
 export function registerConsultationQualityRoutes(app: any, isAuthenticated: any, requireAdmin: any) {
   // ============================================================================
@@ -564,23 +566,47 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
         return res.status(400).json({ error: '該諮詢記錄缺少學員 email，無法儲存至知識庫' });
       }
 
+      // Find consultant email from users table
+      // Note: closer_name could be first_name, full name, or nickname
+      const userQuery = await pool.query(`
+        SELECT email FROM users
+        WHERE (
+          first_name = $1
+          OR CONCAT(first_name, ' ', COALESCE(last_name, '')) = $1
+          OR CONCAT(first_name, last_name) = $1
+        )
+        AND 'consultant' = ANY(roles)
+        LIMIT 1
+      `, [record.closer_name]);
+
+      const consultantEmail = userQuery.rows.length > 0 ? userQuery.rows[0].email : null;
+
       await pool.end();
 
-      // Ensure student knowledge base exists
+      // 1. Save to student knowledge base
       await getOrCreateStudentKB(record.student_email, record.student_name);
-
-      // Add this analysis to student's data_sources.ai_analyses
       await addDataSourceRef(record.student_email, 'ai_analyses', record.analysis_id);
 
-      console.log(`✅ Saved consultation analysis ${record.analysis_id} to knowledge base for ${record.student_name} (${record.student_email})`);
+      console.log(`✅ Saved consultation analysis ${record.analysis_id} to student KB for ${record.student_name} (${record.student_email})`);
+
+      // 2. Save to consultant knowledge base (if consultant email found)
+      if (consultantEmail) {
+        await getOrCreateConsultantKB(consultantEmail, record.closer_name);
+        await addConsultantDataSourceRef(consultantEmail, 'consultation_analyses', record.analysis_id);
+        console.log(`✅ Saved consultation analysis ${record.analysis_id} to consultant KB for ${record.closer_name} (${consultantEmail})`);
+      } else {
+        console.warn(`⚠️ Consultant email not found for ${record.closer_name}, skipping consultant KB`);
+      }
 
       res.json({
         success: true,
         data: {
           studentEmail: record.student_email,
           studentName: record.student_name,
+          consultantEmail: consultantEmail,
+          consultantName: record.closer_name,
           analysisId: record.analysis_id,
-          message: `已成功儲存至 ${record.student_name} 的知識庫`,
+          message: `已成功儲存至 ${record.student_name} 的知識庫` + (consultantEmail ? ` 及 ${record.closer_name} 的戰績` : ''),
         },
       });
     } catch (error: any) {
@@ -808,6 +834,115 @@ ${aiAnalysis || '（無分析結果）'}`;
       if (!res.headersSent) {
         res.status(500).json({ error: error.message });
       }
+    }
+  });
+
+  // ============================================================================
+  // 9. POST /api/consultation-quality/:eodId/chat/generate-recap
+  // Generate AI-powered chat recap
+  // ============================================================================
+  app.post('/api/consultation-quality/:eodId/chat/generate-recap', isAuthenticated, async (req: any, res) => {
+    try {
+      const { eodId } = req.params;
+      const { chatHistory, chatSessionStart } = req.body;
+
+      if (!chatHistory || !Array.isArray(chatHistory) || chatHistory.length === 0) {
+        return res.status(400).json({ error: '對話記錄不能為空' });
+      }
+
+      const pool = createPool();
+
+      // Get consultation record
+      const consultationQuery = `
+        SELECT
+          e.student_name,
+          e.student_email,
+          e.closer_name,
+          cqa.id as analysis_id
+        FROM eods_for_closers e
+        LEFT JOIN consultation_quality_analysis cqa ON e.id = cqa.eod_id
+        WHERE e.id = $1
+      `;
+
+      const result = await pool.query(consultationQuery, [eodId]);
+
+      if (result.rows.length === 0) {
+        await pool.end();
+        return res.status(404).json({ error: '找不到諮詢記錄' });
+      }
+
+      const record = result.rows[0];
+
+      // Find consultant email from users table
+      const userQuery = await pool.query(`
+        SELECT email FROM users
+        WHERE (
+          first_name = $1
+          OR CONCAT(first_name, ' ', COALESCE(last_name, '')) = $1
+          OR CONCAT(first_name, last_name) = $1
+        )
+        AND 'consultant' = ANY(roles)
+        LIMIT 1
+      `, [record.closer_name]);
+
+      const consultantEmail = userQuery.rows.length > 0 ? userQuery.rows[0].email : null;
+
+      await pool.end();
+
+      // Generate recap
+      const recap = await generateChatRecap({
+        eodId,
+        analysisId: record.analysis_id,
+        studentEmail: record.student_email,
+        studentName: record.student_name,
+        consultantEmail: consultantEmail || undefined,
+        consultantName: record.closer_name,
+        chatHistory,
+        chatSessionStart: chatSessionStart ? new Date(chatSessionStart) : new Date(),
+        generatedBy: req.session?.user?.email || 'unknown',
+      });
+
+      // Save chat recap to knowledge bases
+      if (record.student_email) {
+        await getOrCreateStudentKB(record.student_email, record.student_name);
+        await addDataSourceRef(record.student_email, 'chat_recaps', recap.id);
+        console.log(`✅ Saved chat recap ${recap.id} to student KB for ${record.student_name}`);
+      }
+
+      if (consultantEmail) {
+        await getOrCreateConsultantKB(consultantEmail, record.closer_name);
+        await addConsultantDataSourceRef(consultantEmail, 'chat_recaps', recap.id);
+        console.log(`✅ Saved chat recap ${recap.id} to consultant KB for ${record.closer_name}`);
+      }
+
+      res.json({
+        success: true,
+        data: recap,
+        message: '對話摘要已生成並儲存至知識庫',
+      });
+    } catch (error: any) {
+      console.error('Failed to generate chat recap:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // 10. GET /api/consultation-quality/:eodId/chat/recaps
+  // Get all chat recaps for a consultation
+  // ============================================================================
+  app.get('/api/consultation-quality/:eodId/chat/recaps', isAuthenticated, async (req: any, res) => {
+    try {
+      const { eodId } = req.params;
+
+      const recaps = await getChatRecapsForConsultation(eodId);
+
+      res.json({
+        success: true,
+        data: recaps,
+      });
+    } catch (error: any) {
+      console.error('Failed to get chat recaps:', error);
+      res.status(500).json({ error: error.message });
     }
   });
 
