@@ -101,10 +101,10 @@ export function FieldMappingDialog({
 
   const loadTables = async () => {
     try {
-      const response = await fetch('/api/supabase/tables');
+      const response = await fetch('/api/database/tables');
       const data = await response.json();
-      if (data.success) {
-        setTables(data.data);
+      if (data.success && data.tables) {
+        setTables(data.tables);
       }
     } catch (error) {
       console.error('載入表格失敗:', error);
