@@ -565,26 +565,29 @@ function ConsultationQualityDetailContent() {
 
               {/* Input Area */}
               <div className="space-y-3">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="輸入你的問題..."
-                    className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    value={inputMessage}
-                    onChange={(e) => setInputMessage(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey && inputMessage.trim() && !isLoading) {
-                        e.preventDefault();
-                        handleSendMessage();
-                      }
-                    }}
-                    disabled={isLoading}
-                  />
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1">
+                    <textarea
+                      placeholder="輸入你的問題... (⌘+Enter 或 Ctrl+Enter 送出)"
+                      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                      rows={3}
+                      value={inputMessage}
+                      onChange={(e) => setInputMessage(e.target.value)}
+                      onKeyDown={(e) => {
+                        // Command+Enter (Mac) or Ctrl+Enter (Windows/Linux) to send
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && inputMessage.trim() && !isLoading) {
+                          e.preventDefault();
+                          handleSendMessage();
+                        }
+                      }}
+                      disabled={isLoading}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={handleSendMessage}
                     disabled={isLoading || !inputMessage.trim()}
-                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                   >
                     {isLoading ? (
                       <Loader2 className="h-5 w-5 animate-spin" />

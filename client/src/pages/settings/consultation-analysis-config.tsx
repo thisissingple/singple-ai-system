@@ -230,7 +230,15 @@ function ConsultationAnalysisConfigContent() {
                   value={formData.ai_model}
                   onChange={(e) => setFormData({ ...formData, ai_model: e.target.value })}
                 >
-                  <option value="gpt-4o">gpt-4o (推薦 - 最新、最強)</option>
+                  <option value="gpt-5">gpt-5 (最新旗艦版)</option>
+                  <option value="gpt-5-mini">gpt-5-mini (輕量快速)</option>
+                  <option value="gpt-5-nano">gpt-5-nano (超輕量)</option>
+                  <option value="gpt-4.1">gpt-4.1 (升級版)</option>
+                  <option value="gpt-4.1-mini">gpt-4.1-mini (輕量版)</option>
+                  <option value="gpt-4.1-nano">gpt-4.1-nano (超輕量版)</option>
+                  <option value="o3">o3 (推理模型)</option>
+                  <option value="o4-mini">o4-mini (推理輕量版)</option>
+                  <option value="gpt-4o">gpt-4o (推薦 - 平衡)</option>
                   <option value="gpt-4-turbo">gpt-4-turbo (快速)</option>
                   <option value="gpt-4">gpt-4 (標準)</option>
                   <option value="gpt-3.5-turbo">gpt-3.5-turbo (經濟)</option>
@@ -328,7 +336,15 @@ function ConsultationAnalysisConfigContent() {
                   value={formData.chat_ai_model}
                   onChange={(e) => setFormData({ ...formData, chat_ai_model: e.target.value })}
                 >
-                  <option value="gpt-4o">gpt-4o (推薦 - 最新、最強)</option>
+                  <option value="gpt-5">gpt-5 (最新旗艦版)</option>
+                  <option value="gpt-5-mini">gpt-5-mini (輕量快速)</option>
+                  <option value="gpt-5-nano">gpt-5-nano (超輕量)</option>
+                  <option value="gpt-4.1">gpt-4.1 (升級版)</option>
+                  <option value="gpt-4.1-mini">gpt-4.1-mini (輕量版)</option>
+                  <option value="gpt-4.1-nano">gpt-4.1-nano (超輕量版)</option>
+                  <option value="o3">o3 (推理模型)</option>
+                  <option value="o4-mini">o4-mini (推理輕量版)</option>
+                  <option value="gpt-4o">gpt-4o (推薦 - 平衡)</option>
                   <option value="gpt-4-turbo">gpt-4-turbo (快速)</option>
                   <option value="gpt-4">gpt-4 (標準)</option>
                   <option value="gpt-3.5-turbo">gpt-3.5-turbo (經濟)</option>
