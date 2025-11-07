@@ -6093,7 +6093,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/database/:tableName/data', async (req, res) => {
     try {
       const { tableName } = req.params;
-      const { page = '1', limit = '50', search = '', searchColumn = 'email' } = req.query;
+      const {
+        page = '1',
+        limit = '50',
+        search = '',
+        searchColumn = 'email',
+        sortBy = 'created_at',
+        sortOrder = 'desc'
+      } = req.query;
 
       const offset = (parseInt(page as string) - 1) * parseInt(limit as string);
       const limitNum = parseInt(limit as string);
@@ -6105,10 +6112,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (search) {
         query += ` WHERE ${searchColumn}::text ILIKE $1`;
         params.push(`%${search}%`);
-        query += ` ORDER BY created_at DESC LIMIT $2 OFFSET $3`;
+      }
+
+      // 排序功能
+      const validSortOrder = sortOrder === 'asc' ? 'ASC' : 'DESC';
+      query += ` ORDER BY ${sortBy} ${validSortOrder}`;
+
+      // 分頁
+      if (search) {
+        query += ` LIMIT $2 OFFSET $3`;
         params.push(limitNum, offset);
       } else {
-        query += ` ORDER BY created_at DESC LIMIT $1 OFFSET $2`;
+        query += ` LIMIT $1 OFFSET $2`;
         params.push(limitNum, offset);
       }
 
@@ -6214,6 +6229,127 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, data: result.rows[0] });
     } catch (error: any) {
       console.error('刪除資料失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Database Browser API - 匯出資料為 CSV
+  app.get('/api/database/:tableName/export', async (req, res) => {
+    try {
+      const { tableName } = req.params;
+      const { search = '', searchColumn = 'email', sortBy = 'created_at', sortOrder = 'desc' } = req.query;
+
+      let query = `SELECT * FROM ${tableName}`;
+      const params: any[] = [];
+
+      // 搜尋功能
+      if (search) {
+        query += ` WHERE ${searchColumn}::text ILIKE $1`;
+        params.push(`%${search}%`);
+      }
+
+      // 排序功能
+      const validSortOrder = sortOrder === 'asc' ? 'ASC' : 'DESC';
+      query += ` ORDER BY ${sortBy} ${validSortOrder}`;
+
+      const result = await queryDatabase(query, params);
+      const data = result.rows;
+
+      if (data.length === 0) {
+        return res.status(404).json({ error: '沒有資料可匯出' });
+      }
+
+      // 生成 CSV
+      const columns = Object.keys(data[0]);
+      const csvHeader = columns.join(',');
+      const csvRows = data.map(row =>
+        columns.map(col => {
+          const value = row[col];
+          // 處理包含逗號或換行的值
+          if (value === null || value === undefined) return '';
+          const stringValue = String(value);
+          if (stringValue.includes(',') || stringValue.includes('\n') || stringValue.includes('"')) {
+            return `"${stringValue.replace(/"/g, '""')}"`;
+          }
+          return stringValue;
+        }).join(',')
+      );
+      const csv = [csvHeader, ...csvRows].join('\n');
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${tableName}_${new Date().toISOString().split('T')[0]}.csv"`);
+      res.send('\uFEFF' + csv); // BOM for UTF-8
+    } catch (error: any) {
+      console.error('匯出資料失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Database Browser API - 從 CSV 匯入資料
+  app.post('/api/database/:tableName/import', async (req, res) => {
+    try {
+      const { tableName } = req.params;
+
+      // 使用 multer 處理檔案上傳
+      const multer = require('multer');
+      const upload = multer({ storage: multer.memoryStorage() });
+
+      upload.single('file')(req, res, async (err: any) => {
+        if (err) {
+          return res.status(400).json({ error: '檔案上傳失敗' });
+        }
+
+        if (!req.file) {
+          return res.status(400).json({ error: '未選擇檔案' });
+        }
+
+        const csvContent = req.file.buffer.toString('utf-8');
+        const lines = csvContent.split('\n').filter(line => line.trim());
+
+        if (lines.length < 2) {
+          return res.status(400).json({ error: 'CSV 檔案格式錯誤' });
+        }
+
+        // 解析標題行
+        const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+
+        // 解析資料行
+        let imported = 0;
+        let failed = 0;
+
+        for (let i = 1; i < lines.length; i++) {
+          try {
+            const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+            const rowData: any = {};
+
+            headers.forEach((header, index) => {
+              if (values[index] && values[index] !== '') {
+                rowData[header] = values[index];
+              }
+            });
+
+            // 排除自動生成的欄位
+            delete rowData.id;
+            delete rowData.created_at;
+            delete rowData.updated_at;
+
+            await insertAndReturn(tableName, rowData);
+            imported++;
+          } catch (error) {
+            console.error(`第 ${i + 1} 行匯入失敗:`, error);
+            failed++;
+          }
+        }
+
+        res.json({
+          success: true,
+          imported,
+          failed,
+          total: lines.length - 1
+        });
+      });
+    } catch (error: any) {
+      console.error('匯入資料失敗:', error);
       res.status(500).json({ error: error.message });
     }
   });

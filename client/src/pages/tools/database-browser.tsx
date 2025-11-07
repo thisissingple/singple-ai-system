@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, Edit, Trash2, ChevronLeft, ChevronRight, Loader2, Plus } from 'lucide-react';
+import { Search, Edit, Trash2, ChevronLeft, ChevronRight, Loader2, Plus, ArrowUpDown, ArrowUp, ArrowDown, Download, Upload } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface ColumnInfo {
@@ -34,6 +34,10 @@ export default function DatabaseBrowser() {
   const [editFormData, setEditFormData] = useState<Record<string, any>>({});
   const [addFormData, setAddFormData] = useState<Record<string, any>>({});
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
 
   // 取得所有表格
   const { data: tablesData } = useQuery({
@@ -59,13 +63,14 @@ export default function DatabaseBrowser() {
 
   // 取得表格資料
   const { data: tableData, isLoading } = useQuery({
-    queryKey: ['database', 'data', selectedTable, page, searchQuery, searchColumn],
+    queryKey: ['database', 'data', selectedTable, page, searchQuery, searchColumn, sortColumn, sortDirection],
     queryFn: async () => {
       if (!selectedTable) return null;
       const params = new URLSearchParams({
         page: page.toString(),
         limit: limit.toString(),
         ...(searchQuery && { search: searchQuery, searchColumn }),
+        ...(sortColumn && { sortBy: sortColumn, sortOrder: sortDirection }),
       });
       const res = await fetch(`/api/database/${selectedTable}/data?${params}`);
       if (!res.ok) throw new Error('Failed to fetch data');
@@ -224,6 +229,89 @@ export default function DatabaseBrowser() {
     setPage(1); // 重置到第一頁
   };
 
+  const handleSort = (columnName: string) => {
+    if (sortColumn === columnName) {
+      // 切換排序方向
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      // 新欄位，預設升序
+      setSortColumn(columnName);
+      setSortDirection('asc');
+    }
+    setPage(1); // 重置到第一頁
+  };
+
+  const handleExport = async () => {
+    if (!selectedTable) return;
+
+    try {
+      const params = new URLSearchParams({
+        ...(searchQuery && { search: searchQuery, searchColumn }),
+        ...(sortColumn && { sortBy: sortColumn, sortOrder: sortDirection }),
+      });
+
+      const res = await fetch(`/api/database/${selectedTable}/export?${params}`);
+      if (!res.ok) throw new Error('Failed to export');
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${selectedTable}_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      toast({
+        title: "匯出成功",
+        description: `已匯出 ${selectedTable} 資料`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "匯出失敗",
+        description: error.message || "無法匯出資料",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleImport = async () => {
+    if (!selectedTable || !importFile) return;
+
+    const formData = new FormData();
+    formData.append('file', importFile);
+
+    try {
+      const res = await fetch(`/api/database/${selectedTable}/import`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to import');
+      }
+
+      const result = await res.json();
+
+      queryClient.invalidateQueries({ queryKey: ['database', 'data', selectedTable] });
+      setIsImportDialogOpen(false);
+      setImportFile(null);
+
+      toast({
+        title: "匯入成功",
+        description: `已成功匯入 ${result.imported || 0} 筆資料`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "匯入失敗",
+        description: error.message || "無法匯入資料",
+        variant: "destructive",
+      });
+    }
+  };
+
   // 當選擇表格時，重置搜尋和頁碼
   useEffect(() => {
     setSearchQuery('');
@@ -300,6 +388,14 @@ export default function DatabaseBrowser() {
                 <Plus className="h-4 w-4" />
                 新增紀錄
               </Button>
+              <Button onClick={() => setIsImportDialogOpen(true)} size="sm" variant="outline" className="gap-1">
+                <Upload className="h-4 w-4" />
+                匯入
+              </Button>
+              <Button onClick={handleExport} size="sm" variant="outline" className="gap-1">
+                <Download className="h-4 w-4" />
+                匯出
+              </Button>
               <div className="ml-auto text-sm text-muted-foreground">
                 共 {pagination?.total || 0} 筆
               </div>
@@ -328,7 +424,21 @@ export default function DatabaseBrowser() {
                             width: columnWidths[col.column_name] || 150,
                           }}
                         >
-                          <div className="truncate">{col.column_name}</div>
+                          <div
+                            className="truncate flex items-center gap-1 cursor-pointer hover:text-blue-600"
+                            onClick={() => handleSort(col.column_name)}
+                          >
+                            <span>{col.column_name}</span>
+                            {sortColumn === col.column_name ? (
+                              sortDirection === 'asc' ? (
+                                <ArrowUp className="h-3.5 w-3.5" />
+                              ) : (
+                                <ArrowDown className="h-3.5 w-3.5" />
+                              )
+                            ) : (
+                              <ArrowUpDown className="h-3.5 w-3.5 opacity-30" />
+                            )}
+                          </div>
                           {/* 調整大小控制器 */}
                           <div
                             className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-transparent hover:bg-blue-500 group-hover:bg-blue-300"
@@ -586,6 +696,59 @@ export default function DatabaseBrowser() {
               ) : (
                 '新增'
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 匯入對話框 */}
+      <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>匯入資料</DialogTitle>
+            <DialogDescription>
+              從 CSV 檔案匯入資料到 {selectedTable} 表格
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="import-file">選擇 CSV 檔案</Label>
+              <Input
+                id="import-file"
+                type="file"
+                accept=".csv"
+                onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+              />
+            </div>
+
+            <div className="text-sm text-muted-foreground space-y-1">
+              <p>📌 注意事項：</p>
+              <ul className="list-disc list-inside space-y-1 ml-2">
+                <li>CSV 檔案的欄位名稱必須與資料表欄位一致</li>
+                <li>第一行必須是欄位標題</li>
+                <li>日期格式：YYYY-MM-DD</li>
+                <li>匯入會新增資料，不會覆蓋現有資料</li>
+              </ul>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsImportDialogOpen(false);
+                setImportFile(null);
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              onClick={handleImport}
+              disabled={!importFile}
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              開始匯入
             </Button>
           </DialogFooter>
         </DialogContent>
