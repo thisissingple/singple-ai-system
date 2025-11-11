@@ -65,7 +65,15 @@ export function CreateSourceDialog({
         setSheetUrl('');
         onSuccess();
       } else {
-        throw new Error(data.message || '新增失敗');
+        // 處理特定錯誤訊息
+        let errorMessage = data.error || data.message || '新增失敗';
+
+        // 如果是重複的 Sheet ID，顯示友善訊息
+        if (errorMessage.includes('duplicate key') && errorMessage.includes('sheet_id')) {
+          errorMessage = '此 Google Sheets 已經存在於系統中，請檢查是否已新增過';
+        }
+
+        throw new Error(errorMessage);
       }
     } catch (error: any) {
       toast({

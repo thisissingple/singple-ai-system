@@ -3651,9 +3651,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Generate report（傳遞當前用戶 ID 進行權限過濾）
       // 支援 debug 模式：可透過 query parameter 指定 userId 進行測試
       let userId = (req as any).user?.id;
-      if (process.env.SKIP_AUTH === 'true' && req.query.debugUserId) {
-        userId = req.query.debugUserId as string;
-        console.log(`[DEBUG] Using debugUserId: ${userId}`);
+
+      // 🔧 SKIP_AUTH 模式：不傳遞 userId（讓 filterDataByPermission 跳過權限檢查）
+      if (process.env.SKIP_AUTH === 'true') {
+        if (req.query.debugUserId) {
+          userId = req.query.debugUserId as string;
+          console.log(`[DEBUG] Using debugUserId: ${userId}`);
+        } else {
+          userId = undefined; // 不傳遞 userId，讓權限過濾跳過
+        }
       }
 
       const reportData = await totalReportService.generateReport({
@@ -6059,10 +6065,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/database/tables', async (_req, res) => {
     try {
       const tables = await listSupabaseTables();
-      res.json({ tables });
+      res.json({ success: true, tables });
     } catch (error: any) {
       console.error('列出資料表失敗:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 
@@ -8648,6 +8654,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // 從 URL 解析 Sheet ID
       const sheet_id = GoogleSheetsAPI.extractSheetId(sheet_url);
 
+      // 檢查是否已存在相同的 Sheet ID
+      const existing = await qdb('SELECT * FROM google_sheets_sources WHERE sheet_id = $1', [sheet_id]);
+      if (existing.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: `此 Google Sheets 已經存在於系統中（名稱: ${existing.rows[0].name}）`
+        });
+      }
+
       const source = await iar('google_sheets_sources', {
         name,
         sheet_url,
@@ -8657,7 +8672,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, data: source });
     } catch (error: any) {
       console.error('Error creating source:', error);
-      res.status(500).json({ success: false, error: error.message });
+
+      // 處理特定資料庫錯誤
+      let errorMessage = error.message;
+      if (error.code === '23505' && error.constraint === 'google_sheets_sources_sheet_id_key') {
+        errorMessage = '此 Google Sheets 已經存在於系統中';
+      }
+
+      res.status(500).json({ success: false, error: errorMessage });
     }
   });
 
@@ -8738,7 +8760,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 建立映射
   app.post('/api/sheets/mappings', async (req, res) => {
     try {
-      const { source_id, worksheet_name, target_table, field_mappings } = req.body;
+      const { source_id, worksheet_name, target_table, field_mappings, is_enabled, sync_schedule } = req.body;
 
       if (!source_id || !worksheet_name || !target_table || !field_mappings) {
         return res.status(400).json({
@@ -8751,7 +8773,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         source_id,
         worksheet_name,
         target_table,
-        field_mappings: JSON.stringify(field_mappings)
+        field_mappings: JSON.stringify(field_mappings),
+        is_enabled: is_enabled !== undefined ? is_enabled : true,
+        sync_schedule: JSON.stringify(sync_schedule || ['02:00'])
       });
 
       res.json({ success: true, data: mapping });
@@ -8810,7 +8834,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put('/api/sheets/mappings/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const { field_mappings, is_enabled } = req.body;
+      const { field_mappings, is_enabled, sync_schedule } = req.body;
 
       const updates: string[] = [];
       const values: any[] = [];
@@ -8825,6 +8849,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (is_enabled !== undefined) {
         updates.push(`is_enabled = $${paramIndex}`);
         values.push(is_enabled);
+        paramIndex++;
+      }
+
+      if (sync_schedule !== undefined) {
+        updates.push(`sync_schedule = $${paramIndex}`);
+        values.push(JSON.stringify(sync_schedule));
         paramIndex++;
       }
 

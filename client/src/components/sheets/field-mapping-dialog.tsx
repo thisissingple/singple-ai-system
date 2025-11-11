@@ -52,6 +52,7 @@ export function FieldMappingDialog({
   const [supabaseColumns, setSupabaseColumns] = useState<string[]>([]);
   const [mappings, setMappings] = useState<FieldMapping[]>([]);
   const [isEnabled, setIsEnabled] = useState(true);
+  const [syncSchedule, setSyncSchedule] = useState<string[]>(['02:00']);
   const [loading, setLoading] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const { toast } = useToast();
@@ -89,13 +90,19 @@ export function FieldMappingDialog({
 
   const loadWorksheets = async () => {
     try {
+      console.log('📄 Loading worksheets for sourceId:', sourceId);
       const response = await fetch(`/api/sheets/${sourceId}/worksheets`);
       const data = await response.json();
+      console.log('📄 Worksheets response:', data);
+
       if (data.success) {
+        console.log('✅ Setting worksheets:', data.data.length, 'worksheets');
         setWorksheets(data.data);
+      } else {
+        console.error('❌ Failed to load worksheets:', data);
       }
     } catch (error) {
-      console.error('載入工作表失敗:', error);
+      console.error('❌ 載入工作表失敗:', error);
     }
   };
 
@@ -103,11 +110,21 @@ export function FieldMappingDialog({
     try {
       const response = await fetch('/api/database/tables');
       const data = await response.json();
+      console.log('📊 Database tables response:', data);
+
+      // 處理兩種可能的回應格式
       if (data.success && data.tables) {
+        console.log('✅ Setting tables (with success):', data.tables.length, 'tables');
         setTables(data.tables);
+      } else if (data.tables) {
+        // 舊版 API 格式（沒有 success 欄位）
+        console.log('✅ Setting tables (legacy format):', data.tables.length, 'tables');
+        setTables(data.tables);
+      } else {
+        console.error('❌ 無效的 API 回應格式:', data);
       }
     } catch (error) {
-      console.error('載入表格失敗:', error);
+      console.error('❌ 載入表格失敗:', error);
     }
   };
 
@@ -151,6 +168,7 @@ export function FieldMappingDialog({
         setSelectedTable(mapping.target_table);
         setMappings(mapping.field_mappings || []);
         setIsEnabled(mapping.is_enabled);
+        setSyncSchedule(mapping.sync_schedule || ['02:00']);
       }
     } catch (error) {
       console.error('載入映射資料失敗:', error);
@@ -170,6 +188,7 @@ export function FieldMappingDialog({
     setSelectedTable('');
     setMappings([]);
     setIsEnabled(true);
+    setSyncSchedule(['02:00']);
   };
 
   const handleAddMapping = () => {
@@ -208,6 +227,15 @@ export function FieldMappingDialog({
       return;
     }
 
+    // 檢查同步排程
+    if (isEnabled && syncSchedule.length === 0) {
+      toast({
+        title: '請至少選擇一個同步時間',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     // 檢查是否有未完成的映射
     const incompleteMappings = mappings.filter(
       (m) => !m.googleColumn || !m.supabaseColumn
@@ -233,6 +261,7 @@ export function FieldMappingDialog({
           body: JSON.stringify({
             field_mappings: mappings,
             is_enabled: isEnabled,
+            sync_schedule: syncSchedule,
           }),
         });
       } else {
@@ -246,6 +275,7 @@ export function FieldMappingDialog({
             target_table: selectedTable,
             field_mappings: mappings,
             is_enabled: isEnabled,
+            sync_schedule: syncSchedule,
           }),
         });
       }
@@ -274,11 +304,36 @@ export function FieldMappingDialog({
     }
   };
 
+  // 診斷函數
+  const diagnose = () => {
+    console.log('🔍 診斷資訊:');
+    console.log('  open:', open);
+    console.log('  sourceId:', sourceId);
+    console.log('  mappingId:', mappingId);
+    console.log('  isEditMode:', isEditMode);
+    console.log('  worksheets:', worksheets);
+    console.log('  tables:', tables);
+    console.log('  selectedWorksheet:', selectedWorksheet);
+    console.log('  selectedTable:', selectedTable);
+    console.log('  loading:', loading);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEditMode ? '編輯欄位映射' : '設定欄位映射'}</DialogTitle>
+          <DialogTitle>
+            {isEditMode ? '編輯欄位映射' : '設定欄位映射'}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={diagnose}
+              className="ml-4"
+            >
+              🔍 診斷
+            </Button>
+          </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-6">
@@ -318,15 +373,27 @@ export function FieldMappingDialog({
                   <SelectValue placeholder="選擇表格" />
                 </SelectTrigger>
                 <SelectContent>
-                  {tables.map((table) => (
-                    <SelectItem key={table} value={table}>
-                      {table}
-                    </SelectItem>
-                  ))}
+                  {tables.length === 0 ? (
+                    <div className="px-2 py-1 text-sm text-muted-foreground">
+                      載入表格中...
+                    </div>
+                  ) : (
+                    tables.map((table) => (
+                      <SelectItem key={table} value={table}>
+                        {table}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
               {isEditMode && (
                 <p className="text-xs text-muted-foreground">編輯模式下無法更改目標表格</p>
+              )}
+              {!isEditMode && tables.length === 0 && (
+                <p className="text-xs text-red-500">無法載入表格列表，請重新整理頁面</p>
+              )}
+              {!isEditMode && tables.length > 0 && (
+                <p className="text-xs text-muted-foreground">已載入 {tables.length} 個表格</p>
               )}
             </div>
           </div>
@@ -415,15 +482,55 @@ export function FieldMappingDialog({
                 )}
               </div>
 
-              {/* 啟用開關 */}
-              <div className="flex items-center justify-between p-4 border rounded-lg">
-                <div>
-                  <Label>啟用自動同步</Label>
-                  <p className="text-sm text-muted-foreground">
-                    每天凌晨 2:00 自動同步此映射
-                  </p>
+              {/* 同步排程設定 */}
+              <div className="space-y-4 p-4 border rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>啟用自動同步</Label>
+                    <p className="text-sm text-muted-foreground">
+                      選擇每日自動同步的時間點
+                    </p>
+                  </div>
+                  <Switch checked={isEnabled} onCheckedChange={setIsEnabled} />
                 </div>
-                <Switch checked={isEnabled} onCheckedChange={setIsEnabled} />
+
+                {isEnabled && (
+                  <div className="space-y-3 pt-3 border-t">
+                    <Label>同步時間設定</Label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {['00:00', '06:00', '12:00', '18:00', '02:00', '08:00', '14:00', '20:00'].map((time) => (
+                        <button
+                          key={time}
+                          type="button"
+                          onClick={() => {
+                            if (syncSchedule.includes(time)) {
+                              setSyncSchedule(syncSchedule.filter((t) => t !== time));
+                            } else {
+                              setSyncSchedule([...syncSchedule, time].sort());
+                            }
+                          }}
+                          className={`px-3 py-2 text-sm rounded-md border transition-colors ${
+                            syncSchedule.includes(time)
+                              ? 'bg-primary text-primary-foreground border-primary'
+                              : 'bg-background hover:bg-muted border-input'
+                          }`}
+                        >
+                          {time}
+                        </button>
+                      ))}
+                    </div>
+                    {syncSchedule.length > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        已選擇 {syncSchedule.length} 個時間點: {syncSchedule.sort().join(', ')}
+                      </p>
+                    )}
+                    {syncSchedule.length === 0 && (
+                      <p className="text-xs text-amber-600">
+                        請至少選擇一個同步時間
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             </>
           )}
