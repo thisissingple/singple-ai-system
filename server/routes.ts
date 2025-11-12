@@ -7,7 +7,7 @@ import { storage, googleSheetsService } from "./services/legacy-stub";
 import { autoAnalysisService } from "./services/deprecated/auto-analysis";
 import { totalReportService } from "./services/reporting/total-report-service";
 import { introspectService } from "./services/reporting/introspect-service";
-import { generateConsultantReport, getConsultationList, type ConsultantReportParams, type PeriodType, type DealStatus, type TrendGrouping } from "./services/consultant-report-service";
+import { generateConsultantReport, getConsultationList, getTrendData, getLeadSourceAverageDetails, type ConsultantReportParams, type PeriodType, type DealStatus, type TrendGrouping } from "./services/consultant-report-service";
 import { devSeedService } from "./services/deprecated/dev-seed-service";
 import { reportMetricConfigService } from "./services/reporting/report-metric-config-service";
 import { formulaEngine } from "./services/reporting/formula-engine";
@@ -3794,23 +3794,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Consultant Report - 趨勢圖資料 API (獨立 endpoint 避免整頁重新載入)
+  app.get('/api/reports/consultants/trend', isAuthenticated, requireModulePermission('consultant_report'), async (req, res) => {
+    try {
+      const params: ConsultantReportParams = {
+        period: (req.query.period as PeriodType) || 'month',
+        consultantName: req.query.consultantName as string | undefined,
+        trendGrouping: req.query.trendGrouping as TrendGrouping | undefined,
+        dealStatus: 'all',
+        compareWithPrevious: false,
+        compareWithLastYear: false,
+      };
+
+      // 趨勢圖顯示全部歷史數據，所以 dateRange 只是形式參數
+      const dateRange = { start: '', end: '' };
+
+      const trendData = await getTrendData(params, dateRange);
+
+      res.json({
+        success: true,
+        data: trendData,
+      });
+    } catch (error: any) {
+      console.error('[Consultant Report Trend] Error:', error);
+
+      const errorMessage = error?.message || String(error);
+      const isDbError = errorMessage.includes('database') ||
+                       errorMessage.includes('connection') ||
+                       errorMessage.includes('ECONNREFUSED');
+
+      if (isDbError) {
+        return res.status(503).json({
+          success: false,
+          error: 'Database connection error',
+          message: '資料庫連線失敗，請稍後再試',
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        message: '取得趨勢資料時發生錯誤',
+        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+      });
+    }
+  });
+
   // Consultant Report - 諮詢名單詳情 API
   app.get('/api/reports/consultants/consultation-list', isAuthenticated, requireModulePermission('consultant_report'), async (req, res) => {
     try {
-      // 解析查詢參數（與主報表相同）
-      const params: ConsultantReportParams & { setterName?: string } = {
+      // 解析查詢參數（擴展支援新篩選和排序）
+      const params: ConsultantReportParams & {
+        setterName?: string;
+        leadSourceFilter?: string;
+        statusFilter?: string;
+        sortBy?: string;
+        sortOrder?: 'ASC' | 'DESC';
+      } = {
         period: (req.query.period as PeriodType) || 'month',
         startDate: req.query.startDate as string | undefined,
         endDate: req.query.endDate as string | undefined,
         consultantName: req.query.consultantName as string | undefined,
         setterName: req.query.setterName as string | undefined,
         dealStatus: (req.query.dealStatus as DealStatus) || 'all',
+        leadSourceFilter: req.query.leadSourceFilter as string | undefined,
+        statusFilter: req.query.statusFilter as string | undefined,
+        sortBy: req.query.sortBy as string | undefined,
+        sortOrder: (req.query.sortOrder as 'ASC' | 'DESC') || 'DESC',
       };
 
       console.log('[Consultation List] Fetching consultation list with params:', params);
 
       // 查詢諮詢名單
       const consultationList = await getConsultationList(params);
+
+      // 調試：檢查返回的資料
+      if (consultationList.length > 0) {
+        console.log('[Consultation List] Sample data:', JSON.stringify(consultationList[0], null, 2));
+      }
 
       res.json({
         success: true,
@@ -3823,6 +3884,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: false,
         error: 'Internal server error',
         message: '查詢諮詢名單時發生錯誤',
+      });
+    }
+  });
+
+  // Consultant Report - 來源平均值詳細資料 API
+  app.get('/api/reports/consultants/lead-source-average-details', isAuthenticated, requireModulePermission('consultant_report'), async (req, res) => {
+    try {
+      const leadSource = req.query.leadSource as string;
+
+      if (!leadSource) {
+        return res.status(400).json({
+          success: false,
+          message: '缺少必要參數: leadSource',
+        });
+      }
+
+      const params: ConsultantReportParams = {
+        period: (req.query.period as PeriodType) || 'month',
+        startDate: req.query.startDate as string,
+        endDate: req.query.endDate as string,
+        consultantName: req.query.consultantName as string,
+      };
+
+      console.log('[Lead Source Average Details] Fetching details:', { leadSource, params });
+
+      const details = await getLeadSourceAverageDetails(leadSource, params);
+
+      res.json({
+        success: true,
+        data: details,
+      });
+    } catch (error: any) {
+      console.error('[Lead Source Average Details] Error:', error);
+
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        message: '查詢來源平均值詳細資料時發生錯誤',
       });
     }
   });

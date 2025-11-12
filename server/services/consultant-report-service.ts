@@ -7,7 +7,7 @@ import { queryDatabase } from './pg-client';
 import { parseNumberField } from './reporting/field-mapping-v2';
 
 export type PeriodType = 'today' | 'week' | 'month' | 'quarter' | 'year' | 'all' | 'custom';
-export type DealStatus = 'all' | 'closed' | 'in_progress' | 'lost';
+export type DealStatus = 'all' | 'closed' | 'not_closed' | 'pending';
 export type TrendGrouping = 'day' | 'week' | 'month' | 'quarter';
 
 export interface ConsultantReportParams {
@@ -32,11 +32,40 @@ export interface KPIData {
   avgDealAmount: number;
   pendingCount: number;
   potentialRevenue: number;
-  // 對比資料
+  // 新增：上線數/未上線數
+  showCount: number;
+  notShowCount: number;
+  // 對比資料 - 變化百分比
   consultationCountChange?: number;
   dealCountChange?: number;
   closingRateChange?: number;
   totalActualAmountChange?: number;
+  showCountChange?: number;
+  notShowCountChange?: number;
+  // 對比資料 - 前期實際值
+  prevConsultationCount?: number;
+  prevDealCount?: number;
+  prevTotalActualAmount?: number;
+  prevShowCount?: number;
+  prevNotShowCount?: number;
+}
+
+export interface LeadSourceTableRow {
+  leadSource: string;
+  consultationCount: number;
+  showCount: number;  // 新增：上線數
+  dealCount: number;
+  closingRate: number;
+  actualAmount: number;
+  // 對比數據 - 與歷史平均值對比
+  avgConsultationCount?: number;  // 歷史平均諮詢數
+  avgClosingRate?: number;  // 歷史平均成交率
+  avgActualAmount?: number;  // 歷史平均實收金額
+  consultationCountChange?: number;  // 與平均值的變化百分比
+  showCountChange?: number;  // 新增：上線數變化
+  dealCountChange?: number;
+  closingRateChange?: number;
+  actualAmountChange?: number;  // 與平均值的變化百分比
 }
 
 export interface ChartData {
@@ -94,6 +123,7 @@ export interface ConsultantReport {
   charts: ChartData;
   ranking: ConsultantRanking[];
   setterRanking: SetterRanking[]; // 電訪人員排行榜
+  leadSourceTable: LeadSourceTableRow[]; // 來源分析表格
   aiInsights: AIInsight[];
   metadata: {
     period: PeriodType;
@@ -215,6 +245,16 @@ async function queryKPIs(params: ConsultantReportParams, dateRange: { start: str
     values.push(params.planType);
   }
 
+  // 成交狀態篩選
+  if (params.dealStatus === 'closed') {
+    conditions.push(`deal_date IS NOT NULL`);
+  } else if (params.dealStatus === 'not_closed') {
+    conditions.push(`deal_date IS NULL`);
+  } else if (params.dealStatus === 'pending') {
+    conditions.push(`deal_date IS NULL AND consultation_date IS NOT NULL`);
+  }
+  // 'all' 狀態不需要額外條件
+
   const whereClause = conditions.join(' AND ');
 
   const query = `
@@ -231,7 +271,9 @@ async function queryKPIs(params: ConsultantReportParams, dateRange: { start: str
         THEN CAST(REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') AS NUMERIC)
         ELSE NULL
       END), 0) as total_actual_amount,
-      COUNT(DISTINCT CASE WHEN deal_date IS NULL AND consultation_date IS NOT NULL THEN student_email END) as pending_count
+      COUNT(DISTINCT CASE WHEN deal_date IS NULL AND consultation_date IS NOT NULL THEN student_email END) as pending_count,
+      COUNT(DISTINCT CASE WHEN is_show = '已上線' THEN student_email END) as show_count,
+      COUNT(DISTINCT CASE WHEN is_show = '未上線' OR (is_show IS NOT NULL AND is_show != '已上線') THEN student_email END) as not_show_count
     FROM eods_for_closers
     WHERE ${whereClause}
   `;
@@ -246,6 +288,8 @@ async function queryKPIs(params: ConsultantReportParams, dateRange: { start: str
   const avgDealAmount = dealCount > 0 ? totalActualAmount / dealCount : 0;
   const pendingCount = parseInt(row.pending_count) || 0;
   const potentialRevenue = pendingCount * avgDealAmount;
+  const showCount = parseInt(row.show_count) || 0;
+  const notShowCount = parseInt(row.not_show_count) || 0;
 
   return {
     consultationCount,
@@ -256,6 +300,8 @@ async function queryKPIs(params: ConsultantReportParams, dateRange: { start: str
     avgDealAmount: Math.round(avgDealAmount),
     pendingCount,
     potentialRevenue: Math.round(potentialRevenue),
+    showCount,
+    notShowCount,
   };
 }
 
@@ -274,6 +320,15 @@ async function getLeadSourceDistribution(params: ConsultantReportParams, dateRan
   if (params.consultantName) {
     conditions.push(`closer_name = $${paramIndex++}`);
     values.push(params.consultantName);
+  }
+
+  // 成交狀態篩選
+  if (params.dealStatus === 'closed') {
+    conditions.push(`deal_date IS NOT NULL`);
+  } else if (params.dealStatus === 'not_closed') {
+    conditions.push(`deal_date IS NULL`);
+  } else if (params.dealStatus === 'pending') {
+    conditions.push(`deal_date IS NULL AND consultation_date IS NOT NULL`);
   }
 
   const whereClause = conditions.join(' AND ');
@@ -295,6 +350,301 @@ async function getLeadSourceDistribution(params: ConsultantReportParams, dateRan
     value: parseInt(row.value),
     dealCount: parseInt(row.deal_count),
   }));
+}
+
+/**
+ * 查詢來源分析表格（含完整統計數據）
+ */
+async function getLeadSourceTable(params: ConsultantReportParams, dateRange: { start: string; end: string }): Promise<LeadSourceTableRow[]> {
+  const conditions: string[] = [
+    `consultation_date >= $1`,
+    `consultation_date <= $2`,
+    `lead_source IS NOT NULL`,
+  ];
+  const values: any[] = [dateRange.start, dateRange.end];
+  let paramIndex = 3;
+
+  if (params.consultantName) {
+    conditions.push(`closer_name = $${paramIndex++}`);
+    values.push(params.consultantName);
+  }
+
+  // 成交狀態篩選
+  if (params.dealStatus === 'closed') {
+    conditions.push(`deal_date IS NOT NULL`);
+  } else if (params.dealStatus === 'not_closed') {
+    conditions.push(`deal_date IS NULL`);
+  } else if (params.dealStatus === 'pending') {
+    conditions.push(`deal_date IS NULL AND consultation_date IS NOT NULL`);
+  }
+
+  const whereClause = conditions.join(' AND ');
+
+  const query = `
+    SELECT
+      lead_source,
+      COUNT(DISTINCT student_email) as consultation_count,
+      COUNT(DISTINCT CASE WHEN is_show = '已上線' THEN student_email END) as show_count,
+      COUNT(DISTINCT CASE WHEN deal_date IS NOT NULL THEN student_email END) as deal_count,
+      COALESCE(SUM(CASE
+        WHEN deal_date IS NOT NULL AND actual_amount IS NOT NULL
+        THEN CAST(REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') AS NUMERIC)
+        ELSE NULL
+      END), 0) as actual_amount
+    FROM eods_for_closers
+    WHERE ${whereClause}
+    GROUP BY lead_source
+    ORDER BY deal_count DESC, consultation_count DESC
+  `;
+
+  const result = await queryDatabase(query, values, 'session');
+
+  return result.rows.map(row => {
+    const consultationCount = parseInt(row.consultation_count) || 0;
+    const showCount = parseInt(row.show_count) || 0;
+    const dealCount = parseInt(row.deal_count) || 0;
+    const closingRate = consultationCount > 0 ? (dealCount / consultationCount) * 100 : 0;
+    const actualAmount = parseNumberField(row.actual_amount) || 0;
+
+    return {
+      leadSource: row.lead_source || '未知來源',
+      consultationCount,
+      showCount,
+      dealCount,
+      closingRate: Math.round(closingRate * 10) / 10,
+      actualAmount,
+    };
+  });
+}
+
+/**
+ * 計算名單來源的歷史平均值
+ * 根據當前期間類型,計算每個來源的歷史平均諮詢數、成交率和實收金額
+ */
+async function getLeadSourceAverages(params: ConsultantReportParams, period: string): Promise<Map<string, { avgConsultationCount: number; avgClosingRate: number; avgActualAmount: number }>> {
+  // 根據期間類型決定分組方式
+  let groupByClause = '';
+  let periodDays = 1;
+
+  switch (period) {
+    case 'today':
+    case 'custom':
+      groupByClause = `DATE_TRUNC('day', consultation_date)`;
+      periodDays = 1;
+      break;
+    case 'week':
+      groupByClause = `DATE_TRUNC('week', consultation_date)`;
+      periodDays = 7;
+      break;
+    case 'month':
+      groupByClause = `DATE_TRUNC('month', consultation_date)`;
+      periodDays = 30;
+      break;
+    case 'quarter':
+      groupByClause = `DATE_TRUNC('quarter', consultation_date)`;
+      periodDays = 90;
+      break;
+    case 'year':
+      groupByClause = `DATE_TRUNC('year', consultation_date)`;
+      periodDays = 365;
+      break;
+    default:
+      groupByClause = `DATE_TRUNC('day', consultation_date)`;
+      periodDays = 1;
+  }
+
+  const conditions: string[] = [
+    `lead_source IS NOT NULL`,
+    `consultation_date IS NOT NULL`,
+  ];
+
+  if (params.consultantName) {
+    conditions.push(`closer_name = $1`);
+  }
+
+  const whereClause = conditions.join(' AND ');
+  const values: any[] = params.consultantName ? [params.consultantName] : [];
+
+  // 計算所有歷史成交記錄的簡單平均：總實收金額 / 不重複成交學生數
+  const query = `
+    SELECT
+      lead_source,
+      COUNT(DISTINCT student_email) as total_consultation_count,
+      COUNT(CASE WHEN deal_date IS NOT NULL THEN 1 END) as total_deal_count,
+      COUNT(DISTINCT CASE WHEN deal_date IS NOT NULL THEN student_email END) as unique_deal_student_count,
+      COALESCE(SUM(CASE
+        WHEN deal_date IS NOT NULL AND actual_amount IS NOT NULL
+        THEN CAST(REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') AS NUMERIC)
+        ELSE 0
+      END), 0) as total_actual_amount,
+      CASE
+        WHEN COUNT(DISTINCT student_email) > 0
+        THEN (COUNT(DISTINCT CASE WHEN deal_date IS NOT NULL THEN student_email END)::NUMERIC / COUNT(DISTINCT student_email)::NUMERIC) * 100
+        ELSE 0
+      END as avg_closing_rate,
+      CASE
+        WHEN COUNT(DISTINCT CASE WHEN deal_date IS NOT NULL THEN student_email END) > 0
+        THEN COALESCE(SUM(CASE
+          WHEN deal_date IS NOT NULL AND actual_amount IS NOT NULL
+          THEN CAST(REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') AS NUMERIC)
+          ELSE 0
+        END), 0) / COUNT(DISTINCT CASE WHEN deal_date IS NOT NULL THEN student_email END)::NUMERIC
+        ELSE 0
+      END as avg_actual_amount
+    FROM eods_for_closers
+    WHERE ${whereClause}
+    GROUP BY lead_source
+  `;
+
+  const result = await queryDatabase(query, values, 'session');
+
+  const averages = new Map<string, { avgConsultationCount: number; avgClosingRate: number; avgActualAmount: number }>();
+
+  result.rows.forEach(row => {
+    averages.set(row.lead_source, {
+      avgConsultationCount: parseFloat(row.total_consultation_count) || 0,
+      avgClosingRate: parseFloat(row.avg_closing_rate) || 0,
+      avgActualAmount: parseFloat(row.avg_actual_amount) || 0,
+    });
+  });
+
+  return averages;
+}
+
+/**
+ * 查詢特定來源的歷史成交記錄詳細資料(用於查看平均值是如何計算的)
+ */
+export async function getLeadSourceAverageDetails(
+  leadSource: string,
+  params: ConsultantReportParams
+): Promise<{ records: any[]; summary: { totalRecords: number; uniqueStudents: number; totalStudents: number; totalAmount: number; avgAmount: number; closingRate: number } }> {
+  // 根據期間類型決定分組方式
+  let groupByClause = '';
+
+  switch (params.period) {
+    case 'today':
+    case 'custom':
+      groupByClause = `DATE_TRUNC('day', consultation_date)`;
+      break;
+    case 'week':
+      groupByClause = `DATE_TRUNC('week', consultation_date)`;
+      break;
+    case 'month':
+      groupByClause = `DATE_TRUNC('month', consultation_date)`;
+      break;
+    case 'quarter':
+      groupByClause = `DATE_TRUNC('quarter', consultation_date)`;
+      break;
+    case 'year':
+      groupByClause = `DATE_TRUNC('year', consultation_date)`;
+      break;
+    default:
+      groupByClause = `DATE_TRUNC('day', consultation_date)`;
+  }
+
+  // 查詢成交記錄
+  const dealConditions: string[] = [
+    `lead_source = $1`,
+    `consultation_date IS NOT NULL`,
+    `deal_date IS NOT NULL`,
+  ];
+
+  const values: any[] = [leadSource];
+  let paramIndex = 2;
+
+  if (params.consultantName) {
+    dealConditions.push(`closer_name = $${paramIndex++}`);
+    values.push(params.consultantName);
+  }
+
+  const dealWhereClause = dealConditions.join(' AND ');
+
+  const dealQuery = `
+    SELECT
+      student_name,
+      student_email,
+      consultation_date,
+      deal_date,
+      closer_name as consultant_name,
+      setter_name,
+      lead_source,
+      plan,
+      actual_amount,
+      ${groupByClause} as period
+    FROM eods_for_closers
+    WHERE ${dealWhereClause}
+    ORDER BY consultation_date DESC
+  `;
+
+  const dealResult = await queryDatabase(dealQuery, values, 'session');
+
+  const records = dealResult.rows.map(row => ({
+    studentName: row.student_name,
+    studentEmail: row.student_email,
+    consultationDate: row.consultation_date,
+    dealDate: row.deal_date,
+    consultantName: row.consultant_name,
+    setterName: row.setter_name,
+    leadSource: row.lead_source,
+    plan: row.plan,
+    actualAmount: row.actual_amount,
+    period: row.period,
+  }));
+
+  // 查詢該來源的所有學生數（包含成交和未成交）
+  const totalConditions: string[] = [
+    `lead_source = $1`,
+    `consultation_date IS NOT NULL`,
+  ];
+
+  const totalValues: any[] = [leadSource];
+  let totalParamIndex = 2;
+
+  if (params.consultantName) {
+    totalConditions.push(`closer_name = $${totalParamIndex++}`);
+    totalValues.push(params.consultantName);
+  }
+
+  const totalWhereClause = totalConditions.join(' AND ');
+
+  const totalQuery = `
+    SELECT COUNT(DISTINCT student_email) as total_students
+    FROM eods_for_closers
+    WHERE ${totalWhereClause}
+  `;
+
+  const totalResult = await queryDatabase(totalQuery, totalValues, 'session');
+  const totalStudents = parseInt(totalResult.rows[0]?.total_students) || 0;
+
+  // 計算統計資訊
+  const uniqueStudents = new Set(dealResult.rows.map(row => row.student_email)).size;
+  const totalRecords = dealResult.rows.length;
+  let totalAmount = 0;
+
+  dealResult.rows.forEach(row => {
+    if (row.actual_amount) {
+      const cleaned = String(row.actual_amount).replace(/[^0-9.-]/g, '');
+      const amount = parseFloat(cleaned);
+      if (!isNaN(amount)) {
+        totalAmount += amount;
+      }
+    }
+  });
+
+  const avgAmount = uniqueStudents > 0 ? totalAmount / uniqueStudents : 0;
+  const closingRate = totalStudents > 0 ? (uniqueStudents / totalStudents) * 100 : 0;
+
+  return {
+    records,
+    summary: {
+      totalRecords,
+      uniqueStudents,
+      totalStudents,
+      totalAmount,
+      avgAmount,
+      closingRate,
+    },
+  };
 }
 
 /**
@@ -343,17 +693,26 @@ async function getPlanDistribution(params: ConsultantReportParams, dateRange: { 
 /**
  * 查詢趨勢資料（時序）
  */
-async function getTrendData(params: ConsultantReportParams, dateRange: { start: string; end: string }) {
+export async function getTrendData(params: ConsultantReportParams, dateRange: { start: string; end: string }) {
+  // 趨勢圖顯示全部歷史數據,不受日期範圍限制
   const conditions: string[] = [
-    `consultation_date >= $1`,
-    `consultation_date <= $2`,
+    `consultation_date IS NOT NULL`,
   ];
-  const values: any[] = [dateRange.start, dateRange.end];
-  let paramIndex = 3;
+  const values: any[] = [];
+  let paramIndex = 1;
 
   if (params.consultantName) {
     conditions.push(`closer_name = $${paramIndex++}`);
     values.push(params.consultantName);
+  }
+
+  // 成交狀態篩選
+  if (params.dealStatus === 'closed') {
+    conditions.push(`deal_date IS NOT NULL`);
+  } else if (params.dealStatus === 'not_closed') {
+    conditions.push(`deal_date IS NULL`);
+  } else if (params.dealStatus === 'pending') {
+    conditions.push(`deal_date IS NULL AND consultation_date IS NOT NULL`);
   }
 
   const whereClause = conditions.join(' AND ');
@@ -374,7 +733,10 @@ async function getTrendData(params: ConsultantReportParams, dateRange: { start: 
   // 根據分組方式設定 SQL
   switch (grouping) {
     case 'week':
-      dateGroup = `DATE_TRUNC('week', consultation_date)::date`;
+      // 週次從週四開始到下週三結束
+      // PostgreSQL 的 DATE_TRUNC('week') 預設從週一開始
+      // 我們需要調整為從週四開始：減去 4 天後再 TRUNC，然後加回 4 天
+      dateGroup = `(DATE_TRUNC('week', consultation_date - INTERVAL '4 days') + INTERVAL '4 days')::date`;
       break;
     case 'month':
       dateGroup = `DATE_TRUNC('month', consultation_date)::date`;
@@ -724,21 +1086,39 @@ function calculateChange(currentVal: number, comparisonVal: number): number {
 }
 
 /**
- * 計算 KPI 變化百分比
+ * 計算 KPI 變化百分比和前期實際值
  */
 function calculateKPIChanges(current: KPIData, comparison: KPIData): Partial<KPIData> {
   return {
+    // 變化百分比
     consultationCountChange: calculateChange(current.consultationCount, comparison.consultationCount),
     dealCountChange: calculateChange(current.dealCount, comparison.dealCount),
     closingRateChange: calculateChange(current.closingRate, comparison.closingRate),
     totalActualAmountChange: calculateChange(current.totalActualAmount, comparison.totalActualAmount),
+    showCountChange: calculateChange(current.showCount, comparison.showCount),
+    notShowCountChange: calculateChange(current.notShowCount, comparison.notShowCount),
+    // 前期實際值
+    prevConsultationCount: comparison.consultationCount,
+    prevDealCount: comparison.dealCount,
+    prevTotalActualAmount: comparison.totalActualAmount,
+    prevShowCount: comparison.showCount,
+    prevNotShowCount: comparison.notShowCount,
   };
 }
 
 /**
  * 查詢諮詢名單（用於點擊 KPI 後顯示詳細名單）
+ * 新增：支援來源篩選、狀態篩選、排序
  */
-export async function getConsultationList(params: ConsultantReportParams & { setterName?: string }): Promise<any[]> {
+export async function getConsultationList(
+  params: ConsultantReportParams & {
+    setterName?: string;
+    leadSourceFilter?: string;  // 新增：按來源篩選
+    statusFilter?: string;       // 新增：按狀態篩選
+    sortBy?: string;             // 新增：排序欄位
+    sortOrder?: 'ASC' | 'DESC';  // 新增：排序順序
+  }
+): Promise<any[]> {
   const dateRange = calculateDateRange(params.period, params.startDate, params.endDate);
 
   const conditions: string[] = [
@@ -758,7 +1138,40 @@ export async function getConsultationList(params: ConsultantReportParams & { set
     values.push(params.setterName);
   }
 
+  // 新增：按來源篩選
+  if (params.leadSourceFilter) {
+    conditions.push(`lead_source = $${paramIndex++}`);
+    values.push(params.leadSourceFilter);
+  }
+
+  // 新增：按狀態篩選
+  if (params.statusFilter) {
+    if (params.statusFilter === '已成交') {
+      conditions.push(`deal_date IS NOT NULL`);
+    } else if (params.statusFilter === '未成交' || params.statusFilter === '跟進中') {
+      conditions.push(`deal_date IS NULL`);
+    }
+  }
+
+  // 成交狀態篩選（使用 dealStatus 參數）
+  if (params.dealStatus === 'closed') {
+    conditions.push(`deal_date IS NOT NULL`);
+  } else if (params.dealStatus === 'not_closed') {
+    conditions.push(`deal_date IS NULL`);
+  } else if (params.dealStatus === 'pending') {
+    conditions.push(`deal_date IS NULL AND consultation_date IS NOT NULL`);
+  }
+
   const whereClause = conditions.join(' AND ');
+
+  // 新增：動態排序
+  const sortBy = params.sortBy || 'consultation_date';
+  const sortOrder = params.sortOrder || 'DESC';
+
+  // 安全的排序欄位白名單
+  const allowedSortFields = ['consultation_date', 'deal_date', 'student_name', 'closer_name', 'setter_name', 'lead_source'];
+  const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'consultation_date';
+  const safeSortOrder = sortOrder === 'ASC' ? 'ASC' : 'DESC';
 
   const query = `
     SELECT
@@ -767,17 +1180,16 @@ export async function getConsultationList(params: ConsultantReportParams & { set
       consultation_date,
       closer_name as consultant_name,
       setter_name,
+      lead_source,
       deal_date,
       package_price,
       actual_amount,
-      CASE
-        WHEN deal_date IS NOT NULL THEN '已成交'
-        WHEN deal_date IS NULL THEN '跟進中'
-        ELSE '未知'
-      END as status
+      is_show,
+      plan,
+      consultation_result
     FROM eods_for_closers
     WHERE ${whereClause}
-    ORDER BY consultation_date DESC
+    ORDER BY ${safeSortBy} ${safeSortOrder}
   `;
 
   const result = await queryDatabase(query, values, 'session');
@@ -788,10 +1200,13 @@ export async function getConsultationList(params: ConsultantReportParams & { set
     consultationDate: row.consultation_date,
     consultantName: row.consultant_name,
     setterName: row.setter_name,
+    leadSource: row.lead_source,
     dealDate: row.deal_date,
     packagePrice: row.package_price,
     actualAmount: row.actual_amount,
-    status: row.status,
+    isShow: row.is_show,
+    plan: row.plan,
+    consultationResult: row.consultation_result,
   }));
 }
 
@@ -803,7 +1218,7 @@ export async function generateConsultantReport(params: ConsultantReportParams): 
   const dateRange = calculateDateRange(params.period, params.startDate, params.endDate);
 
   // 並行查詢所有資料
-  const [kpiData, leadSourcePie, planPie, trendLine, setterCloserMatrix, funnel, ranking, setterRanking] = await Promise.all([
+  const [kpiData, leadSourcePie, planPie, trendLine, setterCloserMatrix, funnel, ranking, setterRanking, leadSourceTable] = await Promise.all([
     queryKPIs(params, dateRange),
     getLeadSourceDistribution(params, dateRange),
     getPlanDistribution(params, dateRange),
@@ -811,7 +1226,8 @@ export async function generateConsultantReport(params: ConsultantReportParams): 
     getSetterCloserMatrix(params, dateRange),
     getFunnelData(params, dateRange),
     getConsultantRanking(params, dateRange),
-    getSetterRanking(params, dateRange), // 新增：查詢電訪人員排行榜
+    getSetterRanking(params, dateRange), // 查詢電訪人員排行榜
+    getLeadSourceTable(params, dateRange), // 新增：查詢來源分析表格
   ]);
 
   // 如果需要對比，計算對比期間的 KPI 和排行榜
@@ -854,6 +1270,19 @@ export async function generateConsultantReport(params: ConsultantReportParams): 
     });
   }
 
+  // 計算來源分析表格的歷史平均值對比 (獨立於前期/去年同期對比)
+  const leadSourceAverages = await getLeadSourceAverages(params, params.period);
+  leadSourceTable.forEach(source => {
+    const averages = leadSourceAverages.get(source.leadSource);
+    if (averages) {
+      source.avgConsultationCount = Math.round(averages.avgConsultationCount);
+      source.avgClosingRate = Math.round(averages.avgClosingRate * 10) / 10;
+      source.avgActualAmount = Math.round(averages.avgActualAmount);
+      source.consultationCountChange = calculateChange(source.consultationCount, averages.avgConsultationCount);
+      source.actualAmountChange = calculateChange(source.actualAmount, averages.avgActualAmount);
+    }
+  });
+
   const charts: ChartData = {
     leadSourcePie,
     planPie,
@@ -869,7 +1298,8 @@ export async function generateConsultantReport(params: ConsultantReportParams): 
     kpiData,
     charts,
     ranking,
-    setterRanking, // 新增：電訪人員排行榜
+    setterRanking, // 電訪人員排行榜
+    leadSourceTable, // 新增：來源分析表格
     aiInsights,
     metadata: {
       period: params.period,
