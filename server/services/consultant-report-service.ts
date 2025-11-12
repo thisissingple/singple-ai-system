@@ -744,6 +744,9 @@ export async function getTrendData(params: ConsultantReportParams, dateRange: { 
     case 'quarter':
       dateGroup = `DATE_TRUNC('quarter', consultation_date)::date`;
       break;
+    case 'year':
+      dateGroup = `DATE_TRUNC('year', consultation_date)::date`;
+      break;
     case 'day':
     default:
       dateGroup = `DATE(consultation_date)`;
@@ -754,7 +757,12 @@ export async function getTrendData(params: ConsultantReportParams, dateRange: { 
     SELECT
       ${dateGroup} as date,
       COUNT(DISTINCT student_email) as consultations,
-      COUNT(DISTINCT CASE WHEN deal_date IS NOT NULL THEN student_email END) as deals
+      COUNT(DISTINCT CASE WHEN deal_date IS NOT NULL THEN student_email END) as deals,
+      COALESCE(SUM(CASE
+        WHEN deal_date IS NOT NULL AND actual_amount IS NOT NULL
+        THEN CAST(REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') AS NUMERIC)
+        ELSE 0
+      END), 0) as revenue
     FROM eods_for_closers
     WHERE ${whereClause}
     GROUP BY ${dateGroup}
@@ -766,6 +774,7 @@ export async function getTrendData(params: ConsultantReportParams, dateRange: { 
     date: row.date,
     consultations: parseInt(row.consultations),
     deals: parseInt(row.deals),
+    revenue: parseNumberField(row.revenue) || 0,
   }));
 }
 

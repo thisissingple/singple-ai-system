@@ -4,6 +4,7 @@
  */
 
 import { useState } from 'react';
+import { useLocation } from 'wouter';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { useFilteredSidebar } from '@/hooks/use-sidebar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -171,8 +172,7 @@ interface ConsultantReport {
 }
 
 function ConsultantReportContent() {
-  // 新增：戰報模式切換
-  const [viewMode, setViewMode] = useState<'full' | 'battle'>('battle');
+  const [, setLocation] = useLocation();
 
   const [period, setPeriod] = useState<PeriodType>('month');  // 改為預設本月
   const [dealStatus, setDealStatus] = useState<DealStatus>('all');
@@ -180,7 +180,7 @@ function ConsultantReportContent() {
   const [endDate, setEndDate] = useState<string>('');
   const [compareWithPrevious, setCompareWithPrevious] = useState(true);  // 預設開啟前期對比
   const [compareWithLastYear, setCompareWithLastYear] = useState(false);
-  const [trendGrouping, setTrendGrouping] = useState<TrendGrouping>('day');
+  const [trendGrouping, setTrendGrouping] = useState<TrendGrouping>('week');
   const [consultationListOpen, setConsultationListOpen] = useState(false);
   const [selectedConsultantName, setSelectedConsultantName] = useState<string | null>(null);
   const [selectedSetterName, setSelectedSetterName] = useState<string | null>(null);
@@ -286,7 +286,7 @@ function ConsultantReportContent() {
       if (!response.ok) throw new Error('Failed to fetch consultation list');
       return response.json();
     },
-    enabled: (viewMode === 'battle' || consultationListOpen) && (period !== 'custom' || (period === 'custom' && !!startDate && !!endDate)), // 戰報模式或 Dialog 開啟時查詢
+    enabled: period !== 'custom' || (period === 'custom' && !!startDate && !!endDate),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -314,6 +314,18 @@ function ConsultantReportContent() {
     },
     enabled: averageDetailsOpen && !!selectedLeadSourceForAverage,
     staleTime: 5 * 60 * 1000,
+  });
+
+  // 查詢學生的 AI 分析記錄
+  const studentAIAnalysis = useQuery({
+    queryKey: ['studentAIAnalysis', selectedStudent?.studentEmail],
+    queryFn: async () => {
+      if (!selectedStudent?.studentEmail) return null;
+      const response = await fetch(`/api/teaching-quality/student-records?studentEmail=${encodeURIComponent(selectedStudent.studentEmail)}`);
+      if (!response.ok) throw new Error('Failed to fetch');
+      return response.json();
+    },
+    enabled: !!selectedStudent?.studentEmail && studentDetailOpen,
   });
 
   const consultationList = consultationListData?.data || [];
@@ -534,31 +546,11 @@ function ConsultantReportContent() {
               分析諮詢師業績、成交數據與協作效果
             </p>
           </div>
-
-          {/* 新增：戰報/完整模式切換器 */}
-          <div className="flex gap-2">
-            <Button
-              variant={viewMode === 'battle' ? 'default' : 'outline'}
-              onClick={() => setViewMode('battle')}
-              className="gap-2"
-            >
-              ⚡ 戰報模式
-            </Button>
-            <Button
-              variant={viewMode === 'full' ? 'default' : 'outline'}
-              onClick={() => setViewMode('full')}
-              className="gap-2"
-            >
-              📊 完整版
-            </Button>
-          </div>
         </div>
 
-        {/* 篩選控件 - 簡化版（戰報模式）vs 完整版 */}
+        {/* 篩選控件 - 戰報模式：快速切換按鈕 + 日曆選擇器 */}
         <div className="flex flex-wrap gap-3">
-          {viewMode === 'battle' ? (
-            // 戰報模式：快速切換按鈕 + 日曆選擇器
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
               <Button
                 variant={period === 'today' ? 'default' : 'outline'}
                 size="sm"
@@ -760,32 +752,7 @@ function ConsultantReportContent() {
                   </div>
                 </PopoverContent>
               </Popover>
-            </div>
-          ) : (
-            // 完整版：下拉選單
-            <select
-              value={period}
-              onChange={(e) => {
-                const newPeriod = e.target.value as PeriodType;
-                if (newPeriod === 'custom') {
-                  setCustomDateDialogOpen(true);
-                } else {
-                  setPeriod(newPeriod);
-                  setStartDate('');
-                  setEndDate('');
-                }
-              }}
-              className="border rounded-md px-3 py-2"
-            >
-              <option value="today">今日</option>
-              <option value="week">本週</option>
-              <option value="month">本月</option>
-              <option value="quarter">本季</option>
-              <option value="year">今年</option>
-              <option value="all">全部</option>
-              <option value="custom">自訂區間</option>
-            </select>
-          )}
+          </div>
 
           {/* 顯示已選擇的自訂日期 */}
           {period === 'custom' && startDate && endDate && (
@@ -828,8 +795,8 @@ function ConsultantReportContent() {
         </div>
       </div>
 
-      {/* KPI 卡片 - 戰報模式 7 個，完整版 4 個 */}
-      <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${viewMode === 'battle' ? 'lg:grid-cols-4 xl:grid-cols-4' : 'lg:grid-cols-4'}`}>
+      {/* KPI 卡片 - 戰報模式 7 個 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-4">
         {/* 諮詢數 */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -889,64 +856,60 @@ function ConsultantReportContent() {
           </CardContent>
         </Card>
 
-        {/* 新增：上線數（戰報模式才顯示） */}
-        {viewMode === 'battle' && (
-          <>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  上線數 {renderArrowIndicator(kpiData.showCountChange)}
-                </CardTitle>
-                <TrendingUp className="h-4 w-4 text-green-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-green-600">{formatNumber(kpiData.showCount)}</div>
-                {renderComparisonIndicator(kpiData.showCountChange, kpiData.prevShowCount)}
-                <p className="text-xs text-muted-foreground mt-1">
-                  已完成體驗課並上線
-                </p>
-              </CardContent>
-            </Card>
+        {/* 新增：上線數 */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              上線數 {renderArrowIndicator(kpiData.showCountChange)}
+            </CardTitle>
+            <TrendingUp className="h-4 w-4 text-green-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">{formatNumber(kpiData.showCount)}</div>
+            {renderComparisonIndicator(kpiData.showCountChange, kpiData.prevShowCount)}
+            <p className="text-xs text-muted-foreground mt-1">
+              已完成體驗課並上線
+            </p>
+          </CardContent>
+        </Card>
 
-            {/* 新增：未上線數 */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  未上線數 {renderArrowIndicator(kpiData.notShowCountChange)}
-                </CardTitle>
-                <Clock className="h-4 w-4 text-orange-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-orange-600">{formatNumber(kpiData.notShowCount)}</div>
-                {renderComparisonIndicator(kpiData.notShowCountChange, kpiData.prevNotShowCount)}
-                <p className="text-xs text-muted-foreground mt-1">
-                  待上線或未上線
-                </p>
-              </CardContent>
-            </Card>
+        {/* 新增：未上線數 */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              未上線數 {renderArrowIndicator(kpiData.notShowCountChange)}
+            </CardTitle>
+            <Clock className="h-4 w-4 text-orange-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">{formatNumber(kpiData.notShowCount)}</div>
+            {renderComparisonIndicator(kpiData.notShowCountChange, kpiData.prevNotShowCount)}
+            <p className="text-xs text-muted-foreground mt-1">
+              待上線或未上線
+            </p>
+          </CardContent>
+        </Card>
 
-            {/* 新增：成交率卡片（戰報模式單獨顯示） */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  成交率 {renderArrowIndicator(kpiData.closingRateChange)}
-                </CardTitle>
-                <Target className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatPercent(kpiData.closingRate)}</div>
-                {renderComparisonIndicator(kpiData.closingRateChange)}
-                <p className="text-xs text-muted-foreground mt-1">
-                  成交 / 諮詢總數
-                </p>
-              </CardContent>
-            </Card>
-          </>
-        )}
+        {/* 新增：成交率卡片 */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              成交率 {renderArrowIndicator(kpiData.closingRateChange)}
+            </CardTitle>
+            <Target className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatPercent(kpiData.closingRate)}</div>
+            {renderComparisonIndicator(kpiData.closingRateChange)}
+            <p className="text-xs text-muted-foreground mt-1">
+              成交 / 諮詢總數
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* 完整諮詢名單 - 戰報模式才顯示 */}
-      {viewMode === 'battle' && (() => {
+      {/* 完整諮詢名單 */}
+      {(() => {
         // 計算分頁
         const totalRecords = consultationList?.length || 0;
         const totalPages = Math.ceil(totalRecords / itemsPerPage);
@@ -1125,15 +1088,13 @@ function ConsultantReportContent() {
 
       {/* 圖表區塊 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* 名單來源分佈/分析 - 戰報模式顯示表格，完整版顯示圓餅圖 */}
-        <Card className={viewMode === 'battle' ? 'lg:col-span-2' : ''}>
+        {/* 名單來源分析 */}
+        <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>{viewMode === 'battle' ? '名單來源分析' : '名單來源分佈'}</CardTitle>
+            <CardTitle>名單來源分析</CardTitle>
           </CardHeader>
           <CardContent>
-            {viewMode === 'battle' ? (
-              // 戰報模式：顯示表格
-              <div className="overflow-x-auto">
+            <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -1230,29 +1191,7 @@ function ConsultantReportContent() {
                     )}
                   </TableBody>
                 </Table>
-              </div>
-            ) : (
-              // 完整版：顯示圓餅圖
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={charts.leadSourcePie}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={true}
-                    label={renderCustomLabel}
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {charts.leadSourcePie.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
+            </div>
           </CardContent>
         </Card>
 
@@ -1334,15 +1273,8 @@ function ConsultantReportContent() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>諮詢與成交趨勢</CardTitle>
+              <CardTitle>成交額趨勢</CardTitle>
               <div className="flex gap-2">
-                <Button
-                  variant={trendGrouping === 'day' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setTrendGrouping('day')}
-                >
-                  日線
-                </Button>
                 <Button
                   variant={trendGrouping === 'week' ? 'default' : 'outline'}
                   size="sm"
@@ -1363,6 +1295,13 @@ function ConsultantReportContent() {
                   onClick={() => setTrendGrouping('quarter')}
                 >
                   季線
+                </Button>
+                <Button
+                  variant={trendGrouping === 'year' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setTrendGrouping('year')}
+                >
+                  年線
                 </Button>
               </div>
             </div>
@@ -1394,30 +1333,33 @@ function ConsultantReportContent() {
                     textAnchor="end"
                     height={80}
                   />
-                  <YAxis />
+                  <YAxis
+                    tickFormatter={(value) => {
+                      // Y軸顯示為千位數格式
+                      if (value >= 1000) {
+                        return `${(value / 1000).toFixed(0)}k`;
+                      }
+                      return value.toString();
+                    }}
+                  />
                   <Tooltip
                     labelFormatter={(value) => {
                       const date = new Date(value);
                       return date.toLocaleDateString('zh-TW');
                     }}
+                    formatter={(value: any) => {
+                      // 格式化成交額為貨幣格式
+                      return formatCurrency(Number(value));
+                    }}
                   />
                   <Line
                     type="monotone"
-                    dataKey="consultations"
-                    stroke="#3b82f6"
-                    name="諮詢數"
-                    strokeWidth={1.5}
-                    dot={false}
-                    opacity={0.8}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="deals"
+                    dataKey="revenue"
                     stroke="#10b981"
-                    name="成交數"
-                    strokeWidth={1.5}
+                    name="成交額"
+                    strokeWidth={2}
                     dot={false}
-                    opacity={0.8}
+                    opacity={0.9}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -2145,6 +2087,37 @@ function ConsultantReportContent() {
                   </div>
                 </div>
               </div>
+
+              {/* AI 分析資訊 */}
+              {studentAIAnalysis.data?.data?.[0] && (
+                <div className="border-t pt-4">
+                  <h3 className="font-semibold mb-3">AI 諮詢分析</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium text-muted-foreground">諮詢分數</label>
+                      <p className="text-2xl font-bold mt-1 text-blue-600">
+                        {studentAIAnalysis.data.data[0].analysis_score || '-'}
+                        {studentAIAnalysis.data.data[0].analysis_score && <span className="text-sm text-muted-foreground ml-1">/ 100</span>}
+                      </p>
+                    </div>
+                    <div className="flex items-end">
+                      <Button
+                        onClick={() => {
+                          if (studentAIAnalysis.data?.data?.[0]?.id) {
+                            setLocation(`/consultation-quality/${studentAIAnalysis.data.data[0].id}`);
+                            setStudentDetailOpen(false);
+                          }
+                        }}
+                        className="w-full"
+                        variant="default"
+                      >
+                        <Lightbulb className="h-4 w-4 mr-2" />
+                        查看 AI 分析結果
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="border-t pt-4">
                 <h3 className="font-semibold mb-3">金額資訊</h3>
