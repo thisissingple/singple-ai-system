@@ -1319,11 +1319,22 @@ function ConsultantReportContent() {
                     dataKey="date"
                     tickFormatter={(value) => {
                       const date = new Date(value);
-                      if (trendGrouping === 'week') {
-                        // 週線顯示：YYYY/MM/DD 格式，只在年份變化時顯示年份
-                        const year = date.getFullYear();
-                        const month = (date.getMonth() + 1).toString().padStart(2, '0');
-                        const day = date.getDate().toString().padStart(2, '0');
+                      const year = date.getFullYear();
+                      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                      const day = date.getDate().toString().padStart(2, '0');
+
+                      if (trendGrouping === 'year') {
+                        // 年線顯示：YYYY 年
+                        return `${year}年`;
+                      } else if (trendGrouping === 'quarter') {
+                        // 季線顯示：YYYY/Q1, YYYY/Q2, ...
+                        const quarter = Math.floor((date.getMonth() / 3)) + 1;
+                        return `${year}/Q${quarter}`;
+                      } else if (trendGrouping === 'month') {
+                        // 月線顯示：YYYY/MM
+                        return `${year}/${month}`;
+                      } else if (trendGrouping === 'week') {
+                        // 週線顯示：YYYY/MM/DD 格式
                         return `${year}/${month}/${day}`;
                       }
                       return formatDate(value);
