@@ -226,7 +226,8 @@ export class TotalReportService {
         attendanceData,
         purchaseData,
         eodsData,
-        warnings
+        warnings,
+        structuredWarnings
       );
 
       // 🆕 計算教師數據時傳入學生數據，確保狀態一致
@@ -240,11 +241,12 @@ export class TotalReportService {
 
       // 🆕 如果有前一期資料，計算教師對比
       if (previousPeriodData) {
-        // 先計算前一期的學生數據
+        // 先計算前一期的學生數據（不需要收集警告，所以傳入空陣列）
         const previousStudentInsights = await this.calculateStudentInsights(
           previousPeriodData.attendanceData,
           previousPeriodData.purchaseData,
           previousPeriodData.eodsData,
+          [],
           []
         );
 
@@ -338,7 +340,7 @@ export class TotalReportService {
             lastSync: trialPurchaseSheet?.lastSyncAt?.toISOString() || null,
           },
           eodsForClosers: {
-            rows: eodsData.length,
+            rows: summaryMetrics.totalConsultations || eodsData.length,
             lastSync: eodsSheet?.lastSyncAt?.toISOString() || null,
           },
         },
@@ -561,9 +563,16 @@ export class TotalReportService {
     // 合併 warnings
     warnings.push(...result.warnings);
 
-    // 🆕 合併 structuredWarnings
+    // 🆕 合併 structuredWarnings（去重）
     if (structuredWarnings && result.structuredWarnings) {
-      structuredWarnings.push(...result.structuredWarnings);
+      const existingTypes = new Set(structuredWarnings.map(w => `${w.type}:${w.message}`));
+      result.structuredWarnings.forEach(warning => {
+        const key = `${warning.type}:${warning.message}`;
+        if (!existingTypes.has(key)) {
+          structuredWarnings.push(warning);
+          existingTypes.add(key);
+        }
+      });
     }
 
     // 計算總學生數（購買記錄中的獨立 email 數量）
@@ -906,7 +915,8 @@ export class TotalReportService {
     attendanceData: any[],
     purchaseData: any[],
     eodsData: any[],
-    warnings: string[]
+    warnings: string[],
+    structuredWarnings: any[]
   ): Promise<TotalReportData['studentInsights']> {
     const insights: TotalReportData['studentInsights'] = [];
     const studentMap = new Map<string, any>();
@@ -914,9 +924,23 @@ export class TotalReportService {
 
     // Step 0: 批量查詢所有方案的總堂數（提升效能）
     const planNamesSet = new Set<string>();
+    const studentPlanMap = new Map<string, { studentName: string; email: string; wrongPlan: string }[]>();
+
     purchaseData.forEach((row) => {
-      const packageName = row.plan || row.data?.成交方案 || row.data?.plan || '';
-      if (packageName) planNamesSet.add(packageName);
+      const packageName = row.data?.plan || row.data?.成交方案 || row.data?.packageName || '';
+      if (packageName) {
+        planNamesSet.add(packageName);
+
+        // 記錄使用此方案的學員
+        if (!studentPlanMap.has(packageName)) {
+          studentPlanMap.set(packageName, []);
+        }
+        studentPlanMap.get(packageName)!.push({
+          studentName: row.data?.studentName || row.data?.學員姓名 || '未知',
+          email: row.data?.studentEmail || row.data?.學員信箱 || '',
+          wrongPlan: packageName
+        });
+      }
     });
 
     const planTotalClassesMap = new Map<string, number>();
@@ -939,15 +963,54 @@ export class TotalReportService {
       });
 
       if (missingPlans.length > 0) {
-        warnings.push(
-          `⚠️ 以下 ${missingPlans.length} 個方案尚未定義在 course_plans 表中，將使用原始資料的堂數：\n` +
-          missingPlans.map(p => `  - "${p}"`).join('\n')
-        );
+        // 找出相似的正確方案名稱建議
+        const availablePlans = Array.from(planTotalClassesMap.keys());
+
+        // 為每個錯誤方案找出學員和建議
+        missingPlans.forEach(wrongPlan => {
+          const students = studentPlanMap.get(wrongPlan) || [];
+          const similar = availablePlans.find(correctPlan => {
+            const normalize = (s: string) => s.replace(/[\s\-–—]/g, '').toLowerCase();
+            return normalize(correctPlan).includes(normalize(wrongPlan)) ||
+                   normalize(wrongPlan).includes(normalize(correctPlan));
+          });
+
+          students.forEach(student => {
+            const warningMessage = similar
+              ? `學員「${student.studentName}」的方案名稱「${wrongPlan}」需改為「${similar}」`
+              : `學員「${student.studentName}」的方案名稱「${wrongPlan}」找不到對應方案，請檢查拼寫`;
+
+            structuredWarnings.push({
+              message: warningMessage,
+              type: 'missing_plan',
+              severity: 'warning',
+              actionLabel: '前往資料庫瀏覽器',
+              actionRoute: '/tools/database-browser',
+              actionParams: { studentEmail: student.email, wrongPlan }
+            });
+          });
+        });
       }
     } catch (error) {
       console.error('Error querying course_plans:', error);
-      warnings.push('⚠️ 無法查詢 course_plans 表，將使用原始資料的堂數');
+      const errorMsg = '⚠️ 無法查詢 course_plans 表，將使用原始資料的堂數';
+
+      // 🆕 使用 structured warning
+      structuredWarnings.push({
+        message: errorMsg,
+        type: 'db_error',
+        severity: 'error',
+        actionLabel: '檢查資料庫連線',
+        actionRoute: '/settings/data-sources'
+      });
     }
+
+    // 記錄缺少信箱和重複購買記錄的學員
+    const studentsWithoutEmail: string[] = [];
+    const duplicatePurchases = new Map<string, Array<{ name: string; plan: string; date: string }>>(); // email+plan -> 購買記錄列表（同一方案重複購買）
+    const multiplePlanStudents = new Map<string, Array<{ plan: string; date: string }>>(); // email -> 購買方案列表（同一學員購買多個方案）
+    const seenPurchases = new Map<string, { name: string; date: string }>(); // "email|plan" -> 第一筆記錄
+    const studentPurchaseCount = new Map<string, { name: string; plans: Set<string> }>(); // email -> 購買方案集合
 
     // Step 1: Build from purchase records (most complete info)
     purchaseData.forEach((row, index) => {
@@ -958,10 +1021,39 @@ export class TotalReportService {
         ''
       ).toLowerCase();
 
-      if (!email) return;
-
       const name = resolveField(row.data, 'studentName') || row.data?.學員姓名 || '';
-      const packageName = row.plan || row.data?.成交方案 || row.data?.plan || '';
+
+      if (!email) {
+        studentsWithoutEmail.push(name || '未命名學員');
+        return;
+      }
+
+      const packageName = row.data?.plan || row.data?.成交方案 || row.data?.packageName || '';
+      const purchaseDateStr = row.data?.purchaseDate || row.data?.purchase_date || row.data?.購買日期 || '';
+
+      // 追蹤每個學員購買的方案
+      if (!studentPurchaseCount.has(email)) {
+        studentPurchaseCount.set(email, { name, plans: new Set() });
+      }
+      studentPurchaseCount.get(email)!.plans.add(packageName);
+
+      // 檢查是否已存在「相同 email + 相同方案」的組合（表示重複購買同一方案）
+      const purchaseKey = `${email}|${packageName}`;
+      if (seenPurchases.has(purchaseKey)) {
+        // 發現重複購買同一方案
+        if (!duplicatePurchases.has(purchaseKey)) {
+          const firstPurchase = seenPurchases.get(purchaseKey)!;
+          duplicatePurchases.set(purchaseKey, [
+            { name: firstPurchase.name, plan: packageName, date: firstPurchase.date }
+          ]);
+        }
+        duplicatePurchases.get(purchaseKey)!.push({ name, plan: packageName, date: purchaseDateStr });
+        // 繼續處理，但不加入 studentMap（避免重複）
+        return;
+      }
+
+      // 記錄這筆購買
+      seenPurchases.set(purchaseKey, { name, date: purchaseDateStr });
 
       // 🆕 優先從 course_plans 表查詢總堂數
       let totalTrialClasses: number;
@@ -998,6 +1090,14 @@ export class TotalReportService {
         intentScore: 50,
         hasPurchaseRecord: true,
       });
+    });
+
+    // 🆕 檢查購買多個方案的學員（提醒，不是錯誤）
+    studentPurchaseCount.forEach((data, email) => {
+      if (data.plans.size > 1) {
+        const plansList = Array.from(data.plans).filter(p => p).join('、');
+        multiplePlanStudents.set(email, Array.from(data.plans).map(plan => ({ plan, date: '' })));
+      }
     });
 
     // Step 2: Process attendance data (create students if not in purchase records)
@@ -1068,13 +1168,20 @@ export class TotalReportService {
       student.dealAmount = 0;
     });
 
-    // Add warning if students found in attendance but not in purchase
+    // 🆕 Add structured warning if students found in attendance but not in purchase
     if (studentsWithoutPurchase.length > 0) {
-      warnings.push(
-        `⚠️ 發現 ${studentsWithoutPurchase.length} 位學生有上課記錄但缺少購買記錄，請盡快處理：\n` +
+      const warningMessage = `⚠️ 發現 ${studentsWithoutPurchase.length} 位學生有上課記錄但缺少購買記錄，請盡快處理：\n` +
         studentsWithoutPurchase.slice(0, 10).join('\n') +
-        (studentsWithoutPurchase.length > 10 ? `\n...以及其他 ${studentsWithoutPurchase.length - 10} 位學生` : '')
-      );
+        (studentsWithoutPurchase.length > 10 ? `\n...以及其他 ${studentsWithoutPurchase.length - 10} 位學生` : '');
+
+      structuredWarnings.push({
+        message: warningMessage,
+        type: 'missing_purchase',
+        severity: 'warning',
+        actionLabel: '前往資料庫瀏覽器',
+        actionRoute: '/tools/database-browser',
+        actionParams: { students: studentsWithoutPurchase }
+      });
     }
 
     // Step 3: Integrate EOD data (deal amounts)
@@ -1199,8 +1306,55 @@ export class TotalReportService {
       });
     });
 
-    if (insights.length < purchaseData.length) {
-      warnings.push(`${purchaseData.length - insights.length} 筆購買記錄缺少學員信箱`);
+    // 🆕 Add structured warnings for data quality issues
+    console.log(`[Debug] purchaseData.length: ${purchaseData.length}, insights.length: ${insights.length}, studentsWithoutEmail: ${studentsWithoutEmail.length}, duplicatePurchases: ${duplicatePurchases.size}`);
+
+    // 1. 缺少信箱警告
+    if (studentsWithoutEmail.length > 0) {
+      studentsWithoutEmail.forEach(studentName => {
+        structuredWarnings.push({
+          message: `學員「${studentName}」缺少學員信箱，請補充以利後續追蹤`,
+          type: 'missing_email',
+          severity: 'warning',
+          actionLabel: '前往資料庫瀏覽器',
+          actionRoute: '/tools/database-browser'
+        });
+      });
+    }
+
+    // 2. 重複購買記錄警告（同一學員購買同一方案多次）- 這是錯誤，需要修正
+    if (duplicatePurchases.size > 0) {
+      duplicatePurchases.forEach((purchases, purchaseKey) => {
+        const [email, plan] = purchaseKey.split('|');
+        const studentName = purchases[0].name;
+        const dates = purchases.map(p => p.date).filter(d => d).join('、');
+
+        structuredWarnings.push({
+          message: `學員「${studentName}」(${email}) 重複購買方案「${plan}」${purchases.length} 次${dates ? `，購買日期：${dates}` : ''}，請確認並刪除重複資料`,
+          type: 'missing_email', // 暫時使用 missing_email type，可以考慮新增 duplicate_purchase type
+          severity: 'warning',
+          actionLabel: '前往資料庫瀏覽器',
+          actionRoute: '/tools/database-browser'
+        });
+      });
+    }
+
+    // 3. 購買多個方案提醒（同一學員購買不同方案）- 這不是錯誤，只是提醒特殊情況
+    if (multiplePlanStudents.size > 0) {
+      multiplePlanStudents.forEach((plans, email) => {
+        const studentData = studentPurchaseCount.get(email);
+        if (!studentData) return;
+
+        const plansList = Array.from(studentData.plans).filter(p => p).join('、');
+
+        structuredWarnings.push({
+          message: `💡 學員「${studentData.name}」(${email}) 購買了 ${studentData.plans.size} 個方案：${plansList}`,
+          type: 'missing_email', // 使用 info type 來區分這不是錯誤
+          severity: 'info',
+          actionLabel: '查看學員資料',
+          actionRoute: '/tools/database-browser'
+        });
+      });
     }
 
     return insights;

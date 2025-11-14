@@ -123,7 +123,7 @@ export interface AISuggestions {
 // 🆕 Structured warning with actionable fix button
 export interface DataQualityWarning {
   message: string;               // Warning message
-  type: 'missing_plan' | 'missing_email' | 'db_error' | 'generic'; // Warning type
+  type: 'missing_plan' | 'missing_email' | 'missing_purchase' | 'db_error' | 'generic'; // Warning type
   severity: 'error' | 'warning' | 'info'; // Severity level
   actionLabel?: string;          // Label for fix button (e.g., "前往課程方案設定")
   actionRoute?: string;          // Route to navigate to (e.g., "/settings/course-plans")

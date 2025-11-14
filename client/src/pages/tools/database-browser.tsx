@@ -5,13 +5,15 @@
 
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useLocation } from 'wouter';
 import ReportsLayout from '../reports-layout';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, Edit, Trash2, ChevronLeft, ChevronRight, Loader2, Plus, ArrowUpDown, ArrowUp, ArrowDown, Download, Upload } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Search, Edit, Trash2, ChevronLeft, ChevronRight, Loader2, Plus, ArrowUpDown, ArrowUp, ArrowDown, Download, Upload, AlertTriangle, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface ColumnInfo {
@@ -38,6 +40,21 @@ export default function DatabaseBrowser() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [showWarning, setShowWarning] = useState(true);
+
+  // 從 URL 參數中讀取警告信息
+  const urlParams = new URLSearchParams(window.location.search);
+  const warningsParam = urlParams.get('warnings');
+  const warnings = warningsParam ? JSON.parse(decodeURIComponent(warningsParam)) : [];
+
+  // 舊版單一警告支援（向後相容）
+  const warningType = urlParams.get('warningType');
+  const warningMessage = urlParams.get('warningMessage');
+  const warningSeverity = urlParams.get('warningSeverity') as 'error' | 'warning' | 'info' | null;
+
+  if (warningType && warningMessage && warnings.length === 0) {
+    warnings.push({ type: warningType, message: warningMessage, severity: warningSeverity || 'warning' });
+  }
 
   // 取得所有表格
   const { data: tablesData } = useQuery({
@@ -341,6 +358,73 @@ export default function DatabaseBrowser() {
   return (
     <ReportsLayout title="資料庫瀏覽器">
       <div className="p-6 space-y-4">
+        {/* 資料品質警告提示 */}
+        {warnings.length > 0 && showWarning && (
+          <div className="border rounded-lg border-orange-200 bg-orange-50 dark:bg-orange-950">
+            <div className="flex items-center justify-between p-4 border-b border-orange-200">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="h-5 w-5 text-orange-600" />
+                <span className="font-semibold text-orange-800 dark:text-orange-200">
+                  資料品質警告
+                </span>
+                <span className="text-sm text-orange-600 dark:text-orange-400">
+                  ({warnings.length} 個問題)
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0"
+                onClick={() => setShowWarning(false)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="px-4 py-3 space-y-2">
+              {warnings.map((warning: any, index: number) => {
+                const title = warning.type === 'missing_plan' ? '⚠️ 方案名稱錯誤'
+                  : warning.type === 'missing_purchase' ? '⚠️ 缺少購買記錄'
+                  : warning.message.includes('重複') ? '⚠️ 重複購買記錄'
+                  : warning.message.includes('💡') ? '💡 特殊情況提醒'
+                  : warning.type === 'legacy' ? '⚠️ 系統訊息'
+                  : '⚠️ 缺少學員信箱';
+
+                return (
+                  <div
+                    key={index}
+                    className={`flex items-start gap-3 p-3 rounded-md border ${
+                      warning.severity === 'error'
+                        ? 'border-red-300 bg-red-50 dark:bg-red-950'
+                        : warning.severity === 'info'
+                          ? 'border-blue-300 bg-blue-50 dark:bg-blue-950'
+                          : 'border-orange-300 bg-white dark:bg-orange-900'
+                    }`}
+                  >
+                    <div className={`font-medium text-sm whitespace-nowrap ${
+                      warning.severity === 'error'
+                        ? 'text-red-800 dark:text-red-200'
+                        : warning.severity === 'info'
+                          ? 'text-blue-800 dark:text-blue-200'
+                          : 'text-orange-800 dark:text-orange-200'
+                    }`}>
+                      {title}
+                    </div>
+                    <div className={`text-sm flex-1 ${
+                      warning.severity === 'error'
+                        ? 'text-red-700 dark:text-red-300'
+                        : warning.severity === 'info'
+                          ? 'text-blue-700 dark:text-blue-300'
+                          : 'text-orange-700 dark:text-orange-300'
+                    }`}>
+                      {warning.message}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* 頂部工具列 */}
         <div className="flex items-center gap-3 bg-white p-3 rounded-lg border">
           <Select value={selectedTable} onValueChange={setSelectedTable}>
