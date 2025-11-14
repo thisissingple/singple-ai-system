@@ -12,6 +12,7 @@ import { ImpersonationBanner } from "@/components/impersonation-banner";
 // 只有這些頁面需要立即載入（登入頁面和 404）
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/auth/login";
+import LoginDebugPage from "@/pages/auth/login-debug";
 
 // 優化：使用 lazy loading 延遲載入其他頁面，減少初始 bundle 大小
 
@@ -68,6 +69,7 @@ function Router() {
       <Switch>
         {/* 公開路由 - 無需登入 */}
         <Route path="/login" component={LoginPage} />
+        <Route path="/login-debug" component={LoginDebugPage} />
         <Route path="/forgot-password" component={ForgotPasswordPage} />
         <Route path="/forms/share/:id" component={PublicFormPage} />
         <Route path="/forms/public/trial-class" component={PublicTrialClassForm} />
