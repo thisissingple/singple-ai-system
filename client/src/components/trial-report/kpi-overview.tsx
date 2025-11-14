@@ -202,11 +202,13 @@ export function KPIOverview({ metrics, onRedefineKPI: _onRedefineKPI, onRevenueC
         />
 
         <KPICard
-          kpiId="pendingStudents"
-          title="待跟進學生"
-          value={metrics.pendingStudents}
-          subtitle="需要進一步聯繫的學生數"
-          onShowDefinition={() => showDefinition('pendingStudents', metrics.pendingStudents)}
+          kpiId="startRate"
+          title="開始率"
+          value={`${metrics.startRate.toFixed(1)}%`}
+          subtitle="已開始學員 / 總學員數"
+          trend={metrics.startRate >= 80 ? 'up' : 'neutral'}
+          trendValue={metrics.startRate >= 80 ? '表現優異' : '需要關注'}
+          onShowDefinition={() => showDefinition('startRate', metrics.startRate.toFixed(1))}
         />
 
         <KPICard
@@ -222,7 +224,7 @@ export function KPIOverview({ metrics, onRedefineKPI: _onRedefineKPI, onRevenueC
           kpiId="totalStudents"
           title="總學生數"
           value={metrics.totalStudents ?? metrics.totalTrials}
-          subtitle={`已成交 ${metrics.totalConversions} 筆`}
+          subtitle={`諮詢記錄 ${metrics.totalConsultations} 筆`}
           onShowDefinition={() => showDefinition('totalStudents', metrics.totalStudents ?? metrics.totalTrials)}
         />
       </div>

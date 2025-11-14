@@ -19,11 +19,12 @@ export interface CalculatedKPIs {
   conversionRate: number;
   avgConversionTime: number;
   trialCompletionRate: number;
-  pendingStudents: number;
+  pendingStudents: number;      // Deprecated, use startRate instead
+  startRate: number;            // 開始率：已開始學員 / 總學員數 * 100
   potentialRevenue: number;
   totalTrials: number;
-  totalConsultations: number;  // 總諮詢數（包含已成交和未成交）
-  totalConversions: number;     // 已成交數
+  totalConsultations: number;   // 總諮詢記錄數（來自 eods_for_closers 表）
+  totalConversions: number;     // 已成交數（有成交金額的記錄）
   pendingConsultations: number; // 待成交數
 }
 
@@ -97,7 +98,16 @@ export async function calculateAllKPIs(
   // 第 1 步：準備基礎變數（從 raw data 萃取）
   // ========================================
   const totalTrials = attendance.length;
-  const totalConsultations = deals.length; // 總諮詢數（包含已成交和未成交）
+
+  // 💡 直接從資料庫查詢總諮詢記錄數（不受權限過濾影響）
+  let totalConsultations = deals.length; // 預設值
+  try {
+    const result = await queryDatabase('SELECT COUNT(*) as count FROM eods_for_closers');
+    totalConsultations = parseInt(result.rows[0].count, 10);
+    console.log('📊 資料庫實際諮詢記錄數:', totalConsultations);
+  } catch (error) {
+    console.warn('⚠️ 無法查詢諮詢記錄總數，使用 deals.length:', deals.length);
+  }
 
   // ========================================
   // 💡 動態計算學生狀態（不依賴 current_status 欄位）
@@ -327,20 +337,24 @@ export async function calculateAllKPIs(
   // 計算「已上完課」的唯一學生數（已轉高 + 未轉高）
   const completedStudentsCount = statusCounts['已轉高'] + statusCounts['未轉高'];
 
-  // 計算已成交數（從 deals 表，有 deal_date 和 deal_amount 的記錄）
+  // 計算已成交數（從 deals 表，有 actual_amount > 0 的記錄）
   const totalConversions = deals.filter(deal => {
-    const dealDate = resolveField(deal.data, 'dealDate') || deal.data.deal_date;
-    const dealAmount = parseNumberField(resolveField(deal.data, 'dealAmount') || deal.data.deal_amount);
-    return dealDate && dealAmount && dealAmount > 0;
+    const amount = parseNumberField(deal.actual_amount || deal.data?.actual_amount);
+    return amount && amount > 0;
   }).length;
 
   // 待成交數
   const pendingConsultations = totalConsultations - totalConversions;
 
   const totalPurchases = purchases.length;
+  const totalStudents = studentMap.size; // 總學生數
 
   // 💡 待跟進學生數 = 體驗中 + 未開始
   const pending = statusCounts['體驗中'] + statusCounts['未開始'];
+
+  // 💡 開始率 = 已開始學員（體驗中 + 未轉高 + 已轉高）/ 總學員數 * 100
+  const startedStudents = statusCounts['體驗中'] + statusCounts['未轉高'] + statusCounts['已轉高'];
+  const startRate = totalStudents > 0 ? (startedStudents / totalStudents) * 100 : 0;
 
   // 記錄 Step 1 詳情
   const step1_baseVariables: Record<string, BaseVariable> = {
@@ -362,7 +376,7 @@ export async function calculateAllKPIs(
     },
     totalConversions: {
       value: totalConversions,
-      source: 'deals.filter(有 deal_date 且 deal_amount > 0).length',
+      source: 'deals.filter(actual_amount > 0).length',
     },
     pendingConsultations: {
       value: pendingConsultations,
@@ -372,9 +386,21 @@ export async function calculateAllKPIs(
       value: totalPurchases,
       source: 'purchases.length',
     },
+    totalStudents: {
+      value: totalStudents,
+      source: 'studentMap.size (去重後的學生數)',
+    },
     pending: {
       value: pending,
       source: '動態計算：「體驗中」+「未開始」的學生數',
+    },
+    startedStudents: {
+      value: startedStudents,
+      source: '動態計算：「體驗中」+「未轉高」+「已轉高」的學生數',
+    },
+    startRate: {
+      value: startRate,
+      source: '動態計算：startedStudents / totalStudents * 100',
     },
   };
 
@@ -488,14 +514,17 @@ export async function calculateAllKPIs(
   // ========================================
   const step3_formulaContext = {
     trials: totalTrials,
-    consultations: totalConsultations,     // 總諮詢數
-    conversions: totalConversions,         // 已成交數（從 deals 表）
+    consultations: totalConsultations,     // 總諮詢記錄數（來自 eods_for_closers 表）
+    conversions: totalConversions,         // 已成交數（actual_amount > 0 的記錄）
     convertedStudents: convertedStudentsCount,  // 💡 新增：已轉高學生數（從 purchases 表）
     completedStudents: completedStudentsCount,  // 💡 新增：已上完課學生數（從 purchases 表）
     attendedStudents: completedStudentsCount,   // 別名：已上課學生數
     pendingConsultations: pendingConsultations, // 待成交數
     purchases: totalPurchases,
     pending,
+    totalStudents,  // 總學生數
+    startedStudents,  // 已開始學員數
+    startRate,  // 開始率（%）
     totalRevenue,
     totalDealAmount: totalRevenue,
     avgDealAmount,
@@ -635,12 +664,13 @@ export async function calculateAllKPIs(
     conversionRate: correctConversionRate,  // 已轉高 ÷ (已轉高+未轉高)
     avgConversionTime: Math.round(calculatedMetrics.avgConversionTime || avgConversionDays),
     trialCompletionRate: correctTrialCompletionRate,  // (已轉高+未轉高) ÷ 總購買數
-    pendingStudents: correctPendingStudents,  // 體驗中 + 未開始
+    pendingStudents: correctPendingStudents,  // 體驗中 + 未開始 (deprecated)
+    startRate: startRate,  // 開始率：已開始學員 / 總學員數 * 100
     potentialRevenue: Math.round(totalRevenue),  // 修正：已成交金額（高階方案）
     totalTrials,  // 上課記錄總數
-    totalConsultations: convertedStudentsCount,  // 修正：已轉高學生數（不是 deals）
-    totalConversions: convertedStudentsCount,    // 修正：已轉高學生數
-    pendingConsultations: correctPendingStudents,  // 修正：待追蹤學生數
+    totalConsultations: totalConsultations,  // 總諮詢記錄數（來自 eods_for_closers 表）
+    totalConversions: totalConversions,    // 已成交數（actual_amount > 0 的記錄）
+    pendingConsultations: pendingConsultations,  // 待成交數
   };
 
   const calculationDetail: CalculationDetail = {

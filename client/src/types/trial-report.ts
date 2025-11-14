@@ -16,10 +16,12 @@ export interface SummaryMetrics {
   conversionRate: number;        // Percentage (0-100)
   avgConversionTime: number;     // Days
   trialCompletionRate: number;   // Percentage (0-100)
-  pendingStudents: number;       // Count
+  pendingStudents: number;       // Count (deprecated, use startRate instead)
+  startRate: number;             // 開始率：已開始學員 / 總學員數 * 100
   potentialRevenue: number;      // Amount in NT$
   totalTrials: number;           // Total trial classes
   totalConversions: number;      // Total successful conversions
+  totalConsultations: number;    // 總諮詢記錄數（來自 eods_for_closers 表）
   totalStudents?: number;        // 總學生數 (from purchase records)
 }
 
