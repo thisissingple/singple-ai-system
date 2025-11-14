@@ -16,6 +16,25 @@ import { sendAccountCreationEmail, sendPasswordResetEmail } from './services/ema
 
 export function registerAuthRoutes(app: Express) {
   /**
+   * GET /api/auth/debug-session
+   * 除錯用：檢查 Session 狀態
+   */
+  app.get('/api/auth/debug-session', (req, res) => {
+    const session = (req as any).session;
+    res.json({
+      success: true,
+      data: {
+        hasSession: !!session,
+        sessionId: session?.id,
+        userId: session?.userId,
+        hasUser: !!session?.user,
+        cookie: session?.cookie,
+        store: session?.store?.constructor?.name || 'unknown',
+      },
+    });
+  });
+
+  /**
    * POST /api/auth/login
    * 登入
    */
@@ -56,6 +75,15 @@ export function registerAuthRoutes(app: Express) {
         }
 
         console.log('[AUTH] ✅ Session saved successfully for user:', result.user!.id);
+        console.log('[AUTH] Session ID:', (req as any).session.id);
+        console.log('[AUTH] Session Store:', (req as any).session.store?.constructor?.name);
+        console.log('[AUTH] Cookie settings:', {
+          httpOnly: (req as any).session.cookie.httpOnly,
+          secure: (req as any).session.cookie.secure,
+          sameSite: (req as any).session.cookie.sameSite,
+          path: (req as any).session.cookie.path,
+        });
+
         res.json({
           success: true,
           user: result.user,
@@ -99,7 +127,16 @@ export function registerAuthRoutes(app: Express) {
       const userId = (req as any).session?.userId;
       const sessionUser = (req as any).session?.user;
 
+      console.log('[AUTH /me] Session check:', {
+        hasSession: !!(req as any).session,
+        sessionId: (req as any).session?.id,
+        userId: userId,
+        hasUser: !!sessionUser,
+        cookie: req.headers.cookie ? 'present' : 'missing',
+      });
+
       if (!userId) {
+        console.error('[AUTH /me] ❌ No userId in session');
         return res.status(401).json({
           success: false,
           error: '未登入',

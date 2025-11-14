@@ -59,7 +59,7 @@ async function debugLoginRedirect() {
         pm.module_category,
         up.scope
       FROM user_permissions up
-      JOIN permission_modules pm ON up.module_id::text = pm.id::text
+      JOIN permission_modules pm ON up.module_id = pm.module_id
       WHERE up.user_id::text = $1::text
         AND up.is_active = true
         AND pm.is_active = true
