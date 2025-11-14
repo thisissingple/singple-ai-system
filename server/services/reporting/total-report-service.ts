@@ -23,6 +23,14 @@ export interface TotalReportData {
     end: string;
   };
   warnings?: string[];
+  dataQualityIssues?: {
+    missingEmailRecords?: Array<{
+      id: string;
+      studentName?: string;
+      purchaseDate?: string;
+      packageName?: string;
+    }>;
+  };
   summaryMetrics: {
     conversionRate: number;
     avgConversionTime: number;
@@ -118,6 +126,7 @@ export class TotalReportService {
     const endDate = request.endDate ? new Date(request.endDate) : undefined;
     const dateRange = this.getDateRange(request.period, baseDate, startDate, endDate);
     const warnings: string[] = [];
+    const structuredWarnings: any[] = []; // 🆕 Structured warnings array
 
     try {
       // 優化：並行查詢當期和前期資料，減少等待時間
@@ -169,12 +178,13 @@ export class TotalReportService {
         );
       }
 
-      // 計算各項指標（傳入 warnings）
+      // 計算各項指標（傳入 warnings 和 structuredWarnings）
       const summaryMetrics = await this.calculateSummaryMetrics(
         attendanceData,
         purchaseData,
         eodsData,
-        warnings
+        warnings,
+        structuredWarnings
       );
 
       // 🆕 如果有前一期資料，計算前一期的指標並生成對比
@@ -309,6 +319,7 @@ export class TotalReportService {
         period: request.period,
         dateRange,
         warnings: warnings.length > 0 ? warnings : undefined,
+        structuredWarnings: structuredWarnings.length > 0 ? structuredWarnings : undefined, // 🆕 Include structured warnings
         summaryMetrics,
         trendData,
         funnelData,
@@ -537,7 +548,8 @@ export class TotalReportService {
     attendanceData: any[],
     purchaseData: any[],
     eodsData: any[],
-    warnings: string[]
+    warnings: string[],
+    structuredWarnings?: any[] // 🆕 Optional structured warnings array
   ): Promise<TotalReportData['summaryMetrics']> {
     // 使用新的 KPI Calculator（整合 Formula Engine）
     const result = await calculateAllKPIs({
@@ -548,6 +560,11 @@ export class TotalReportService {
 
     // 合併 warnings
     warnings.push(...result.warnings);
+
+    // 🆕 合併 structuredWarnings
+    if (structuredWarnings && result.structuredWarnings) {
+      structuredWarnings.push(...result.structuredWarnings);
+    }
 
     // 計算總學生數（購買記錄中的獨立 email 數量）
     const uniqueStudents = new Set<string>();

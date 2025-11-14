@@ -15,6 +15,7 @@ import { AISuggestions } from '@/components/trial-report/ai-suggestions';
 import { SimpleDataSourceStatus } from '@/components/trial-report/simple-data-source-status';
 import { MetricSettingsDialog } from '@/components/trial-report/metric-settings-dialog';
 import { RedefineKPIDialog } from '@/components/trial-report/redefine-kpi-dialog';
+import { DataQualityWarnings } from '@/components/trial-report/data-quality-warnings';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -199,10 +200,6 @@ export default function DashboardTrialReport() {
     );
   }
 
-  const filteredWarnings = (allTimeData.warnings || []).filter(
-    (warning) => !/資料來源|Supabase/i.test(warning)
-  );
-
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-[1800px] mx-auto p-6 space-y-6">
@@ -228,20 +225,11 @@ export default function DashboardTrialReport() {
           dealsCount={allTimeData.dataSourceMeta?.eodsForClosers?.rows || 0}
         />
 
-        {/* Warnings */}
-        {filteredWarnings.length > 0 && (
-          <Alert variant="default" className="border-orange-200 bg-orange-50 dark:bg-orange-950">
-            <AlertTriangle className="h-4 w-4 text-orange-600" />
-            <AlertTitle className="text-orange-800 dark:text-orange-200">資料品質警告</AlertTitle>
-            <AlertDescription className="text-orange-700 dark:text-orange-300">
-              <ul className="list-disc list-inside space-y-1 mt-2">
-                {filteredWarnings.map((warning, index) => (
-                  <li key={index}>{warning}</li>
-                ))}
-              </ul>
-            </AlertDescription>
-          </Alert>
-        )}
+        {/* Data Quality Warnings with Fix Buttons */}
+        <DataQualityWarnings
+          warnings={allTimeData.structuredWarnings}
+          legacyWarnings={allTimeData.warnings}
+        />
 
         {/* Section 1: 整體概況 (KPI Overview) - 使用全部時間的資料 */}
         <div>

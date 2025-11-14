@@ -118,11 +118,22 @@ export interface AISuggestions {
   periodComparison?: string;     // AI 對比分析：本期與前期的比較
 }
 
+// 🆕 Structured warning with actionable fix button
+export interface DataQualityWarning {
+  message: string;               // Warning message
+  type: 'missing_plan' | 'missing_email' | 'db_error' | 'generic'; // Warning type
+  severity: 'error' | 'warning' | 'info'; // Severity level
+  actionLabel?: string;          // Label for fix button (e.g., "前往課程方案設定")
+  actionRoute?: string;          // Route to navigate to (e.g., "/settings/course-plans")
+  actionParams?: Record<string, any>; // Optional parameters for the action
+}
+
 export interface TotalReportData {
   mode?: 'mock' | 'live';        // Data source mode
   period: PeriodType;
   dateRange: DateRange;
-  warnings?: string[];           // Data quality warnings
+  warnings?: string[];           // Data quality warnings (legacy, to be deprecated)
+  structuredWarnings?: DataQualityWarning[]; // 🆕 Structured warnings with actions
   summaryMetrics: SummaryMetricsWithComparison;
   trendData: TrendDataPoint[];
   funnelData: FunnelDataPoint[];

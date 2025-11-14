@@ -390,6 +390,8 @@ export function StudentInsights({ students, initialFilter = 'all' }: StudentInsi
   ]);
   const [statusFilter, setStatusFilter] = useState<ActualStatus | 'all'>('all');
   const [teacherFilter, setTeacherFilter] = useState<string | 'all'>('all');
+  const [packageFilter, setPackageFilter] = useState<string | 'all'>('all');
+  const [dateType, setDateType] = useState<'purchase' | 'lastClass'>('lastClass'); // 🆕 日期類型：購買日期或最近上課日
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
@@ -502,13 +504,23 @@ export function StudentInsights({ students, initialFilter = 'all' }: StudentInsi
       return false;
     }
 
-    // 日期範圍篩選（使用最近一次上課日）
-    if (startDate || endDate) {
-      const classDate = student.lastClassDate || student.classDate;
-      if (!classDate) return false;
+    // 方案篩選
+    if (packageFilter !== 'all') {
+      const studentPackage = student.packageName || '未購課';
+      if (studentPackage !== packageFilter) {
+        return false;
+      }
+    }
 
-      if (startDate && classDate < startDate) return false;
-      if (endDate && classDate > endDate) return false;
+    // 日期範圍篩選（根據 dateType 選擇日期欄位）
+    if (startDate || endDate) {
+      const dateToUse = dateType === 'purchase'
+        ? student.purchaseDate
+        : (student.lastClassDate || student.classDate);
+      if (!dateToUse) return false;
+
+      if (startDate && dateToUse < startDate) return false;
+      if (endDate && dateToUse > endDate) return false;
     }
 
     return true;
@@ -622,16 +634,31 @@ export function StudentInsights({ students, initialFilter = 'all' }: StudentInsi
     return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
   }, [students]);
 
+  // 計算方案統計
+  const packageCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    students.forEach((student) => {
+      if (student.currentStatus === '測試範本') return;
+
+      const packageName = student.packageName || '未購課';
+      counts.set(packageName, (counts.get(packageName) ?? 0) + 1);
+    });
+
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+  }, [students]);
+
   // 清除所有篩選
   const clearFilters = () => {
     setSearchQuery('');
     setStatusFilter('all');
     setTeacherFilter('all');
+    setPackageFilter('all');
     setStartDate('');
     setEndDate('');
   };
 
-  const hasActiveFilters = searchQuery || statusFilter !== 'all' || teacherFilter !== 'all' || startDate || endDate;
+  const hasActiveFilters = searchQuery || statusFilter !== 'all' || teacherFilter !== 'all' || packageFilter !== 'all' || startDate || endDate;
 
   // 計算老師行動追蹤指標 + 未分配學生
   const getTeacherActionStats = () => {
@@ -883,8 +910,40 @@ export function StudentInsights({ students, initialFilter = 'all' }: StudentInsi
               </SelectContent>
             </Select>
 
-            {/* 日期篩選 */}
+            {/* 方案篩選 - 下拉選單 */}
+            <Select value={packageFilter} onValueChange={setPackageFilter}>
+              <SelectTrigger className="w-[160px] h-9 text-sm">
+                <SelectValue placeholder="篩選方案" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">
+                  <span className="flex items-center justify-between w-full">
+                    全部方案
+                    <span className="ml-3 text-gray-400 text-xs">({statusCounts.all})</span>
+                  </span>
+                </SelectItem>
+                {packageCounts.map(([packageName, count]) => (
+                  <SelectItem key={packageName} value={packageName}>
+                    <span className="flex items-center justify-between w-full">
+                      {packageName}
+                      <span className="ml-3 text-gray-400 text-xs">({count})</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* 日期類型選擇器 + 日期篩選 */}
             <div className="flex items-center gap-2">
+              <Select value={dateType} onValueChange={(value: 'purchase' | 'lastClass') => setDateType(value)}>
+                <SelectTrigger className="w-[110px] h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="purchase">購買日期</SelectItem>
+                  <SelectItem value="lastClass">最近上課</SelectItem>
+                </SelectContent>
+              </Select>
               <Input
                 type="date"
                 value={startDate}

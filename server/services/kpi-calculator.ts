@@ -7,6 +7,7 @@
 import { reportMetricConfigService } from './reporting/report-metric-config-service';
 import { formulaEngine } from './reporting/formula-engine';
 import { resolveField, parseDateField, parseNumberField } from './reporting/field-mapping-v2';
+import { queryDatabase } from './pg-client';
 
 export interface RawData {
   attendance: any[];
@@ -63,10 +64,21 @@ export interface CalculationDetail {
   step4_kpiCalculations: KPICalculationDetail[];
 }
 
+// 🆕 Structured warning with actionable fix button
+export interface DataQualityWarning {
+  message: string;
+  type: 'missing_plan' | 'missing_email' | 'db_error' | 'generic';
+  severity: 'error' | 'warning' | 'info';
+  actionLabel?: string;
+  actionRoute?: string;
+  actionParams?: Record<string, any>;
+}
+
 export interface KPICalculationResult {
   summaryMetrics: CalculatedKPIs;
   calculationDetail: CalculationDetail;
   warnings: string[];
+  structuredWarnings?: DataQualityWarning[]; // 🆕 Structured warnings
 }
 
 /**
@@ -78,6 +90,7 @@ export async function calculateAllKPIs(
   rawData: RawData
 ): Promise<KPICalculationResult> {
   const warnings: string[] = [];
+  const structuredWarnings: DataQualityWarning[] = [];
   const { attendance, purchases, deals } = rawData;
 
   // ========================================
@@ -87,67 +100,232 @@ export async function calculateAllKPIs(
   const totalConsultations = deals.length; // 總諮詢數（包含已成交和未成交）
 
   // ========================================
-  // 💡 新邏輯：基於「目前狀態」計算轉換率
+  // 💡 動態計算學生狀態（不依賴 current_status 欄位）
+  // 邏輯與 total-report-service.ts 的 calculateStudentInsights 一致
   // ========================================
 
-  // 從 purchases 表提取唯一學生的狀態
-  const studentStatusMap = new Map<string, string>();
   console.log('🔍 購買記錄總數:', purchases.length);
-  if (purchases.length > 0) {
-    console.log('📋 第一筆購買記錄結構:', Object.keys(purchases[0]));
-    console.log('📋 第一筆完整資料:', JSON.stringify(purchases[0]).substring(0, 500));
+  console.log('🔍 體驗課打卡記錄:', attendance.length);
+  console.log('🔍 成交記錄:', deals.length);
+
+  // Step 0: 批量查詢所有方案的總堂數（提升效能）
+  const planNamesSet = new Set<string>();
+  purchases.forEach((purchase) => {
+    const packageName = purchase.plan || purchase.data?.成交方案 || purchase.data?.plan || '';
+    if (packageName) planNamesSet.add(packageName);
+  });
+
+  const planTotalClassesMap = new Map<string, number>();
+  const missingPlans: string[] = [];
+
+  try {
+    const result = await queryDatabase(
+      'SELECT plan_name, total_classes FROM course_plans WHERE is_active = TRUE'
+    );
+
+    result.rows.forEach((row: any) => {
+      planTotalClassesMap.set(row.plan_name, row.total_classes);
+    });
+
+    // 檢查缺少的方案
+    planNamesSet.forEach((planName) => {
+      if (!planTotalClassesMap.has(planName)) {
+        missingPlans.push(planName);
+      }
+    });
+
+    if (missingPlans.length > 0) {
+      const warningMessage = `⚠️ 以下 ${missingPlans.length} 個方案尚未定義在 course_plans 表中，將使用原始資料的堂數：\n` +
+        missingPlans.map(p => `  - "${p}"`).join('\n');
+      warnings.push(warningMessage);
+
+      // 🆕 Add structured warning with action button
+      structuredWarnings.push({
+        message: warningMessage,
+        type: 'missing_plan',
+        severity: 'warning',
+        actionLabel: '前往課程方案設定',
+        actionRoute: '/settings/course-plans',
+        actionParams: { missingPlans }
+      });
+    }
+  } catch (error) {
+    console.error('Error querying course_plans:', error);
+    const errorMsg = '⚠️ 無法查詢 course_plans 表，將使用原始資料的堂數';
+    warnings.push(errorMsg);
+
+    // 🆕 Add structured warning for database error
+    structuredWarnings.push({
+      message: errorMsg,
+      type: 'db_error',
+      severity: 'error',
+      actionLabel: '檢查資料庫連線',
+      actionRoute: '/settings/data-sources'
+    });
   }
 
-  purchases.forEach((purchase, index) => {
-    // 支援多種資料格式：Supabase 正規化後的 + raw_data + 原始格式
+  console.log(`📋 已載入 ${planTotalClassesMap.size} 個方案的堂數定義`);
+
+  // 建立學生資料結構（以 email 為 key）
+  const studentMap = new Map<string, {
+    email: string;
+    totalTrialClasses: number;
+    attendedClasses: number;
+    remainingClasses: number;
+    classDates: Date[];
+    dealAmount: number;
+    currentStatus: '未開始' | '體驗中' | '已轉高' | '未轉高';
+  }>();
+
+  // Step 1: 從 purchases 建立學生基礎資料
+  purchases.forEach((purchase) => {
     const email = (
       purchase.student_email ||
       purchase.data?.student_email ||
+      purchase.data?.studentEmail ||
       purchase.data?.email ||
       resolveField(purchase.data, 'studentEmail') ||
-      purchase.email ||
       ''
-    ).trim().toLowerCase();
+    ).toString().trim().toLowerCase();
 
-    const status = (
-      purchase.status ||
-      purchase.data?.status ||
-      purchase.data?.current_status ||
-      purchase.data?.currentStatus ||
-      resolveField(purchase.data, 'currentStatus') ||
-      purchase['目前狀態（自動計算）'] ||
+    if (!email) return;
+
+    const packageName = purchase.plan || purchase.data?.成交方案 || purchase.data?.plan || '';
+
+    // 🆕 優先從 course_plans 表查詢總堂數
+    let totalTrialClasses: number;
+    const planTotalFromDB = packageName ? planTotalClassesMap.get(packageName) : null;
+
+    if (planTotalFromDB !== null && planTotalFromDB !== undefined) {
+      // ✅ 從 course_plans 表取得總堂數
+      totalTrialClasses = planTotalFromDB;
+    } else {
+      // ⚠️ Fallback: 使用原始資料的堂數
+      totalTrialClasses = purchase.trial_class_count ||
+        purchase.data?.trial_class_count ||
+        parseNumberField(purchase.data?.體驗堂數) || 0;
+    }
+
+    studentMap.set(email, {
+      email,
+      totalTrialClasses,
+      attendedClasses: 0,
+      remainingClasses: totalTrialClasses,
+      classDates: [],
+      dealAmount: 0,
+      currentStatus: '未開始',
+    });
+  });
+
+  // Step 2: 從 attendance 收集上課日期
+  attendance.forEach((att) => {
+    const email = (
+      att.student_email ||
+      att.data?.student_email ||
+      att.data?.studentEmail ||
+      resolveField(att.data, 'studentEmail') ||
       ''
-    );
+    ).toString().trim().toLowerCase();
 
-    if (index < 3) {
-      console.log(`  [${index}] email: "${email}", status: "${status}"`);
-      console.log(`       raw purchase:`, {
-        student_email: purchase.student_email,
-        status: purchase.status,
-        data_status: purchase.data?.status
+    if (!email) return;
+
+    const classDate = parseDateField(resolveField(att.data, 'classDate'));
+
+    if (!studentMap.has(email)) {
+      // 有打卡記錄但沒有購買記錄的學生
+      studentMap.set(email, {
+        email,
+        totalTrialClasses: 0,
+        attendedClasses: 0,
+        remainingClasses: 0,
+        classDates: [],
+        dealAmount: 0,
+        currentStatus: '未開始',
       });
     }
 
-    if (email && status) {
-      studentStatusMap.set(email, status);
+    const student = studentMap.get(email)!;
+    if (classDate) {
+      student.classDates.push(classDate);
+      student.attendedClasses += 1;
     }
   });
 
-  console.log('📊 去重後學生數:', studentStatusMap.size);
+  // Step 3: 從 deals 累計高階方案成交金額
+  const trialStudentEmails = new Set(studentMap.keys());
+
+  deals.forEach((deal) => {
+    const email = (
+      deal.student_email ||
+      deal.data?.student_email ||
+      deal.data?.studentEmail ||
+      deal.data?.email ||
+      ''
+    ).toString().trim().toLowerCase();
+
+    if (!email || !trialStudentEmails.has(email)) return;
+
+    const plan = (
+      deal.plan ||
+      deal.data?.plan ||
+      deal.data?.成交方案 ||
+      ''
+    );
+
+    const isHighLevel = plan.includes('高階一對一') || plan.includes('高音');
+
+    if (isHighLevel) {
+      const student = studentMap.get(email)!;
+      const amount = parseNumberField(
+        deal.actual_amount ||
+        deal.data?.actual_amount ||
+        resolveField(deal.data, 'dealAmount')
+      ) || 0;
+      student.dealAmount += amount;
+    }
+  });
+
+  // Step 4: 重新計算剩餘堂數和狀態
+  studentMap.forEach((student) => {
+    student.remainingClasses = Math.max(0, student.totalTrialClasses - student.attendedClasses);
+
+    const hasAttendance = student.classDates.length > 0;
+    const hasHighLevelDeal = student.dealAmount > 0;
+    const noRemainingClasses = student.remainingClasses === 0;
+
+    // 狀態計算邏輯（與 total-report-service.ts 完全一致）
+    if (hasHighLevelDeal) {
+      student.currentStatus = '已轉高';
+    } else if (noRemainingClasses && hasAttendance) {
+      student.currentStatus = '未轉高';
+    } else if (hasAttendance) {
+      student.currentStatus = '體驗中';
+    } else {
+      student.currentStatus = '未開始';
+    }
+  });
+
+  console.log('📊 去重後學生數:', studentMap.size);
+
+  // 統計各狀態的學生數
+  const statusCounts = {
+    '已轉高': 0,
+    '未轉高': 0,
+    '體驗中': 0,
+    '未開始': 0,
+  };
+
+  studentMap.forEach((student) => {
+    statusCounts[student.currentStatus]++;
+  });
+
+  console.log('📊 狀態分布:', statusCounts);
 
   // 計算「已轉高」的唯一學生數
-  const convertedStudentEmails = Array.from(studentStatusMap.entries())
-    .filter(([email, status]) => status === '已轉高')
-    .map(([email]) => email);
-
-  const convertedStudentsCount = convertedStudentEmails.length;
+  const convertedStudentsCount = statusCounts['已轉高'];
 
   // 計算「已上完課」的唯一學生數（已轉高 + 未轉高）
-  const completedStudentEmails = Array.from(studentStatusMap.entries())
-    .filter(([email, status]) => status === '已轉高' || status === '未轉高')
-    .map(([email]) => email);
-
-  const completedStudentsCount = completedStudentEmails.length;
+  const completedStudentsCount = statusCounts['已轉高'] + statusCounts['未轉高'];
 
   // 計算已成交數（從 deals 表，有 deal_date 和 deal_amount 的記錄）
   const totalConversions = deals.filter(deal => {
@@ -160,8 +338,9 @@ export async function calculateAllKPIs(
   const pendingConsultations = totalConsultations - totalConversions;
 
   const totalPurchases = purchases.length;
-  const pendingOriginal = totalPurchases - totalConversions;
-  const pending = Math.max(0, pendingOriginal);
+
+  // 💡 待跟進學生數 = 體驗中 + 未開始
+  const pending = statusCounts['體驗中'] + statusCounts['未開始'];
 
   // 記錄 Step 1 詳情
   const step1_baseVariables: Record<string, BaseVariable> = {
@@ -175,11 +354,11 @@ export async function calculateAllKPIs(
     },
     convertedStudents: {
       value: convertedStudentsCount,
-      source: 'purchases 表中「目前狀態」= "已轉高" 的唯一學生數',
+      source: '動態計算：有高階方案成交記錄的唯一學生數',
     },
     completedStudents: {
       value: completedStudentsCount,
-      source: 'purchases 表中「目前狀態」IN ["已轉高", "未轉高"] 的唯一學生數',
+      source: '動態計算：「已轉高」+「未轉高」的唯一學生數',
     },
     totalConversions: {
       value: totalConversions,
@@ -195,8 +374,7 @@ export async function calculateAllKPIs(
     },
     pending: {
       value: pending,
-      source: 'max(0, purchases - conversions)',
-      ...(pendingOriginal < 0 && { originalValue: pendingOriginal }),
+      source: '動態計算：「體驗中」+「未開始」的學生數',
     },
   };
 
@@ -247,98 +425,25 @@ export async function calculateAllKPIs(
   // 成交記錄包含整個工作室，不只體驗課學生，無法對應是正常的
 
   // ========================================
-  // 計算已成交金額（修正邏輯 2025-10-31）
-  // 新邏輯：
-  // 1. 取得所有 trial_class_purchases 中的學生 email
-  // 2. 在 eods_for_closers 中找到這些學生，且方案名稱包含「高階一對一」
-  // 3. 計算這些成交記錄的實收金額總和
+  // 計算已成交金額和平均客單價（從 studentMap 取得）
   // ========================================
   const revenueWarnings: string[] = [];
 
-  // 取得所有體驗課學生的 email（不管目前狀態）
-  const trialStudentEmails = new Set<string>();
-  purchases.forEach((purchase) => {
-    const email = (
-      purchase.student_email ||
-      purchase.data?.student_email ||
-      purchase.data?.email ||
-      resolveField(purchase.data, 'studentEmail') ||
-      purchase.email ||
-      ''
-    ).trim().toLowerCase();
+  // 從 studentMap 計算總收益（已轉高學生的成交金額總和）
+  let totalRevenue = 0;
+  let highLevelStudentCount = 0;
 
-    if (email) {
-      trialStudentEmails.add(email);
+  studentMap.forEach((student) => {
+    if (student.dealAmount > 0) {
+      totalRevenue += student.dealAmount;
+      highLevelStudentCount++;
     }
   });
 
-  console.log(`📊 體驗課學員總數: ${trialStudentEmails.size}`);
-  console.log(`📊 eods_for_closers 總筆數: ${deals.length}`);
-
-  // Debug: 檢查前 3 筆 deals 的結構
-  if (deals.length > 0) {
-    console.log('🔍 前 3 筆 deals 結構：');
-    deals.slice(0, 3).forEach((deal, idx) => {
-      console.log(`  [${idx + 1}] email: ${deal.student_email || deal.data?.student_email || 'N/A'}`);
-      console.log(`      plan: ${deal.plan || deal.data?.plan || 'N/A'}`);
-      console.log(`      actual_amount: ${deal.actual_amount || deal.data?.actual_amount || 'N/A'}`);
-    });
-  }
-
-  // 在 eods_for_closers 中找到體驗課學生，且方案包含「高階一對一」
-  const highLevelDeals = deals.filter(deal => {
-    // 1. 檢查這個 deal 的學生是否來自體驗課
-    const email = (
-      deal.student_email ||
-      deal.data?.student_email ||
-      deal.data?.email ||
-      ''
-    ).trim().toLowerCase();
-
-    if (!email || !trialStudentEmails.has(email)) {
-      return false; // 不是體驗課學生
-    }
-
-    // 2. 檢查方案名稱是否包含「高階一對一」
-    const plan = (
-      deal.plan ||                     // ✅ 優先：頂層欄位（從資料庫直接讀取）
-      deal.data?.plan ||               // ✅ 次要：data 中的 plan
-      deal.data?.成交方案 ||
-      deal.data?.deal_package ||
-      resolveField(deal.data, 'dealPackage') ||
-      ''
-    );
-    const isHighLevel = plan.includes('高階一對一') || plan.includes('高音');
-
-    if (isHighLevel) {
-      console.log(`✅ 找到高階方案: ${email} - ${plan}`);
-    }
-
-    return isHighLevel;
-  });
-
-  console.log(`💰 體驗課轉高階成交數: ${highLevelDeals.length}`);
-
-  const totalRevenue = highLevelDeals.reduce((sum, deal) => {
-    const amountStr = (
-      deal.actual_amount ||            // ✅ 優先：頂層欄位（從資料庫直接讀取）
-      deal.deal_amount ||              // ✅ 次要：頂層 deal_amount
-      deal.data?.actual_amount ||      // data 中的欄位
-      deal.data?.實收金額 ||
-      '0'
-    ).toString().replace(/[^0-9.]/g, '');
-    const amount = parseFloat(amountStr) || 0;
-    return sum + amount;
-  }, 0);
-
-  console.log(`💰 體驗課轉高階總收益: NT$ ${totalRevenue.toLocaleString()}`);
-
-  // 不再警告高階方案缺失，這是正常的業務情況
-
-  // 平均客單價（基於高階方案）
+  // 平均客單價（基於已轉高學生）
   let avgDealAmount = 50000; // 預設值
-  if (highLevelDeals.length > 0) {
-    avgDealAmount = Math.round(totalRevenue / highLevelDeals.length);
+  if (highLevelStudentCount > 0) {
+    avgDealAmount = Math.round(totalRevenue / highLevelStudentCount);
   }
 
   // 記錄 Step 2 詳情
@@ -358,11 +463,11 @@ export async function calculateAllKPIs(
       value: avgDealAmount,
       calculation: {
         totalRevenue: totalRevenue,
-        validDeals: highLevelDeals.length,
+        validDeals: highLevelStudentCount,
         totalDeals: deals.length,
-        trialStudents: trialStudentEmails.size,
-        highLevelDeals: highLevelDeals.length,
-        formula: 'totalRevenue / highLevelDeals.length',
+        trialStudents: studentMap.size,
+        highLevelStudents: highLevelStudentCount,
+        formula: 'totalRevenue / highLevelStudentCount',
         result: avgDealAmount,
       },
       ...(revenueWarnings.length > 0 && { warnings: revenueWarnings }),
@@ -370,9 +475,9 @@ export async function calculateAllKPIs(
     totalRevenue: {
       value: totalRevenue,
       calculation: {
-        source: '體驗課學員在 eods_for_closers 中「高階一對一」或「高音」方案的實收金額總和',
-        trialStudents: trialStudentEmails.size,
-        highLevelDeals: highLevelDeals.length,
+        source: '從 studentMap 動態計算：已轉高學生的成交金額總和',
+        trialStudents: studentMap.size,
+        highLevelStudents: highLevelStudentCount,
         totalAmount: totalRevenue,
       },
     },
@@ -518,13 +623,13 @@ export async function calculateAllKPIs(
     ? Math.round((convertedStudentsCount / completedStudentsCount) * 10000) / 100
     : 0;
 
-  const correctTrialCompletionRate = studentStatusMap.size > 0
-    ? Math.round((completedStudentsCount / studentStatusMap.size) * 10000) / 100
+  const correctTrialCompletionRate = studentMap.size > 0
+    ? Math.round((completedStudentsCount / studentMap.size) * 10000) / 100
     : 0;
 
   // 計算待追蹤學生（體驗中 + 未開始）
-  const correctPendingStudents = Array.from(studentStatusMap.values())
-    .filter(status => status === '體驗中' || status === '未開始').length;
+  const correctPendingStudents = Array.from(studentMap.values())
+    .filter(student => student.currentStatus === '體驗中' || student.currentStatus === '未開始').length;
 
   const summaryMetrics: CalculatedKPIs = {
     conversionRate: correctConversionRate,  // 已轉高 ÷ (已轉高+未轉高)
@@ -549,5 +654,6 @@ export async function calculateAllKPIs(
     summaryMetrics,
     calculationDetail,
     warnings,
+    structuredWarnings, // 🆕 Include structured warnings
   };
 }

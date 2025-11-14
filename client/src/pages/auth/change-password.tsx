@@ -31,7 +31,9 @@ export default function ChangePasswordPage() {
   const { data: permissionsData } = useQuery({
     queryKey: ['user-permissions'],
     queryFn: async () => {
-      const res = await fetch('/api/permissions/my-permissions');
+      const res = await fetch('/api/permissions/my-permissions', {
+        credentials: 'include', // 重要：包含 session cookie
+      });
       if (!res.ok) throw new Error('Failed to fetch permissions');
       return res.json();
     },
@@ -39,16 +41,20 @@ export default function ChangePasswordPage() {
 
   useEffect(() => {
     // 檢查使用者狀態
-    fetch('/api/auth/me')
+    fetch('/api/auth/me', {
+      credentials: 'include', // 重要：包含 session cookie
+    })
       .then(res => res.json())
       .then(data => {
         if (!data.success) {
+          console.error('[修改密碼頁] 無法取得使用者資料:', data);
           setLocation('/login');
           return;
         }
         setMustChange(data.user.must_change_password);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('[修改密碼頁] API 請求失敗:', err);
         setLocation('/login');
       });
   }, [setLocation]);
@@ -74,6 +80,7 @@ export default function ChangePasswordPage() {
       const response = await fetch('/api/auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // 重要：包含 session cookie
         body: JSON.stringify({
           oldPassword: mustChange ? null : oldPassword,
           newPassword,
