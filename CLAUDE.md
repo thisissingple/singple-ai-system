@@ -12,7 +12,7 @@ An educational institution data dashboard system that integrates Google Sheets d
 
 ### Development
 ```bash
-npm run dev              # Start development server (port 5000)
+npm run dev              # Start development server (port 5001)
 npm run dev:clean        # Kill existing tsx processes and restart
 npm run build            # Build production bundle
 npm start                # Start production server

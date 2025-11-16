@@ -78,7 +78,7 @@ npm run dev
 
 ### 步驟 4: 開啟瀏覽器
 
-- 前往：`http://localhost:5000`
+- 前往：`http://localhost:5001`
 - 登入並測試
 
 ---

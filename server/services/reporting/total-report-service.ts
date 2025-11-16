@@ -40,6 +40,10 @@ export interface TotalReportData {
     totalTrials: number;
     totalConversions: number;
   };
+  calculationDetail?: {
+    step1_baseVariables?: Record<string, {value: number; source: string}>;
+    [key: string]: any;
+  };
   trendData: Array<{
     date: string;
     trials: number;
@@ -179,22 +183,25 @@ export class TotalReportService {
       }
 
       // 計算各項指標（傳入 warnings 和 structuredWarnings）
-      const summaryMetrics = await this.calculateSummaryMetrics(
+      const summaryResult = await this.calculateSummaryMetrics(
         attendanceData,
         purchaseData,
         eodsData,
         warnings,
         structuredWarnings
       );
+      const summaryMetrics = summaryResult.metrics;
+      const calculationDetail = summaryResult.calculationDetail;
 
       // 🆕 如果有前一期資料，計算前一期的指標並生成對比
       if (previousPeriodData) {
-        const previousMetrics = await this.calculateSummaryMetrics(
+        const previousResult = await this.calculateSummaryMetrics(
           previousPeriodData.attendanceData,
           previousPeriodData.purchaseData,
           previousPeriodData.eodsData,
           [] // 前一期不需要 warnings
         );
+        const previousMetrics = previousResult.metrics;
 
         // 計算對比
         summaryMetrics.comparison = {
@@ -304,12 +311,12 @@ export class TotalReportService {
         teacherInsights,
         studentInsights,
         request.period,
-        previousPeriodData ? await this.calculateSummaryMetrics(
+        previousPeriodData ? (await this.calculateSummaryMetrics(
           previousPeriodData.attendanceData,
           previousPeriodData.purchaseData,
           previousPeriodData.eodsData,
           []
-        ) : undefined
+        )).metrics : undefined
       );
 
       // 🚀 效能優化：移除 rawData 傳輸，減少 ~70% 資料量
@@ -323,6 +330,7 @@ export class TotalReportService {
         warnings: warnings.length > 0 ? warnings : undefined,
         structuredWarnings: structuredWarnings.length > 0 ? structuredWarnings : undefined, // 🆕 Include structured warnings
         summaryMetrics,
+        calculationDetail, // 🆕 Include calculation details for KPI transparency
         trendData,
         funnelData,
         categoryBreakdown,
@@ -552,7 +560,7 @@ export class TotalReportService {
     eodsData: any[],
     warnings: string[],
     structuredWarnings?: any[] // 🆕 Optional structured warnings array
-  ): Promise<TotalReportData['summaryMetrics']> {
+  ): Promise<{ metrics: TotalReportData['summaryMetrics']; calculationDetail: any }> {
     // 使用新的 KPI Calculator（整合 Formula Engine）
     const result = await calculateAllKPIs({
       attendance: attendanceData,
@@ -590,8 +598,11 @@ export class TotalReportService {
     });
 
     return {
-      ...result.summaryMetrics,
-      totalStudents: uniqueStudents.size,
+      metrics: {
+        ...result.summaryMetrics,
+        totalStudents: uniqueStudents.size,
+      },
+      calculationDetail: result.calculationDetail,
     };
   }
 

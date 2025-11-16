@@ -23,7 +23,7 @@ console.log(`   PORT: ${process.env.PORT || 'not set'}`);
 /**
  * ⚠️ ZEABUR DEPLOYMENT NOTICE ⚠️
  * This server is designed to run on Zeabur platform.
- * PORT can be configured via environment variable (defaults to 5000).
+ * PORT can be configured via environment variable (defaults to 5001).
  * Zeabur automatically assigns PORT in production.
  */
 

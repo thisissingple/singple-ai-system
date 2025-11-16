@@ -823,7 +823,7 @@ try {
 ```
 系統狀態檢查:
 │
-├─ ✅ 伺服器運行        (Port 5000)
+├─ ✅ 伺服器運行        (Port 5001)
 ├─ ✅ 資料庫連接        (Supabase)
 ├─ ✅ 認證功能          (Session)
 ├─ ✅ 表單系統          (完整)
@@ -997,7 +997,7 @@ ps aux | grep -E "node|tsx|nodemon" | grep -v grep | awk '{print $2}' | xargs -r
 npm run dev
 ```
 
-**結果**：✅ 只保留一個開發伺服器運行在 port 5000
+**結果**：✅ 只保留一個開發伺服器運行在 port 5001
 
 ---
 
@@ -1303,7 +1303,7 @@ SELECT COUNT(*) FROM business_identities;
 
 **API 測試**：
 ```bash
-curl http://localhost:5000/api/employees
+curl http://localhost:5001/api/employees
 ✅ 返回 13 筆完整員工資料
 ✅ 包含業務身份、薪資、勞健保資訊
 ```

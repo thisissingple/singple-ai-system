@@ -7,7 +7,7 @@
 https://workspace.orange32.repl.co
 ```
 
-**這是您的正確訪問網址！**（不是 localhost:5000）
+**這是您的正確訪問網址！**（不是 localhost:5001）
 
 ---
 
@@ -237,7 +237,7 @@ replit@replit-473109.iam.gserviceaccount.com
 
 ## ❓ 常見問題
 
-### Q: 為什麼無法訪問 localhost:5000？
+### Q: 為什麼無法訪問 localhost:5001？
 **A**: 因為您在 Replit 環境中，需要使用 Replit 預覽網址：
 ```
 https://workspace.orange32.repl.co/

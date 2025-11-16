@@ -378,10 +378,10 @@ export async function queryDatabase(query: string, params?: any[]) {
 npx tsx scripts/test-db-connection.ts
 
 # 2. 測試收支記錄 API
-curl http://localhost:5000/api/income-expense/records
+curl http://localhost:5001/api/income-expense/records
 
 # 3. 測試教學品質分析 API
-curl http://localhost:5000/api/teaching-quality/sales-records
+curl http://localhost:5001/api/teaching-quality/sales-records
 
 # 4. 前端功能測試
 # - 訪問「收支記錄管理」頁面

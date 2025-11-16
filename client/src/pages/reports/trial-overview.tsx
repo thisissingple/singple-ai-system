@@ -575,6 +575,7 @@ export default function TrialOverview() {
                 <h2 className="text-xl font-semibold mb-4">整體概況</h2>
                 <KPIOverview
                   metrics={allTimeData.summaryMetrics}
+                  calculationDetail={allTimeData.calculationDetail}
                   onRedefineKPI={(kpiName, currentValue) => {
                     const kpiLabels: Record<string, string> = {
                       conversionRate: '轉換率',

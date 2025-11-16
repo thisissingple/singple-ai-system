@@ -13,6 +13,9 @@ import { getKPIDefinition } from '@/config/kpi-definitions';
 
 interface KPIOverviewProps {
   metrics: SummaryMetrics;
+  calculationDetail?: {
+    step1_baseVariables?: Record<string, {value: number; source: string}>;
+  };
   onRedefineKPI?: (kpiName: string, currentValue: number) => void;
   onRevenueClick?: () => void;
 }
@@ -155,7 +158,7 @@ function KPICard({
   );
 }
 
-export function KPIOverview({ metrics, onRedefineKPI: _onRedefineKPI, onRevenueClick }: KPIOverviewProps) {
+export function KPIOverview({ metrics, calculationDetail, onRedefineKPI: _onRedefineKPI, onRevenueClick }: KPIOverviewProps) {
   const isConversionRateAbnormal = metrics.conversionRate > 100;
   const [definitionDialog, setDefinitionDialog] = useState<{
     open: boolean;
@@ -235,6 +238,9 @@ export function KPIOverview({ metrics, onRedefineKPI: _onRedefineKPI, onRevenueC
         onClose={() => setDefinitionDialog({ open: false, kpiId: '' })}
         kpiId={definitionDialog.kpiId}
         currentValue={definitionDialog.value}
+        calculationData={{
+          baseVariables: calculationDetail?.step1_baseVariables
+        }}
       />
     </>
   );
