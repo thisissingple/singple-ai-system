@@ -3,6 +3,7 @@
  * 測試新的統一運算中心
  */
 
+import 'dotenv/config';
 import { calculateAllKPIs } from '../server/services/kpi-calculator';
 
 async function testKPICalculator() {
@@ -86,31 +87,37 @@ async function testKPICalculator() {
 
   console.log('🔧 執行 KPI 計算...\n');
 
-  const kpis = await calculateAllKPIs(mockData, warnings);
+  const result = await calculateAllKPIs(mockData, warnings);
 
   console.log('✅ 計算完成！\n');
   console.log('=' .repeat(60));
   console.log('📈 KPI 結果：\n');
 
-  console.log(`  轉換率: ${kpis.conversionRate.toFixed(2)}%`);
-  console.log(`    計算: ${kpis.totalConversions} / ${kpis.totalTrials} * 100`);
-  console.log(`    說明: 成交數佔體驗課總數的比例\n`);
+  const kpis = result.summaryMetrics;
+  const details = result.calculationDetail;
 
-  console.log(`  平均轉換時間: ${kpis.avgConversionTime} 天`);
-  console.log(`    說明: 從體驗課到成交的平均天數\n`);
+  console.log(`  轉換率: ${kpis.conversionRate?.toFixed(2) || 0}%`);
+  console.log(`    計算公式: 已轉高學生數 / 已上完課學生數 * 100`);
+  console.log(`    實際數據: ${details.step1_baseVariables.convertedStudents?.value || 0} / ${details.step1_baseVariables.completedStudents?.value || 0} * 100\n`);
 
-  console.log(`  體驗課完成率: ${kpis.trialCompletionRate.toFixed(2)}%`);
-  console.log(`    計算: ${mockData.purchases.length} / ${kpis.totalTrials} * 100`);
-  console.log(`    說明: 購買數佔體驗課總數的比例\n`);
+  console.log(`  平均轉換時間: ${kpis.avgConversionTime || 0} 天`);
+  console.log(`    計算公式: 總轉換天數 / 有效配對數`);
+  console.log(`    實際數據: ${details.step1_baseVariables.totalConversionDays?.value || 0} / ${details.step1_baseVariables.validConversionPairs?.value || 0}\n`);
 
-  console.log(`  待聯繫學員: ${kpis.pendingStudents} 位`);
-  console.log(`    計算: ${mockData.purchases.length} - ${kpis.totalConversions}`);
-  console.log(`    說明: 已購買但尚未成交的學員\n`);
+  console.log(`  體驗課完成率: ${kpis.trialCompletionRate?.toFixed(2) || 0}%`);
+  console.log(`    計算公式: 已上完課學生數 / 總學生數 * 100`);
+  console.log(`    實際數據: ${details.step1_baseVariables.completedStudents?.value || 0} / ${details.step1_baseVariables.totalStudents?.value || 0} * 100\n`);
 
-  console.log(`  潛在收益: NT$ ${kpis.potentialRevenue.toLocaleString()}`);
-  console.log(`    說明: 待聯繫學員 × 平均客單價\n`);
+  console.log(`  開始率: ${kpis.startRate?.toFixed(2) || 0}%`);
+  console.log(`    計算公式: 已開始學員 / 總學員數 * 100`);
+  console.log(`    實際數據: ${details.step1_baseVariables.startedStudents?.value || 0} / ${details.step1_baseVariables.totalStudents?.value || 0} * 100\n`);
 
-  console.log(`  總體驗課: ${kpis.totalTrials} 堂`);
+  console.log(`  待跟進學生: ${kpis.pendingStudents || 0} 位`);
+  console.log(`    說明: 體驗中 + 未開始的學生數\n`);
+
+  console.log(`  已轉高實收金額: NT$ ${(kpis.potentialRevenue || 0).toLocaleString()}`);
+  console.log(`    說明: 已轉高學生的高階方案實收金額總和（成交日期在最早上課日期之後）`);
+  console.log(`    實際數據: ${details.step1_baseVariables.potentialRevenue?.value || 0}\n`);
   console.log(`  總成交: ${kpis.totalConversions} 筆`);
 
   if (warnings.length > 0) {

@@ -261,8 +261,10 @@ export async function calculateAllKPIs(
     }
   });
 
-  // Step 3: 從 deals 累計高階方案成交金額
+  // Step 3: 從 deals 累計高階方案成交金額（只計算體驗課後的成交）
   const trialStudentEmails = new Set(studentMap.keys());
+  const dateValidationWarnings: string[] = [];
+  let skippedDealsCount = 0;
 
   deals.forEach((deal) => {
     const email = (
@@ -286,14 +288,62 @@ export async function calculateAllKPIs(
 
     if (isHighLevel) {
       const student = studentMap.get(email)!;
-      const amount = parseNumberField(
-        deal.actual_amount ||
-        deal.data?.actual_amount ||
-        resolveField(deal.data, 'dealAmount')
-      ) || 0;
-      student.dealAmount += amount;
+
+      // 🆕 取得成交日期
+      const dealDate = parseDateField(
+        deal.deal_date ||
+        deal.data?.deal_date ||
+        deal.data?.dealDate ||
+        deal.data?.成交日期
+      );
+
+      // 🆕 計算最早上課日期
+      const firstClassDate = student.classDates.length > 0
+        ? new Date(Math.min(...student.classDates.map(d => d.getTime())))
+        : null;
+
+      // 🆕 嚴格檢查：只計算「上課後」的成交
+      if (!firstClassDate) {
+        // 學生沒有上課記錄，無法判斷時序
+        if (!dateValidationWarnings.includes(`學員 ${email} 無上課記錄，無法計算轉換`)) {
+          dateValidationWarnings.push(`學員 ${email} 無上課記錄，無法計算轉換`);
+        }
+        skippedDealsCount++;
+        return;
+      }
+
+      if (!dealDate) {
+        // 成交記錄缺少日期
+        if (!dateValidationWarnings.includes(`學員 ${email} 的成交記錄缺少成交日期`)) {
+          dateValidationWarnings.push(`學員 ${email} 的成交記錄缺少成交日期`);
+        }
+        skippedDealsCount++;
+        return;
+      }
+
+      // ✅ 只計算「最早上課日期之後」的成交
+      if (dealDate >= firstClassDate) {
+        const amount = parseNumberField(
+          deal.actual_amount ||
+          deal.data?.actual_amount ||
+          resolveField(deal.data, 'dealAmount')
+        ) || 0;
+        student.dealAmount += amount;
+      } else {
+        // 成交日期在上課日期之前，不計入
+        skippedDealsCount++;
+      }
     }
   });
+
+  // 🆕 記錄日期驗證警告
+  if (dateValidationWarnings.length > 0) {
+    warnings.push(`❗ 資料品質警告：${dateValidationWarnings.length} 筆成交記錄因日期問題被跳過`);
+    warnings.push(...dateValidationWarnings.slice(0, 5));  // 最多顯示 5 筆詳細警告
+    if (dateValidationWarnings.length > 5) {
+      warnings.push(`... 以及其他 ${dateValidationWarnings.length - 5} 筆`);
+    }
+  }
 
   // Step 4: 重新計算剩餘堂數和狀態
   studentMap.forEach((student) => {
@@ -357,6 +407,107 @@ export async function calculateAllKPIs(
   const startRate = totalStudents > 0 ? (startedStudents / totalStudents) * 100 : 0;
 
   // 記錄 Step 1 詳情
+  // ========================================
+  // 第 2 步：中間計算（平均轉換時間、總收益等）
+  // ========================================
+
+  // 計算平均轉換時間（從最早上課日期到成交日期）
+  let avgConversionDays = 7; // 預設值
+  let conversionTimeCount = 0;
+  let totalConversionDays = 0;
+  const conversionWarnings: string[] = [];
+
+  // 🆕 只計算「已轉高」學生的轉換時間
+  studentMap.forEach((student) => {
+    if (student.currentStatus !== '已轉高' || student.dealAmount === 0) return;
+
+    // 計算最早上課日期
+    const firstClassDate = student.classDates.length > 0
+      ? new Date(Math.min(...student.classDates.map(d => d.getTime())))
+      : null;
+
+    if (!firstClassDate) {
+      // 已轉高但沒有上課記錄（異常情況）
+      conversionWarnings.push(`學員 ${student.email} 已轉高但無上課記錄`);
+      return;
+    }
+
+    // 找出該學生的高階方案成交記錄（且在上課後）
+    deals.forEach((deal) => {
+      const dealEmail = (
+        deal.student_email ||
+        deal.data?.student_email ||
+        deal.data?.studentEmail ||
+        deal.data?.email ||
+        ''
+      ).toString().trim().toLowerCase();
+
+      if (dealEmail !== student.email) return;
+
+      const plan = deal.plan || deal.data?.成交方案 || '';
+      const isHighLevel = plan.includes('高階一對一') || plan.includes('高音');
+
+      if (!isHighLevel) return;
+
+      const dealDate = parseDateField(
+        deal.deal_date ||
+        deal.data?.deal_date ||
+        deal.data?.dealDate ||
+        deal.data?.成交日期
+      );
+
+      if (!dealDate) return;
+
+      // ✅ 只計算上課後的成交
+      if (dealDate >= firstClassDate) {
+        const daysDiff = Math.floor(
+          (dealDate.getTime() - firstClassDate.getTime()) / (1000 * 60 * 60 * 24)
+        );
+        totalConversionDays += daysDiff;
+        conversionTimeCount++;
+      }
+    });
+  });
+
+  const unmatchedDeals = deals.length - conversionTimeCount;
+  if (conversionTimeCount > 0) {
+    avgConversionDays = Math.round(totalConversionDays / conversionTimeCount);
+  } else if (statusCounts['已轉高'] > 0) {
+    const warning = '無法計算平均轉換時間：已轉高學生缺少成交日期或上課日期';
+    warnings.push(warning);
+    conversionWarnings.push(warning);
+  }
+
+  // ========================================
+  // 計算已成交金額和平均客單價（從 studentMap 取得）
+  // ========================================
+  const revenueWarnings: string[] = [];
+
+  // 從 studentMap 計算總收益（已轉高學生的成交金額總和）
+  let totalRevenue = 0;
+  let highLevelStudentCount = 0;
+
+  studentMap.forEach((student) => {
+    if (student.dealAmount > 0) {
+      totalRevenue += student.dealAmount;
+      highLevelStudentCount++;
+    }
+  });
+
+  // 平均客單價（基於已轉高學生）
+  let avgDealAmount = 50000; // 預設值
+  if (highLevelStudentCount > 0) {
+    avgDealAmount = Math.round(totalRevenue / highLevelStudentCount);
+  }
+
+  // 計算各狀態學生數（用於待跟進學生 KPI）
+  let inProgressStudents = 0;
+  let notStartedStudents = 0;
+  studentMap.forEach((student) => {
+    if (student.currentStatus === '體驗中') inProgressStudents++;
+    if (student.currentStatus === '未開始') notStartedStudents++;
+  });
+
   const step1_baseVariables: Record<string, BaseVariable> = {
     totalTrials: {
       value: totalTrials,
@@ -402,75 +553,33 @@ export async function calculateAllKPIs(
       value: startRate,
       source: '動態計算：startedStudents / totalStudents * 100',
     },
+    // 🆕 平均轉換時間相關變數
+    totalConversionDays: {
+      value: totalConversionDays,
+      source: '所有已轉高學生從體驗課到成交的天數總和',
+    },
+    validConversionPairs: {
+      value: conversionTimeCount,
+      source: '成功配對體驗課日期和成交日期的學生數',
+    },
+    // 🆕 已轉高實收金額
+    potentialRevenue: {
+      value: totalRevenue,
+      source: '已轉高學生的高階方案實收金額總和',
+    },
+    // 🆕 待跟進學生相關變數
+    inProgressStudents: {
+      value: inProgressStudents,
+      source: '動態計算：狀態為「體驗中」的學生數',
+    },
+    notStartedStudents: {
+      value: notStartedStudents,
+      source: '動態計算：狀態為「未開始」的學生數',
+    },
   };
 
   // pending 自動修正為 0，不需警告
-
-  // ========================================
-  // 第 2 步：中間計算（平均轉換時間、總收益等）
-  // ========================================
-
-  // 計算平均轉換時間（從體驗課到成交）
-  let avgConversionDays = 7; // 預設值
-  let conversionTimeCount = 0;
-  let totalConversionDays = 0;
-  const conversionWarnings: string[] = [];
-
-  deals.forEach(deal => {
-    const studentEmail = resolveField(deal.data, 'studentEmail');
-    const dealDate = parseDateField(resolveField(deal.data, 'dealDate'));
-
-    if (studentEmail && dealDate) {
-      const attendanceRecord = attendance.find(
-        a => resolveField(a.data, 'studentEmail') === studentEmail
-      );
-      if (attendanceRecord) {
-        const classDate = parseDateField(resolveField(attendanceRecord.data, 'classDate'));
-        if (classDate) {
-          const daysDiff = Math.floor(
-            (dealDate.getTime() - classDate.getTime()) / (1000 * 60 * 60 * 24)
-          );
-          if (daysDiff >= 0) {
-            totalConversionDays += daysDiff;
-            conversionTimeCount++;
-          }
-        }
-      }
-    }
-  });
-
-  const unmatchedDeals = deals.length - conversionTimeCount;
-  if (conversionTimeCount > 0) {
-    avgConversionDays = Math.round(totalConversionDays / conversionTimeCount);
-  } else if (deals.length > 0) {
-    const warning = '無法計算平均轉換時間：缺少體驗課日期或成交日期';
-    warnings.push(warning);
-    conversionWarnings.push(warning);
-  }
-
   // 成交記錄包含整個工作室，不只體驗課學生，無法對應是正常的
-
-  // ========================================
-  // 計算已成交金額和平均客單價（從 studentMap 取得）
-  // ========================================
-  const revenueWarnings: string[] = [];
-
-  // 從 studentMap 計算總收益（已轉高學生的成交金額總和）
-  let totalRevenue = 0;
-  let highLevelStudentCount = 0;
-
-  studentMap.forEach((student) => {
-    if (student.dealAmount > 0) {
-      totalRevenue += student.dealAmount;
-      highLevelStudentCount++;
-    }
-  });
-
-  // 平均客單價（基於已轉高學生）
-  let avgDealAmount = 50000; // 預設值
-  if (highLevelStudentCount > 0) {
-    avgDealAmount = Math.round(totalRevenue / highLevelStudentCount);
-  }
 
   // 記錄 Step 2 詳情
   const step2_intermediateCalculations: Record<string, IntermediateCalculation> = {
@@ -505,6 +614,8 @@ export async function calculateAllKPIs(
         trialStudents: studentMap.size,
         highLevelStudents: highLevelStudentCount,
         totalAmount: totalRevenue,
+        formula: 'SUM(已轉高學生的成交金額)',
+        result: totalRevenue,
       },
     },
   };

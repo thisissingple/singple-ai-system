@@ -1196,11 +1196,13 @@ export class TotalReportService {
     }
 
     // Step 3: Integrate EOD data (deal amounts)
-    // 累加每位學員「體驗課購買日期之後」的所有高階方案金額
+    // 🆕 累加每位學員「最早上課日期之後」的所有高階方案金額（與 kpi-calculator.ts 一致）
     studentMap.forEach((student) => {
       let totalDealAmount = 0;
-      const purchaseDate = student.purchaseDate
-        ? parseDateField(student.purchaseDate)
+
+      // 🆕 計算最早上課日期（取代購買日期）
+      const firstClassDate = student.classDates.length > 0
+        ? new Date(Math.min(...student.classDates.map(d => new Date(d).getTime())))
         : null;
 
       eodsData.forEach((row) => {
@@ -1219,11 +1221,10 @@ export class TotalReportService {
           ''
         );
 
-        // 只計算：1) 體驗課購買日期之後的 2) 高階方案
-        const isAfterPurchase = !purchaseDate || !dealDate || dealDate >= purchaseDate;
+        // 🆕 只計算：1) 最早上課日期之後的 2) 高階方案（嚴格檢查）
         const isHighLevelPlan = plan.includes('高階一對一') || plan.includes('高音');
 
-        if (isAfterPurchase && isHighLevelPlan) {
+        if (isHighLevelPlan && firstClassDate && dealDate && dealDate >= firstClassDate) {
           const amount = parseNumberField(resolveField(row.data, 'dealAmount'));
           if (amount) {
             totalDealAmount += amount;
