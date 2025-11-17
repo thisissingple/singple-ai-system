@@ -118,6 +118,29 @@ export async function calculateAllKPIs(
   console.log('🔍 體驗課打卡記錄:', attendance.length);
   console.log('🔍 成交記錄:', deals.length);
 
+  // 🆕 直接從資料庫查詢「已轉高」學生名單（使用正確定義）
+  const convertedStudentsSet = new Set<string>();
+  try {
+    const convertedQuery = `
+      SELECT DISTINCT LOWER(TRIM(t.student_email)) as email
+      FROM trial_class_purchases t
+      INNER JOIN eods_for_closers e
+        ON LOWER(TRIM(e.student_email)) = LOWER(TRIM(t.student_email))
+      WHERE e.actual_amount IS NOT NULL
+        AND e.actual_amount != 'NT$0.00'
+        AND e.deal_date IS NOT NULL
+        AND e.deal_date >= t.purchase_date
+        AND (e.plan LIKE '%高階一對一訓練%')
+    `;
+    const convertedResult = await queryDatabase(convertedQuery);
+    convertedResult.rows.forEach((row: any) => {
+      convertedStudentsSet.add(row.email);
+    });
+    console.log('✅ 已轉高學生數（SQL 查詢）:', convertedStudentsSet.size);
+  } catch (error) {
+    console.warn('⚠️ 無法查詢已轉高學生，將使用原有邏輯');
+  }
+
   // Step 0: 批量查詢所有方案的總堂數（提升效能）
   const planNamesSet = new Set<string>();
   purchases.forEach((purchase) => {
@@ -185,6 +208,7 @@ export async function calculateAllKPIs(
     classDates: Date[];
     dealAmount: number;
     currentStatus: '未開始' | '體驗中' | '已轉高' | '未轉高';
+    trialPurchaseDate: Date | null;  // 🆕 體驗課購買日期
   }>();
 
   // Step 1: 從 purchases 建立學生基礎資料
@@ -216,6 +240,14 @@ export async function calculateAllKPIs(
         parseNumberField(purchase.data?.體驗堂數) || 0;
     }
 
+    // 🆕 取得體驗課購買日期
+    const trialPurchaseDate = parseDateField(
+      purchase.purchase_date ||
+      purchase.data?.purchase_date ||
+      purchase.data?.purchaseDate ||
+      purchase.data?.購買日期
+    );
+
     studentMap.set(email, {
       email,
       totalTrialClasses,
@@ -224,6 +256,7 @@ export async function calculateAllKPIs(
       classDates: [],
       dealAmount: 0,
       currentStatus: '未開始',
+      trialPurchaseDate,  // 🆕 儲存體驗課購買日期
     });
   });
 
@@ -251,6 +284,7 @@ export async function calculateAllKPIs(
         classDates: [],
         dealAmount: 0,
         currentStatus: '未開始',
+        trialPurchaseDate: null,  // 🆕 沒有購買記錄
       });
     }
 
@@ -284,7 +318,7 @@ export async function calculateAllKPIs(
       ''
     );
 
-    const isHighLevel = plan.includes('高階一對一') || plan.includes('高音');
+    const isHighLevel = plan.includes('高階一對一訓練');
 
     if (isHighLevel) {
       const student = studentMap.get(email)!;
@@ -297,16 +331,14 @@ export async function calculateAllKPIs(
         deal.data?.成交日期
       );
 
-      // 🆕 計算最早上課日期
-      const firstClassDate = student.classDates.length > 0
-        ? new Date(Math.min(...student.classDates.map(d => d.getTime())))
-        : null;
+      // 🆕 使用體驗課購買日期作為基準（而非上課日期）
+      const trialPurchaseDate = student.trialPurchaseDate;
 
-      // 🆕 嚴格檢查：只計算「上課後」的成交
-      if (!firstClassDate) {
-        // 學生沒有上課記錄，無法判斷時序
-        if (!dateValidationWarnings.includes(`學員 ${email} 無上課記錄，無法計算轉換`)) {
-          dateValidationWarnings.push(`學員 ${email} 無上課記錄，無法計算轉換`);
+      // 🆕 嚴格檢查：只計算「體驗課購買後」的成交
+      if (!trialPurchaseDate) {
+        // 學生沒有體驗課購買記錄，無法判斷時序
+        if (!dateValidationWarnings.includes(`學員 ${email} 無體驗課購買記錄，無法計算轉換`)) {
+          dateValidationWarnings.push(`學員 ${email} 無體驗課購買記錄，無法計算轉換`);
         }
         skippedDealsCount++;
         return;
@@ -321,8 +353,8 @@ export async function calculateAllKPIs(
         return;
       }
 
-      // ✅ 只計算「最早上課日期之後」的成交
-      if (dealDate >= firstClassDate) {
+      // ✅ 只計算「體驗課購買日期當天或之後」的成交
+      if (dealDate >= trialPurchaseDate) {
         const amount = parseNumberField(
           deal.actual_amount ||
           deal.data?.actual_amount ||
@@ -330,7 +362,7 @@ export async function calculateAllKPIs(
         ) || 0;
         student.dealAmount += amount;
       } else {
-        // 成交日期在上課日期之前，不計入
+        // 成交日期在體驗課購買日期之前，不計入
         skippedDealsCount++;
       }
     }
@@ -350,11 +382,14 @@ export async function calculateAllKPIs(
     student.remainingClasses = Math.max(0, student.totalTrialClasses - student.attendedClasses);
 
     const hasAttendance = student.classDates.length > 0;
-    const hasHighLevelDeal = student.dealAmount > 0;
     const noRemainingClasses = student.remainingClasses === 0;
 
-    // 狀態計算邏輯（與 total-report-service.ts 完全一致）
-    if (hasHighLevelDeal) {
+    // 🆕 使用 SQL 查詢結果判斷是否已轉高（更準確）
+    const normalizedEmail = student.email.toLowerCase().trim();
+    const isConverted = convertedStudentsSet.has(normalizedEmail);
+
+    // 狀態計算邏輯
+    if (isConverted) {
       student.currentStatus = '已轉高';
     } else if (noRemainingClasses && hasAttendance) {
       student.currentStatus = '未轉高';
@@ -412,7 +447,7 @@ export async function calculateAllKPIs(
   // ========================================
 
   // 計算平均轉換時間（從最早上課日期到成交日期）
-  let avgConversionDays = 7; // 預設值
+  let avgConversionDays = 0; // 🔧 修正：預設值改為 0（無資料時顯示 0，而非誤導性的 7）
   let conversionTimeCount = 0;
   let totalConversionDays = 0;
   const conversionWarnings: string[] = [];
@@ -445,7 +480,7 @@ export async function calculateAllKPIs(
       if (dealEmail !== student.email) return;
 
       const plan = deal.plan || deal.data?.成交方案 || '';
-      const isHighLevel = plan.includes('高階一對一') || plan.includes('高音');
+      const isHighLevel = plan.includes('高階一對一訓練');
 
       if (!isHighLevel) return;
 
@@ -773,7 +808,7 @@ export async function calculateAllKPIs(
 
   const summaryMetrics: CalculatedKPIs = {
     conversionRate: correctConversionRate,  // 已轉高 ÷ (已轉高+未轉高)
-    avgConversionTime: Math.round(calculatedMetrics.avgConversionTime || avgConversionDays),
+    avgConversionTime: Math.round(calculatedMetrics.avgConversionTime !== undefined ? calculatedMetrics.avgConversionTime : avgConversionDays),
     trialCompletionRate: correctTrialCompletionRate,  // (已轉高+未轉高) ÷ 總購買數
     pendingStudents: correctPendingStudents,  // 體驗中 + 未開始 (deprecated)
     startRate: startRate,  // 開始率：已開始學員 / 總學員數 * 100

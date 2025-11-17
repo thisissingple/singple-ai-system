@@ -933,6 +933,29 @@ export class TotalReportService {
     const studentMap = new Map<string, any>();
     const studentsWithoutPurchase: string[] = []; // Track students in attendance but not in purchase
 
+    // 🆕 直接從資料庫查詢「已轉高」學生名單（使用正確定義）
+    const convertedStudentsSet = new Set<string>();
+    try {
+      const convertedQuery = `
+        SELECT DISTINCT LOWER(TRIM(t.student_email)) as email
+        FROM trial_class_purchases t
+        INNER JOIN eods_for_closers e
+          ON LOWER(TRIM(e.student_email)) = LOWER(TRIM(t.student_email))
+        WHERE e.actual_amount IS NOT NULL
+          AND e.actual_amount != 'NT$0.00'
+          AND e.deal_date IS NOT NULL
+          AND e.deal_date >= t.purchase_date
+          AND (e.plan LIKE '%高階一對一訓練%')
+      `;
+      const convertedResult = await queryDatabase(convertedQuery);
+      convertedResult.rows.forEach((row: any) => {
+        convertedStudentsSet.add(row.email);
+      });
+      console.log('✅ 已轉高學生數（SQL 查詢 - 學生列表）:', convertedStudentsSet.size);
+    } catch (error) {
+      console.warn('⚠️ 無法查詢已轉高學生（學生列表），將使用原有邏輯');
+    }
+
     // Step 0: 批量查詢所有方案的總堂數（提升效能）
     const planNamesSet = new Set<string>();
     const studentPlanMap = new Map<string, { studentName: string; email: string; wrongPlan: string }[]>();
@@ -1196,56 +1219,56 @@ export class TotalReportService {
     }
 
     // Step 3: Integrate EOD data (deal amounts)
-    // 🆕 累加每位學員「最早上課日期之後」的所有高階方案金額（與 kpi-calculator.ts 一致）
-    studentMap.forEach((student) => {
-      let totalDealAmount = 0;
+    // 🆕 直接從資料庫查詢每位學生的累積成交金額（與已轉高定義完全一致）
+    try {
+      const dealAmountQuery = `
+        SELECT
+          LOWER(TRIM(t.student_email)) as email,
+          SUM(CAST(REGEXP_REPLACE(e.actual_amount, '[^0-9.]', '', 'g') AS NUMERIC)) as total_amount
+        FROM trial_class_purchases t
+        INNER JOIN eods_for_closers e
+          ON LOWER(TRIM(e.student_email)) = LOWER(TRIM(t.student_email))
+        WHERE e.actual_amount IS NOT NULL
+          AND e.actual_amount != 'NT$0.00'
+          AND e.deal_date IS NOT NULL
+          AND e.deal_date >= t.purchase_date
+          AND (e.plan LIKE '%高階一對一訓練%')
+        GROUP BY LOWER(TRIM(t.student_email))
+      `;
 
-      // 🆕 計算最早上課日期（取代購買日期）
-      const firstClassDate = student.classDates.length > 0
-        ? new Date(Math.min(...student.classDates.map(d => new Date(d).getTime())))
-        : null;
+      const dealAmountResult = await queryDatabase(dealAmountQuery);
+      const dealAmountMap = new Map<string, number>();
 
-      eodsData.forEach((row) => {
-        const email = (resolveField(row.data, 'studentEmail') || '').toLowerCase();
-        if (email !== student.email) return;
-
-        // 取得成交日期和方案
-        const dealDateRaw = resolveField(row.data, 'dealDate') || row.data?.成交日期 || row.data?.deal_date;
-        const dealDate = parseDateField(dealDateRaw);
-        const plan = (
-          row.plan ||
-          row.data?.plan ||
-          row.data?.成交方案 ||
-          row.data?.方案名稱 ||
-          resolveField(row.data, 'plan') ||
-          ''
-        );
-
-        // 🆕 只計算：1) 最早上課日期之後的 2) 高階方案（嚴格檢查）
-        const isHighLevelPlan = plan.includes('高階一對一') || plan.includes('高音');
-
-        if (isHighLevelPlan && firstClassDate && dealDate && dealDate >= firstClassDate) {
-          const amount = parseNumberField(resolveField(row.data, 'dealAmount'));
-          if (amount) {
-            totalDealAmount += amount;
-          }
-        }
+      dealAmountResult.rows.forEach((row: any) => {
+        dealAmountMap.set(row.email, parseFloat(row.total_amount) || 0);
       });
 
-      if (totalDealAmount > 0) {
-        student.dealAmount = totalDealAmount;
-      }
-    });
+      console.log(`✅ 查詢到 ${dealAmountMap.size} 位學生的累積成交金額`);
+
+      // 設置每位學生的累積金額
+      studentMap.forEach((student) => {
+        const normalizedEmail = student.email.toLowerCase().trim();
+        const amount = dealAmountMap.get(normalizedEmail) || 0;
+        if (amount > 0) {
+          student.dealAmount = amount;
+        }
+      });
+    } catch (error) {
+      console.warn('⚠️ 無法查詢累積成交金額:', error);
+    }
 
     // 🆕 Step 3.5: 重新計算目前狀態（基於新的邏輯）
     // 優先級：已轉高 > 未轉高 > 體驗中 > 未開始
     studentMap.forEach((student) => {
       const hasAttendance = student.classDates.length > 0;
-      const hasHighLevelDeal = student.dealAmount > 0;
       const noRemainingClasses = student.remainingTrialClasses === 0;
 
-      if (hasHighLevelDeal) {
-        // 1. 優先級最高：有成交記錄 → 已轉高
+      // 🆕 使用 SQL 查詢結果判斷是否已轉高（更準確）
+      const normalizedEmail = student.email ? student.email.toLowerCase().trim() : '';
+      const isConverted = convertedStudentsSet.has(normalizedEmail);
+
+      if (isConverted) {
+        // 1. 優先級最高：符合已轉高定義 → 已轉高
         student.currentStatus = '已轉高';
       } else if (noRemainingClasses && hasAttendance) {
         // 2. 剩餘堂數 = 0 且沒有成交 → 未轉高
@@ -1747,8 +1770,11 @@ export class TotalReportService {
       }
 
       // Parse actual_amount（eods_for_closers 專用）
-      let actualAmount = row.actual_amount;
-      if (!actualAmount && row.raw_data) {
+      // actual_amount 可能是字串格式（如 "NT$68,000.00"），需要解析為數字
+      let actualAmount: number | undefined = undefined;
+      if (row.actual_amount) {
+        actualAmount = parseNumberField(row.actual_amount) || undefined;
+      } else if (row.raw_data) {
         const rawActualAmount = resolveField(row.raw_data, 'actualAmount');
         actualAmount = parseNumberField(rawActualAmount) || undefined;
       }
