@@ -14,6 +14,7 @@ export interface StudentListItem {
   first_contact_date: string | null;
   last_interaction_date: string | null;
   conversion_status: string | null;
+  consultation_status: string | null;
   is_deleted: boolean;
   deleted_at: string | null;
   created_at: string;
@@ -51,7 +52,8 @@ interface UseStudentsListParams {
   // Filter params
   teacher?: string;
   consultant?: string;
-  conversionStatus?: 'purchased' | 'in_progress' | 'not_purchased' | '';
+  conversionStatus?: 'renewed_high' | 'purchased_high' | 'purchased_trial' | 'not_purchased' | '';
+  consultationStatus?: 'consulted' | 'no_show' | 'not_consulted' | '';
   lastInteraction?: 'today' | '3days' | '7days' | '30days' | 'over30days' | '';
 }
 
@@ -63,10 +65,11 @@ export function useStudentsList({
   teacher = '',
   consultant = '',
   conversionStatus = '',
+  consultationStatus = '',
   lastInteraction = ''
 }: UseStudentsListParams = {}) {
   return useQuery({
-    queryKey: ['students-list', page, limit, search, showDeleted, teacher, consultant, conversionStatus, lastInteraction],
+    queryKey: ['students-list', page, limit, search, showDeleted, teacher, consultant, conversionStatus, consultationStatus, lastInteraction],
     queryFn: async (): Promise<StudentsListResponse> => {
       const params = new URLSearchParams({
         page: page.toString(),
@@ -79,6 +82,7 @@ export function useStudentsList({
       if (teacher) params.append('teacher', teacher);
       if (consultant) params.append('consultant', consultant);
       if (conversionStatus) params.append('conversionStatus', conversionStatus);
+      if (consultationStatus) params.append('consultationStatus', consultationStatus);
       if (lastInteraction) params.append('lastInteraction', lastInteraction);
 
       const response = await fetch(`/api/students/list?${params}`, {
