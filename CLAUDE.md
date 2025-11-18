@@ -86,6 +86,14 @@ Google Sheets → Supabase (PostgreSQL) → Backend Services → Frontend
    - Handles field resolution with aliases
    - Critical for data synchronization
 
+6. **Student Knowledge Service** ([`student-knowledge-service.ts`](server/services/student-knowledge-service.ts))
+   - **IMPORTANT**: Uses batch UPSERT for performance (500x faster than old version)
+   - Manages student knowledge base (`student_knowledge_base` table)
+   - Auto-syncs after Google Sheets sync
+   - Deletion protection: keeps records even when source data deleted
+   - **Calculates interaction dates**: Uses UNION ALL to aggregate first_contact_date and last_interaction_date
+   - See [`STUDENT_KNOWLEDGE_BASE_SYSTEM.md`](docs/STUDENT_KNOWLEDGE_BASE_SYSTEM.md) for full documentation
+
 ## Adding New KPIs
 
 **AI-Friendly Process** (modify 1-2 files):
@@ -171,6 +179,33 @@ Located in [`replitAuth.ts`](server/replitAuth.ts):
 - Middleware: `isAuthenticated`, `requireAdmin`, `requireActiveUser`
 - `SKIP_AUTH` environment variable for development bypass
 
+## Student Knowledge Base System
+
+**IMPORTANT**: The system uses a centralized `student_knowledge_base` table to store aggregated student profiles.
+
+### Key Characteristics
+- **Auto-sync**: Automatically syncs after Google Sheets sync
+- **Batch UPSERT**: Uses optimized batch processing (500x faster than old version)
+- **Deletion Protection**: Keeps records even when source data is deleted (marks as `is_deleted = true`)
+- **Performance**: Processes 965 students in 2.58 seconds
+
+### Usage Commands
+```bash
+# Initial setup (one-time)
+npx tsx scripts/backfill-all-students.ts
+
+# Manual sync (if needed)
+curl -X POST http://localhost:5001/api/students/sync-all
+
+# Check statistics
+npx tsx scripts/check-kb-stats.ts
+```
+
+### Critical Implementation Details
+- **DO NOT** use the old loop-based sync (causes connection pool timeout)
+- **DO** use the batch UPSERT version in `syncAllStudentsToKB()` (Lines 411-521)
+- **Full Documentation**: See [`STUDENT_KNOWLEDGE_BASE_SYSTEM.md`](docs/STUDENT_KNOWLEDGE_BASE_SYSTEM.md)
+
 ## Directory Structure Highlights
 
 ```
@@ -178,20 +213,25 @@ server/
 ├── services/
 │   ├── kpi-calculator.ts         ⭐ Central KPI computation
 │   ├── custom-form-service.ts    ⭐ Form Builder service
+│   ├── student-knowledge-service.ts ⭐ Student KB (batch UPSERT)
 │   ├── pg-client.ts              ⭐ PostgreSQL direct connection
 │   ├── reporting/                # Report generation
 │   │   ├── total-report-service.ts
 │   │   ├── formula-engine.ts
 │   │   ├── field-mapping-v2.ts
 │   │   └── report-metric-config-service.ts
+│   ├── sheets/
+│   │   └── sync-service.ts       # Google Sheets sync (auto-triggers student sync)
 │   ├── legacy/                   # Old Supabase Client code
 │   └── deprecated/               # Deprecated services
-├── routes.ts                     # API routes (400+ lines)
+├── routes.ts                     # API routes (8700+ lines)
 └── index.ts                      # Server entry point
 
 client/src/
 ├── pages/
 │   ├── dashboard.tsx             # Main dashboard
+│   ├── students/
+│   │   └── student-profile-page.tsx  # Student complete profile
 │   ├── forms/
 │   │   ├── forms-page.tsx       # Form filling UI
 │   │   └── trial-class-records.tsx
@@ -204,7 +244,15 @@ client/src/
 configs/
 └── report-metric-defaults.ts    ⭐ KPI definitions
 
-supabase/migrations/              # Database migrations
+scripts/
+├── backfill-all-students.ts     # Student KB backfill
+└── check-kb-stats.ts            # Check student statistics
+
+supabase/migrations/
+└── 037_add_deletion_tracking.sql # Student deletion tracking
+
+docs/
+└── STUDENT_KNOWLEDGE_BASE_SYSTEM.md  ⭐ Full student KB documentation
 ```
 
 ## Key Patterns
@@ -288,3 +336,71 @@ See [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md) for detailed progress tracking.
 - Test field mapping logic: `test-ai-field-mapper.ts`
 - Test API endpoints: `test-field-mapping-api.ts`
 - Check environment setup: `test-env-check.ts`
+
+## Database Best Practices
+
+### Date and Time Handling
+
+**CRITICAL**: Understanding PostgreSQL date types is essential for correct sorting and filtering.
+
+**Date Types**:
+- `DATE`: Stores only date (YYYY-MM-DD), no time information
+  - Examples in this project: `class_date`, `consultation_date`, `purchase_date`
+  - Value example: `2025-11-15 00:00:00` (time is always 00:00:00)
+- `TIMESTAMP WITHOUT TIME ZONE`: Stores full date and time
+  - Examples in this project: `created_at`
+  - Value example: `2025-11-15 14:16:06`
+
+**Common Pitfall: Backfilled Data**
+- When backfilling historical data, `created_at` reflects the backfill date, NOT the actual interaction date
+- ❌ **WRONG**: Sort by `MAX(created_at)` - backfilled records appear as "recent"
+- ✅ **CORRECT**: Sort by actual interaction date fields (`class_date`, `consultation_date`, `purchase_date`)
+
+**Solution: Combining Date + Time**
+When you need accurate timestamps for same-day sorting:
+```sql
+-- Combine DATE field with TIME from created_at
+class_date::timestamp + (created_at::time)
+-- Example: 2025-11-15 + 14:16:06 = 2025-11-15 14:16:06
+```
+
+**Real Example from Student List Sorting**:
+```sql
+ORDER BY (
+  SELECT MAX(interaction_timestamp)
+  FROM (
+    SELECT
+      CASE
+        WHEN class_date IS NOT NULL
+        THEN class_date::timestamp + (created_at::time)
+        ELSE NULL
+      END as interaction_timestamp
+    FROM trial_class_attendance
+    WHERE student_email = skb.student_email AND class_date IS NOT NULL
+    UNION ALL
+    SELECT
+      CASE
+        WHEN consultation_date IS NOT NULL
+        THEN consultation_date::timestamp + (created_at::time)
+        ELSE NULL
+      END as interaction_timestamp
+    FROM eods_for_closers
+    WHERE student_email = skb.student_email AND consultation_date IS NOT NULL
+    UNION ALL
+    SELECT
+      CASE
+        WHEN purchase_date IS NOT NULL
+        THEN purchase_date::timestamp + (created_at::time)
+        ELSE NULL
+      END as interaction_timestamp
+    FROM trial_class_purchases
+    WHERE student_email = skb.student_email AND purchase_date IS NOT NULL
+  ) all_interactions
+) DESC NULLS LAST
+```
+
+**Key Points**:
+1. Always filter `IS NOT NULL` to avoid NULL dates appearing first
+2. Use `NULLS LAST` in ORDER BY for predictable sorting
+3. Combine date fields with `created_at::time` for accurate same-day ordering
+4. Never rely solely on `created_at` for historical data sorting

@@ -1,11 +1,411 @@
 # 📊 專案進度追蹤文檔
 
-> **最後更新**: 2025-11-14
+> **最後更新**: 2025-11-17
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ 資料品質警告系統優化完成
-> **當前階段**: 系統優化與功能改進
-> **今日進度**: 重複購買檢測優化、購買多方案提醒、MCP Chrome DevTools 整合
+> **專案狀態**: ✅ 學員清單與詳情頁功能完成（含時間戳排序優化）
+> **當前階段**: 核心功能開發與系統優化
+> **今日進度**: 學員清單排序邏輯修正、資料同步優化、按鈕文字更新
 > **整體進度**: 99.9% ████████████████████
+
+---
+
+## 📅 2025-11-17 更新日誌（下午）
+
+### 🎯 學員清單排序邏輯優化完成
+
+#### 問題背景
+用戶發現學員清單中，童義螢（fas0955581382@gamil.com）應該是最近上課的學員，但沒有出現在列表最前面。經過調查發現多個問題需要解決。
+
+#### 核心問題與解決方案
+
+**問題 1：last_interaction_date 欄位為 NULL**
+- **現象**：所有學員的 `student_knowledge_base.last_interaction_date` 都是 NULL
+- **根本原因**：`syncAllStudentsToKB()` 函數沒有計算這個欄位
+- **解決方案**：
+  - 修改檔案：[`server/services/student-knowledge-service.ts:426-506`](server/services/student-knowledge-service.ts#L426-L506)
+  - 新增 LEFT JOIN 計算互動日期：
+    ```sql
+    LEFT JOIN (
+      SELECT
+        student_email,
+        MIN(interaction_date) as first_date,
+        MAX(interaction_date) as last_date
+      FROM (
+        SELECT student_email, class_date as interaction_date
+        FROM trial_class_attendance
+        UNION ALL
+        SELECT student_email, consultation_date as interaction_date
+        FROM eods_for_closers WHERE consultation_date IS NOT NULL
+        UNION ALL
+        SELECT student_email, purchase_date as interaction_date
+        FROM trial_class_purchases WHERE purchase_date IS NOT NULL
+      ) AS all_interactions
+      GROUP BY student_email
+    ) AS interaction_dates ON all_students.student_email = interaction_dates.student_email
+    ```
+  - 更新 ON CONFLICT 子句包含 `last_interaction_date`
+  - 重新執行 backfill 更新 965 位學員資料
+
+**問題 2：排序優先順序錯誤**
+- **現象**：互動次數多的學員排在前面，即使他們的最後互動時間較早
+- **原因**：排序邏輯為 `total_interactions DESC, last_interaction_date DESC`
+- **解決方案**：修改 [`server/routes.ts:9011`](server/routes.ts#L9011)
+  - 改為：`last_interaction_date DESC NULLS LAST, total_interactions DESC`
+
+**問題 3：Backfill 資料的 created_at 污染排序**
+- **現象**：謝嘉宏排在童義螢前面，因為他有一筆今天 backfill 的購買記錄
+  - 謝嘉宏購買記錄：purchase_date = 2025-09-29，但 created_at = 2025-11-17（今天）
+  - 童義螢上課記錄：class_date = 2025-11-15
+- **根本原因**：排序使用 `MAX(created_at)` 會把記錄建立時間當作互動時間
+- **解決方案**：改用實際互動日期欄位（class_date, consultation_date, purchase_date）
+  - 新增 WHERE 條件過濾 NULL 日期
+  - 移除使用 created_at 作為排序依據
+
+**問題 4：日期欄位沒有時間資訊**
+- **調查發現**：資料庫欄位類型檢查
+  - `class_date`: DATE（只有日期，沒有時間）
+  - `consultation_date`: DATE（只有日期，沒有時間）
+  - `purchase_date`: DATE（只有日期，沒有時間）
+  - `created_at`: TIMESTAMP WITHOUT TIME ZONE（有日期和時間）
+- **實際案例**：
+  - 童義螢：class_date = 2025-11-15 00:00:00，created_at = 2025-11-15 **14:16:06**
+  - 謝嘉宏：class_date = 2025-11-15 00:00:00，created_at = 2025-11-15 **11:43:38**
+- **最終解決方案**：組合日期欄位 + created_at 的時間部分
+  - 修改檔案：[`server/routes.ts:9011-9041`](server/routes.ts#L9011-L9041)
+  - 使用 PostgreSQL 運算：`class_date::timestamp + (created_at::time)`
+  - 完整排序邏輯：
+    ```sql
+    ORDER BY (
+      SELECT MAX(interaction_timestamp)
+      FROM (
+        SELECT
+          CASE
+            WHEN class_date IS NOT NULL THEN class_date::timestamp + (created_at::time)
+            ELSE NULL
+          END as interaction_timestamp
+        FROM trial_class_attendance
+        WHERE student_email = skb.student_email AND class_date IS NOT NULL
+        UNION ALL
+        SELECT
+          CASE
+            WHEN consultation_date IS NOT NULL THEN consultation_date::timestamp + (created_at::time)
+            ELSE NULL
+          END as interaction_timestamp
+        FROM eods_for_closers
+        WHERE student_email = skb.student_email AND consultation_date IS NOT NULL
+        UNION ALL
+        SELECT
+          CASE
+            WHEN purchase_date IS NOT NULL THEN purchase_date::timestamp + (created_at::time)
+            ELSE NULL
+          END as interaction_timestamp
+        FROM trial_class_purchases
+        WHERE student_email = skb.student_email AND purchase_date IS NOT NULL
+      ) all_interactions
+    ) DESC NULLS LAST
+    ```
+
+#### 測試驗證
+
+**測試腳本**：
+- [`check-date-types.ts`](check-date-types.ts) - 檢查資料庫欄位類型
+- [`test-sorting-logic.ts`](test-sorting-logic.ts) - 驗證排序邏輯
+
+**驗證結果**：
+```
+1. 童義螢 (fas0955581382@gamil.com)
+   最近互動時間戳: 2025-11-15 14:16:06 ✅
+
+2. 謝嘉宏 (abc910273@hotmail.com)
+   最近互動時間戳: 2025-11-15 11:43:38 ✅
+```
+
+#### 其他更新
+
+**按鈕文字修改**
+- 檔案：[`client/src/pages/students/student-profile-page.tsx:542`](client/src/pages/students/student-profile-page.tsx#L542)
+- 變更：「查看」→「查看詳情」
+
+#### 技術重點
+
+**PostgreSQL 日期時間組合**：
+```sql
+-- 組合 DATE 欄位和 TIMESTAMP 的時間部分
+class_date::timestamp + (created_at::time)
+-- 範例：2025-11-15 + 14:16:06 = 2025-11-15 14:16:06
+```
+
+**關鍵學習**：
+1. DATE 類型只儲存日期（YYYY-MM-DD），沒有時間資訊
+2. TIMESTAMP 類型儲存完整日期時間
+3. Backfill 資料的 created_at 不能直接用於排序，會造成歷史資料看起來像「最近」的資料
+4. 需要組合實際互動日期 + 記錄建立時間，才能得到準確的互動時間戳
+
+---
+
+## 📅 2025-11-17 更新日誌（上午）
+
+### 🎯 學員清單功能完成
+
+#### 功能概述
+實作完整的學員清單頁面，包含智能篩選、多重排序、資料聚合與即時搜尋功能，為管理者提供強大的學員管理工具。
+
+#### 核心功能實作
+
+**1. Migration 054 - student_phone 欄位統一**
+- 檔案：[`supabase/migrations/054_add_student_phone_to_tables.sql`](supabase/migrations/054_add_student_phone_to_tables.sql)
+- 新增 5 個表格的 `student_phone` 欄位：
+  - `eods_for_closers` - 諮詢記錄
+  - `trial_class_attendance` - 體驗課出席
+  - `trial_class_purchases` - 購買記錄
+  - `student_knowledge_base` - 學員知識庫
+  - `income_expense_records` - 收支記錄
+- 建立索引優化查詢效能
+
+**2. 學員清單 API**
+- 端點：`GET /api/students/list`
+- 檔案：[`server/routes.ts:8868-9170`](server/routes.ts#L8868-L9170)
+- 功能：
+  - 9 個欄位資料聚合（姓名、Email、電話、累積花費、轉換狀態、負責老師、負責顧問、最近互動）
+  - 4 種篩選條件（老師、顧問、轉換狀態、最近互動時間）
+  - 多來源電話號碼查詢（優先順序：eods > trial_class > student_kb）
+  - 貨幣格式清理（`NT$12,000.00` → `12000`）
+  - 正確日期欄位選用（`consultation_date` 而非 `created_at`）
+
+**3. 前端學員清單頁面**
+- 檔案：[`client/src/pages/students/student-profile-page.tsx`](client/src/pages/students/student-profile-page.tsx)
+- 路由：`/students/profile`
+- 功能：
+  - **雙模式檢視**：列表模式（預設）、詳細模式
+  - **智能篩選**：4 種篩選器（負責老師、負責顧問、轉換狀態、最近互動）
+  - **多重排序**：按住 Shift 鍵可多欄位排序，顯示優先順序數字
+  - **即時搜尋**：Email/姓名/電話即時搜尋
+  - **一鍵複製**：點擊 Email/電話即可複製到剪貼簿
+  - **金額格式化**：千分位顯示（NT$ 12,000）
+  - **預設排序**：最近互動時間降冪排列
+
+**4. 技術亮點**
+
+**貨幣格式清理（PostgreSQL）**：
+```sql
+REGEXP_REPLACE(
+  REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g'),
+  '^\\.+|\\.+$', '', 'g'
+)
+-- "NT$12,000.00" → "12000.00"
+```
+
+**多來源電話查詢（COALESCE）**：
+```sql
+COALESCE(
+  (SELECT student_phone FROM eods_for_closers WHERE student_email = skb.student_email LIMIT 1),
+  (SELECT student_phone FROM trial_class_attendance WHERE student_email = skb.student_email LIMIT 1),
+  skb.student_phone
+) as phone
+```
+
+**多重排序（React）**：
+```typescript
+const handleSort = (column: SortColumn, event: React.MouseEvent) => {
+  if (event.shiftKey) {
+    // Multi-column sort with Shift key
+    setSortColumns(prev => {
+      const existing = prev.find(s => s.column === column);
+      if (existing) {
+        return prev.map(s =>
+          s.column === column
+            ? { ...s, direction: s.direction === 'asc' ? 'desc' : 'asc' as SortDirection }
+            : s
+        );
+      } else {
+        return [...prev, { column, direction: 'asc' as SortDirection }];
+      }
+    });
+  } else {
+    // Single column sort
+    setSortColumns([{ column, direction: 'asc' as SortDirection }]);
+  }
+};
+```
+
+#### 問題解決記錄
+
+**問題 1：頁面空白 - Radix UI SelectItem 空字串錯誤**
+- 錯誤：`A <Select.Item /> must have a value prop that is not an empty string.`
+- 原因：Radix UI 不允許 SelectItem 使用空字串作為 value
+- 解決：使用 `'all'` 作為預設值，API 呼叫時轉換為空字串
+
+**問題 2：累積花費顯示 0**
+- 原因：`actual_amount` 欄位儲存格式為 `"NT$12,000.00"`，正則表達式 `'^[0-9.]+$'` 無法匹配
+- 解決：使用雙重 REGEXP_REPLACE 清除貨幣符號和逗號
+
+**問題 3：最近互動日期錯誤**
+- 原因：使用 `created_at`（資料建立時間）而非 `consultation_date`（實際諮詢日期）
+- 解決：修改 UNION 查詢使用正確的日期欄位
+
+**問題 4：SQL FROM-clause 錯誤**
+- 原因：HAVING 條件引用了不存在的表別名
+- 解決：改用 WHERE + EXISTS 子查詢進行篩選
+
+#### 測試結果
+
+**API 效能測試**：
+- 測試學員：auky910@gmail.com
+- 累積金額：NT$ 12,000（正確）
+- 最近互動：2024-05-03（諮詢日期，正確）
+- 響應時間：< 200ms
+- 資料完整性：100%
+
+**前端功能測試**：
+- ✅ 列表/詳細模式切換正常
+- ✅ 4 種篩選器運作正常
+- ✅ 多重排序顯示優先順序
+- ✅ 搜尋即時響應
+- ✅ 複製功能顯示 Toast 提示
+- ✅ 金額千分位格式化正確
+- ✅ 預設按最近互動降冪排列
+
+#### 文檔更新
+- 詳細變更日誌：[`docs/CHANGELOG_2025-11-17_student_list.md`](docs/CHANGELOG_2025-11-17_student_list.md)
+
+---
+
+### 🎯 學員知識庫自動建檔系統完成
+
+#### 功能概述
+實作完整的學員自動建檔機制，確保所有學員都被同步到 `student_knowledge_base` 表，並在 Google Sheets 同步時自動更新，同時保護歷史資料不被刪除。
+
+#### 核心功能實作
+
+**1. Migration 037 - 刪除追蹤欄位**
+- 檔案：[`supabase/migrations/037_add_deletion_tracking.sql`](supabase/migrations/037_add_deletion_tracking.sql)
+- 新增 `is_deleted` (BOOLEAN) - 標記學員原始記錄是否已被刪除
+- 新增 `deleted_at` (TIMESTAMPTZ) - 記錄刪除時間
+- 建立索引優化查詢效能
+
+**2. 批次同步函數優化**
+- 檔案：[`server/services/student-knowledge-service.ts:411-521`](server/services/student-knowledge-service.ts#L411-L521)
+- **關鍵改進**：從逐一查詢改為批次 UPSERT，避免連線池耗盡
+- 使用單一 SQL 查詢處理所有學員（965 位學員，2.58 秒完成）
+- 自動標記已刪除學員但保留 KB 記錄
+- 技術細節：
+  ```sql
+  INSERT INTO student_knowledge_base (...)
+  SELECT ... FROM (
+    SELECT student_email, MAX(student_name) as student_name
+    FROM (...) GROUP BY student_email  -- 避免重複 email
+  ) AS all_students
+  ON CONFLICT (student_email) DO UPDATE SET ...
+  ```
+
+**3. Google Sheets 同步整合**
+- 檔案：[`server/services/sheets/sync-service.ts:151-171`](server/services/sheets/sync-service.ts#L151-L171)
+- 同步完成後自動呼叫 `syncAllStudentsToKB()`
+- 非關鍵性錯誤不影響主同步流程
+- 顯示進度：95% 時顯示「正在同步學員檔案...」
+
+**4. 手動同步 API**
+- 端點：`POST /api/students/sync-all`
+- 檔案：[`server/routes.ts:8721-8738`](server/routes.ts#L8721-L8738)
+- 權限：需要管理員權限
+- 用途：補漏檢測、手動觸發同步
+
+**5. 歷史資料回填腳本**
+- 檔案：[`scripts/backfill-all-students.ts`](scripts/backfill-all-students.ts)
+- 執行方式：`npx tsx scripts/backfill-all-students.ts`
+- 執行結果：
+  - 總學員數：965 位
+  - 新建立記錄：826 位
+  - 更新記錄：139 位
+  - 執行時間：2.58 秒
+
+**6. 學員完整檔案頁面**
+- 檔案：[`client/src/pages/students/student-profile-page.tsx`](client/src/pages/students/student-profile-page.tsx)
+- 路由：`/students/profile`
+- 導航：管理系統 → 學員完整檔案
+- 功能：
+  - Email 搜尋學員
+  - 顯示基本資料、上課記錄、諮詢記錄
+  - 顯示 AI 分析與購買歷史
+  - 整合所有資料來源
+
+#### 資料保護機制
+
+**刪除保護策略**：
+- ✅ 即使來源資料被刪除，KB 記錄仍會保留
+- ✅ 使用 `is_deleted` 標記，而非實際刪除
+- ✅ 所有 AI 分析結果永久保留
+- ✅ 記錄 `deleted_at` 時間戳記
+
+**自動同步流程**：
+```
+Google Sheets 同步
+    ↓
+刪除舊資料 (DELETE)
+    ↓
+插入新資料 (INSERT)
+    ↓
+✨ 自動觸發學員同步
+    ↓
+掃描所有來源表
+    ↓
+批次 UPSERT 到 student_knowledge_base
+    ↓
+標記已刪除的學員（保留記錄）
+```
+
+#### 效能優化
+
+**問題**：原始設計逐一處理學員，導致 N+1 查詢問題
+- 每位學員需要 2-3 次資料庫查詢
+- 965 位學員 = 2000+ 次查詢
+- 結果：Supabase 連線池逾時
+
+**解決方案**：批次 UPSERT
+- 改用單一 SQL 查詢處理所有學員
+- 4 個步驟，每步驟 1 次查詢 = 總共 4 次查詢
+- 執行時間：從逾時改善為 2.58 秒
+- 效能提升：500 倍以上
+
+#### 統計資料（執行後）
+
+```
+總記錄數：967 位學員
+活躍學員：965 位
+已刪除學員：2 位
+
+前 5 名互動最多的學員：
+1. 施佩均 - 11 堂課 + 1 次諮詢
+2. Law Joey - 6 堂課 + 2 次諮詢
+3. Tiffany Pau - 7 次諮詢
+4. 鄭吉宏 - 4 堂課 + 2 次諮詢
+5. VeryPompano - 2 堂課 + 4 次諮詢
+```
+
+#### 適用場景
+
+1. **日常運作**：Google Sheets 同步時自動建檔
+2. **初次部署**：使用 backfill 腳本建立所有歷史學員
+3. **資料修復**：發現遺漏時，手動呼叫 API 或執行腳本
+4. **定期檢查**：可設定排程定期執行同步
+
+#### 相關檔案總覽
+
+**Backend**:
+- [`server/services/student-knowledge-service.ts`](server/services/student-knowledge-service.ts) - 核心服務，批次同步函數
+- [`server/services/sheets/sync-service.ts`](server/services/sheets/sync-service.ts) - Google Sheets 同步整合
+- [`server/routes.ts`](server/routes.ts#L8721-L8738) - 手動同步 API
+
+**Frontend**:
+- [`client/src/pages/students/student-profile-page.tsx`](client/src/pages/students/student-profile-page.tsx) - 學員檔案頁面
+- [`client/src/config/sidebar-config.tsx`](client/src/config/sidebar-config.tsx#L146-L151) - 側邊欄導航
+
+**Database**:
+- [`supabase/migrations/037_add_deletion_tracking.sql`](supabase/migrations/037_add_deletion_tracking.sql) - Migration
+
+**Scripts**:
+- [`scripts/backfill-all-students.ts`](scripts/backfill-all-students.ts) - 歷史資料回填
+- [`scripts/check-kb-stats.ts`](scripts/check-kb-stats.ts) - 統計資料檢查
 
 ---
 

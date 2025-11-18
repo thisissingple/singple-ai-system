@@ -46,6 +46,7 @@ const StudentFollowUp = lazy(() => import("@/pages/telemarketing/student-follow-
 const GoHighLevelContacts = lazy(() => import("@/pages/leads/gohighlevel-contacts"));
 const ConsultantsPage = lazy(() => import("@/pages/reports/consultants"));
 const ConsultationQualityDetail = lazy(() => import("@/pages/consultation-quality/consultation-quality-detail"));
+const StudentProfilePage = lazy(() => import("@/pages/students/student-profile-page"));
 
 // Archive 頁面（低使用頻率，保留但移至 archive 目錄）
 const DataSourcesPage = lazy(() => import("@/pages/archive/settings/data-sources"));
@@ -115,6 +116,11 @@ function Router() {
       {/* 諮詢品質分析詳情頁 */}
       <Route path="/consultation-quality/:eodId">
         <ProtectedRoute><ConsultationQualityDetail /></ProtectedRoute>
+      </Route>
+
+      {/* 學員管理路由 */}
+      <Route path="/students/profile">
+        <ProtectedRoute><StudentProfilePage /></ProtectedRoute>
       </Route>
 
       {/* 工具路由（新，包含側邊選單） */}

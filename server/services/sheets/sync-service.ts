@@ -6,6 +6,7 @@
 
 import { GoogleSheetsAPI } from './google-sheets-api';
 import { insertAndReturn, queryDatabase } from '../pg-client';
+import { syncAllStudentsToKB } from '../student-knowledge-service';
 
 interface FieldMapping {
   googleColumn: string;
@@ -145,6 +146,30 @@ export class SyncService {
         ? `同步完成! 成功 ${syncResult.successCount} 筆，失敗 ${syncResult.errorCount} 筆`
         : `同步完成! 已同步 ${syncResult.successCount} 筆資料`;
 
+      console.log(`✅ Sync completed: ${syncResult.successCount} success, ${syncResult.errorCount} failed`);
+
+      // 🎯 同步完成後，自動建檔所有學員到 student_knowledge_base
+      try {
+        console.log(`\n📚 Starting student KB sync...`);
+        this.sendProgress({
+          mappingId,
+          stage: 'completed',
+          current: syncResult.successCount,
+          total: transformedData.length,
+          message: '正在同步學員檔案...',
+          percentage: 95,
+        });
+
+        const studentSyncResult = await syncAllStudentsToKB();
+        console.log(`✅ Student KB sync completed:`, studentSyncResult);
+        console.log(`   - Total found: ${studentSyncResult.totalFound}`);
+        console.log(`   - New students: ${studentSyncResult.newStudents}`);
+        console.log(`   - Updated students: ${studentSyncResult.existingStudents}`);
+      } catch (studentSyncError: any) {
+        // 學員同步失敗不影響主同步流程，僅記錄錯誤
+        console.error(`⚠️ Student KB sync failed (non-critical):`, studentSyncError.message);
+      }
+
       this.sendProgress({
         mappingId,
         stage: 'completed',
@@ -153,8 +178,6 @@ export class SyncService {
         message: completionMessage,
         percentage: 100,
       });
-
-      console.log(`✅ Sync completed: ${syncResult.successCount} success, ${syncResult.errorCount} failed`);
 
     } catch (error: any) {
       console.error(`❌ Sync failed:`, error.message);

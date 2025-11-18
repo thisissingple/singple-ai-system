@@ -8718,6 +8718,367 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // 6. Sync all students to knowledge base (manual trigger)
+  app.post('/api/students/sync-all', isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      console.log('🔄 Manual student KB sync triggered by:', req.user.email);
+      const studentKnowledgeService = await import('./services/student-knowledge-service');
+
+      const result = await studentKnowledgeService.syncAllStudentsToKB();
+
+      res.json({
+        success: true,
+        message: '學員檔案同步完成',
+        data: result
+      });
+    } catch (error: any) {
+      console.error('學員檔案同步失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 7. Get all students list with filters
+  app.get('/api/students/list', isAuthenticated, async (req: any, res) => {
+    try {
+      const { queryDatabase } = await import('./services/pg-client');
+
+      // Get pagination params
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const offset = (page - 1) * limit;
+      const search = req.query.search as string || '';
+      const showDeleted = req.query.showDeleted === 'true';
+
+      // Get filter params
+      const teacherFilter = req.query.teacher as string || '';
+      const consultantFilter = req.query.consultant as string || '';
+      const conversionFilter = req.query.conversionStatus as string || '';
+      const lastInteractionFilter = req.query.lastInteraction as string || '';
+
+      // Build WHERE clause
+      const whereConditions = ['1=1']; // Start with always true
+      const havingConditions = [];
+      const params: any[] = [];
+      let paramIndex = 1;
+
+      if (!showDeleted) {
+        whereConditions.push(`(skb.is_deleted = false OR skb.is_deleted IS NULL)`);
+      }
+
+      if (search) {
+        whereConditions.push(`(skb.student_name ILIKE $${paramIndex} OR skb.student_email ILIKE $${paramIndex})`);
+        params.push(`%${search}%`);
+        paramIndex++;
+      }
+
+      // Filter by teacher
+      if (teacherFilter) {
+        whereConditions.push(`EXISTS(
+          SELECT 1 FROM trial_class_attendance
+          WHERE student_email = skb.student_email
+          AND teacher_name = $${paramIndex}
+        )`);
+        params.push(teacherFilter);
+        paramIndex++;
+      }
+
+      // Filter by consultant
+      if (consultantFilter) {
+        whereConditions.push(`EXISTS(
+          SELECT 1 FROM eods_for_closers
+          WHERE student_email = skb.student_email
+          AND closer_name = $${paramIndex}
+        )`);
+        params.push(consultantFilter);
+        paramIndex++;
+      }
+
+      // Filter by conversion status (使用 actual_amount from eods_for_closers)
+      if (conversionFilter) {
+        if (conversionFilter === 'purchased') {
+          // Has actual_amount > 0 in eods_for_closers
+          whereConditions.push(`
+            EXISTS(
+              SELECT 1 FROM eods_for_closers
+              WHERE student_email = skb.student_email
+              AND actual_amount IS NOT NULL
+              AND actual_amount != ''
+              AND actual_amount ~ '^[0-9.]+$'
+              AND CAST(actual_amount AS NUMERIC) > 0
+            )
+          `);
+        } else if (conversionFilter === 'in_progress') {
+          // Has consultation records but no actual_amount
+          whereConditions.push(`
+            EXISTS(SELECT 1 FROM eods_for_closers WHERE student_email = skb.student_email)
+            AND NOT EXISTS(
+              SELECT 1 FROM eods_for_closers
+              WHERE student_email = skb.student_email
+              AND actual_amount IS NOT NULL
+              AND actual_amount != ''
+              AND actual_amount ~ '^[0-9.]+$'
+              AND CAST(actual_amount AS NUMERIC) > 0
+            )
+          `);
+        } else if (conversionFilter === 'not_purchased') {
+          // No consultation records
+          whereConditions.push(`
+            NOT EXISTS(SELECT 1 FROM eods_for_closers WHERE student_email = skb.student_email)
+          `);
+        }
+      }
+
+      // Filter by last interaction date
+      if (lastInteractionFilter) {
+        const now = new Date();
+        let daysAgo = 0;
+
+        if (lastInteractionFilter === 'today') daysAgo = 0;
+        else if (lastInteractionFilter === '3days') daysAgo = 3;
+        else if (lastInteractionFilter === '7days') daysAgo = 7;
+        else if (lastInteractionFilter === '30days') daysAgo = 30;
+        else if (lastInteractionFilter === 'over30days') {
+          whereConditions.push(`
+            (
+              SELECT MAX(latest_interaction)
+              FROM (
+                SELECT MAX(class_date) as latest_interaction
+                FROM trial_class_attendance
+                WHERE student_email = skb.student_email
+                UNION ALL
+                SELECT MAX(created_at)::date as latest_interaction
+                FROM eods_for_closers
+                WHERE student_email = skb.student_email
+                UNION ALL
+                SELECT MAX(purchase_date) as latest_interaction
+                FROM trial_class_purchases
+                WHERE student_email = skb.student_email
+              ) as all_interactions
+            ) < CURRENT_DATE - INTERVAL '30 days'
+          `);
+        }
+
+        if (daysAgo >= 0 && lastInteractionFilter !== 'over30days') {
+          whereConditions.push(`
+            (
+              SELECT MAX(latest_interaction)
+              FROM (
+                SELECT MAX(class_date) as latest_interaction
+                FROM trial_class_attendance
+                WHERE student_email = skb.student_email
+                UNION ALL
+                SELECT MAX(created_at)::date as latest_interaction
+                FROM eods_for_closers
+                WHERE student_email = skb.student_email
+                UNION ALL
+                SELECT MAX(purchase_date) as latest_interaction
+                FROM trial_class_purchases
+                WHERE student_email = skb.student_email
+              ) as all_interactions
+            ) >= CURRENT_DATE - INTERVAL '${daysAgo} days'
+          `);
+        }
+      }
+
+      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+      const havingClause = havingConditions.length > 0 ? `HAVING ${havingConditions.join(' AND ')}` : '';
+
+      // Get total count (need to use subquery for HAVING clause)
+      const countQuery = `
+        SELECT COUNT(*) as total
+        FROM (
+          SELECT skb.student_email
+          FROM student_knowledge_base skb
+          LEFT JOIN trial_class_attendance tca ON skb.student_email = tca.student_email
+          LEFT JOIN eods_for_closers eods ON skb.student_email = eods.student_email
+          LEFT JOIN trial_class_purchases tcp ON skb.student_email = tcp.student_email
+          ${whereClause}
+          GROUP BY skb.student_email
+          ${havingClause}
+        ) AS filtered_students
+      `;
+
+      const countResult = await queryDatabase(countQuery, params);
+      const total = parseInt(countResult.rows[0].total);
+
+      // Get students list with all required fields
+      params.push(limit);
+      const limitParam = paramIndex;
+      paramIndex++;
+      params.push(offset);
+      const offsetParam = paramIndex;
+
+      const studentsResult = await queryDatabase(`
+        SELECT
+          skb.id,
+          skb.student_email,
+          skb.student_name,
+          skb.total_classes,
+          skb.total_consultations,
+          skb.total_interactions,
+          skb.first_contact_date,
+          skb.last_interaction_date,
+          skb.is_deleted,
+
+          -- Phone (從多個來源取得最新的)
+          COALESCE(
+            (SELECT student_phone FROM eods_for_closers
+             WHERE student_email = skb.student_email
+             AND student_phone IS NOT NULL
+             ORDER BY created_at DESC LIMIT 1),
+            (SELECT student_phone FROM trial_class_attendance
+             WHERE student_email = skb.student_email
+             AND student_phone IS NOT NULL
+             ORDER BY class_date DESC LIMIT 1),
+            (SELECT student_phone FROM ad_leads
+             WHERE student_email = skb.student_email
+             AND student_phone IS NOT NULL
+             ORDER BY created_at DESC LIMIT 1)
+          ) as phone,
+
+          -- Total spent (累積花費 - 使用 actual_amount，移除貨幣符號和逗號)
+          COALESCE(
+            (SELECT SUM(
+               CAST(
+                 REGEXP_REPLACE(
+                   REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g'),
+                   '^\\.+|\\.+$', '', 'g'
+                 ) AS NUMERIC
+               )
+             )
+             FROM eods_for_closers
+             WHERE student_email = skb.student_email
+             AND actual_amount IS NOT NULL
+             AND actual_amount != ''
+             AND REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') ~ '^[0-9.]+$'),
+            0
+          ) as total_spent,
+
+          -- Conversion status (轉換狀態 - 根據 actual_amount，移除貨幣符號)
+          CASE
+            WHEN EXISTS(
+              SELECT 1 FROM eods_for_closers
+              WHERE student_email = skb.student_email
+              AND actual_amount IS NOT NULL
+              AND actual_amount != ''
+              AND REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') ~ '^[0-9.]+$'
+              AND CAST(REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') AS NUMERIC) > 0
+            ) THEN 'purchased'
+            WHEN EXISTS(SELECT 1 FROM eods_for_closers WHERE student_email = skb.student_email) THEN 'in_progress'
+            ELSE 'not_purchased'
+          END as conversion_status,
+
+          -- Teacher (最近的負責老師)
+          (SELECT teacher_name FROM trial_class_attendance
+           WHERE student_email = skb.student_email
+           ORDER BY class_date DESC LIMIT 1) as teacher,
+
+          -- Consultant (最近的諮詢師 closer_name)
+          (SELECT closer_name FROM eods_for_closers
+           WHERE student_email = skb.student_email
+           ORDER BY created_at DESC LIMIT 1) as consultant,
+
+          -- Last interaction type and date (使用實際日期而非 created_at)
+          (
+            SELECT json_build_object(
+              'type', interaction_type,
+              'date', interaction_date
+            )
+            FROM (
+              SELECT 'class' as interaction_type, class_date::text as interaction_date
+              FROM trial_class_attendance
+              WHERE student_email = skb.student_email
+              UNION ALL
+              SELECT 'consultation' as interaction_type, consultation_date::text as interaction_date
+              FROM eods_for_closers
+              WHERE student_email = skb.student_email
+              AND consultation_date IS NOT NULL
+              UNION ALL
+              SELECT 'purchase' as interaction_type, purchase_date::text as interaction_date
+              FROM trial_class_purchases
+              WHERE student_email = skb.student_email
+              ORDER BY interaction_date DESC
+              LIMIT 1
+            ) as latest
+          ) as last_interaction
+
+        FROM student_knowledge_base skb
+        ${whereClause}
+        GROUP BY skb.id, skb.student_email, skb.student_name, skb.total_classes,
+                 skb.total_consultations, skb.total_interactions, skb.first_contact_date,
+                 skb.last_interaction_date, skb.is_deleted
+        ${havingClause}
+        ORDER BY (
+          SELECT MAX(interaction_timestamp)
+          FROM (
+            SELECT
+              CASE
+                WHEN class_date IS NOT NULL THEN class_date::timestamp + (created_at::time)
+                ELSE NULL
+              END as interaction_timestamp
+            FROM trial_class_attendance
+            WHERE student_email = skb.student_email
+            AND class_date IS NOT NULL
+            UNION ALL
+            SELECT
+              CASE
+                WHEN consultation_date IS NOT NULL THEN consultation_date::timestamp + (created_at::time)
+                ELSE NULL
+              END as interaction_timestamp
+            FROM eods_for_closers
+            WHERE student_email = skb.student_email
+            AND consultation_date IS NOT NULL
+            UNION ALL
+            SELECT
+              CASE
+                WHEN purchase_date IS NOT NULL THEN purchase_date::timestamp + (created_at::time)
+                ELSE NULL
+              END as interaction_timestamp
+            FROM trial_class_purchases
+            WHERE student_email = skb.student_email
+            AND purchase_date IS NOT NULL
+          ) all_interactions
+        ) DESC NULLS LAST
+        LIMIT $${limitParam} OFFSET $${offsetParam}
+      `, params);
+
+      // Get filter options (teachers, consultants)
+      const teachersResult = await queryDatabase(`
+        SELECT DISTINCT teacher_name
+        FROM trial_class_attendance
+        WHERE teacher_name IS NOT NULL AND teacher_name != ''
+        ORDER BY teacher_name
+      `);
+
+      const consultantsResult = await queryDatabase(`
+        SELECT DISTINCT closer_name as consultant
+        FROM eods_for_closers
+        WHERE closer_name IS NOT NULL AND closer_name != ''
+        ORDER BY closer_name
+      `);
+
+      res.json({
+        success: true,
+        data: {
+          students: studentsResult.rows,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit)
+          },
+          filterOptions: {
+            teachers: teachersResult.rows.map(r => r.teacher_name),
+            consultants: consultantsResult.rows.map(r => r.consultant)
+          }
+        }
+      });
+    } catch (error: any) {
+      console.error('取得學員列表失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ===================================
   // Google Sheets 同步 API (Phase 39)
   // ===================================

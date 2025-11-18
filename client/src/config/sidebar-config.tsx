@@ -28,6 +28,7 @@ import {
   MessageSquare,
   Shield,
   RefreshCw,
+  UserCircle,
 } from 'lucide-react';
 import { SidebarSectionConfig } from '@/components/layout/sidebar';
 import type { Role } from './permissions';
@@ -140,6 +141,12 @@ export const sidebarConfig: SidebarSection[] = [
         label: '儀表板總覽',
         href: '/',
         icon: LayoutDashboard,
+        requiredModule: 'dashboard',
+      },
+      {
+        label: '學員完整檔案',
+        href: '/students/profile',
+        icon: UserCircle,
         requiredModule: 'dashboard',
       },
       {

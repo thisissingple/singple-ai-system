@@ -117,6 +117,7 @@ export async function getOrCreateStudentKB(
 
 /**
  * Sync student stats from actual database records
+ * Also tracks if student records have been deleted
  */
 export async function syncStudentStats(studentEmail: string): Promise<void> {
   await queryDatabase(`
@@ -132,6 +133,20 @@ export async function syncStudentStats(studentEmail: string): Promise<void> {
         (SELECT student_name FROM trial_class_attendance WHERE student_email = $1 LIMIT 1),
         student_name
       ),
+      -- Mark as deleted if no records exist in any table
+      is_deleted = (
+        (SELECT COUNT(*) FROM trial_class_attendance WHERE student_email = $1) = 0 AND
+        (SELECT COUNT(*) FROM eods_for_closers WHERE student_email = $1) = 0 AND
+        (SELECT COUNT(*) FROM trial_class_purchases WHERE student_email = $1) = 0
+      ),
+      deleted_at = CASE
+        WHEN (
+          (SELECT COUNT(*) FROM trial_class_attendance WHERE student_email = $1) = 0 AND
+          (SELECT COUNT(*) FROM eods_for_closers WHERE student_email = $1) = 0 AND
+          (SELECT COUNT(*) FROM trial_class_purchases WHERE student_email = $1) = 0
+        ) THEN NOW()
+        ELSE deleted_at
+      END,
       updated_at = NOW()
     WHERE student_email = $1
   `, [studentEmail]);
@@ -385,4 +400,148 @@ export async function saveInsightToKnowledgeBase(
         updated_at = NOW()
     WHERE student_email = $2
   `, [JSON.stringify(profileSummary), studentEmail]);
+}
+
+/**
+ * Sync all students from source tables to student_knowledge_base
+ * This is used after Google Sheets sync to ensure all students are in the KB
+ *
+ * Optimized version using batch UPSERT to avoid connection pool exhaustion
+ */
+export async function syncAllStudentsToKB(): Promise<{
+  totalFound: number;
+  newStudents: number;
+  existingStudents: number;
+}> {
+  console.log('📊 Step 1: Getting count of existing KB records...');
+
+  // Get count of existing records before sync
+  const beforeCountResult = await queryDatabase(`
+    SELECT COUNT(*) as count FROM student_knowledge_base
+  `);
+  const beforeCount = parseInt(beforeCountResult.rows[0].count);
+
+  console.log(`📊 Step 2: Performing batch UPSERT of all students...`);
+
+  // Use a single query to UPSERT all students at once
+  // This avoids the N+1 query problem and prevents connection pool exhaustion
+  const result = await queryDatabase(`
+    -- Insert or update all students in one go
+    INSERT INTO student_knowledge_base (
+      student_email,
+      student_name,
+      first_contact_date,
+      last_interaction_date,
+      total_classes,
+      total_consultations,
+      total_interactions,
+      is_deleted,
+      deleted_at
+    )
+    SELECT
+      all_students.student_email,
+      all_students.student_name,
+      COALESCE(interaction_dates.first_date, CURRENT_DATE) as first_contact_date,
+      interaction_dates.last_date as last_interaction_date,
+      COALESCE(class_counts.class_count, 0) as total_classes,
+      COALESCE(consult_counts.consult_count, 0) as total_consultations,
+      COALESCE(class_counts.class_count, 0) + COALESCE(consult_counts.consult_count, 0) as total_interactions,
+      false as is_deleted,
+      NULL as deleted_at
+    FROM (
+      SELECT
+        student_email,
+        MAX(student_name) as student_name
+      FROM (
+        SELECT student_email, student_name FROM trial_class_attendance
+        UNION ALL
+        SELECT student_email, student_name FROM eods_for_closers
+        UNION ALL
+        SELECT student_email, student_name FROM trial_class_purchases
+      ) AS combined
+      WHERE student_email IS NOT NULL AND student_email != ''
+      GROUP BY student_email
+    ) AS all_students
+    LEFT JOIN (
+      SELECT student_email, COUNT(*) as class_count
+      FROM trial_class_attendance
+      GROUP BY student_email
+    ) AS class_counts ON all_students.student_email = class_counts.student_email
+    LEFT JOIN (
+      SELECT student_email, COUNT(*) as consult_count
+      FROM eods_for_closers
+      GROUP BY student_email
+    ) AS consult_counts ON all_students.student_email = consult_counts.student_email
+    LEFT JOIN (
+      SELECT
+        student_email,
+        MIN(interaction_date) as first_date,
+        MAX(interaction_date) as last_date
+      FROM (
+        SELECT student_email, class_date as interaction_date
+        FROM trial_class_attendance
+        UNION ALL
+        SELECT student_email, consultation_date as interaction_date
+        FROM eods_for_closers
+        WHERE consultation_date IS NOT NULL
+        UNION ALL
+        SELECT student_email, purchase_date as interaction_date
+        FROM trial_class_purchases
+        WHERE purchase_date IS NOT NULL
+      ) AS all_interactions
+      GROUP BY student_email
+    ) AS interaction_dates ON all_students.student_email = interaction_dates.student_email
+    ON CONFLICT (student_email)
+    DO UPDATE SET
+      student_name = EXCLUDED.student_name,
+      first_contact_date = EXCLUDED.first_contact_date,
+      last_interaction_date = EXCLUDED.last_interaction_date,
+      total_classes = EXCLUDED.total_classes,
+      total_consultations = EXCLUDED.total_consultations,
+      total_interactions = EXCLUDED.total_interactions,
+      is_deleted = false,
+      deleted_at = NULL,
+      updated_at = NOW()
+    RETURNING student_email
+  `);
+
+  console.log(`📊 Step 3: Marking deleted students...`);
+
+  // Mark students as deleted if they have no source records
+  await queryDatabase(`
+    UPDATE student_knowledge_base
+    SET
+      is_deleted = true,
+      deleted_at = NOW(),
+      updated_at = NOW()
+    WHERE student_email NOT IN (
+      SELECT DISTINCT student_email FROM (
+        SELECT student_email FROM trial_class_attendance
+        UNION
+        SELECT student_email FROM eods_for_closers
+        UNION
+        SELECT student_email FROM trial_class_purchases
+      ) AS active_students
+      WHERE student_email IS NOT NULL
+    )
+    AND (is_deleted = false OR is_deleted IS NULL)
+  `);
+
+  console.log(`📊 Step 4: Getting final count...`);
+
+  // Get count after sync
+  const afterCountResult = await queryDatabase(`
+    SELECT COUNT(*) as count FROM student_knowledge_base
+  `);
+  const afterCount = parseInt(afterCountResult.rows[0].count);
+
+  const totalSynced = result.rows.length;
+  const newStudents = afterCount - beforeCount;
+  const existingStudents = totalSynced - newStudents;
+
+  return {
+    totalFound: totalSynced,
+    newStudents: Math.max(0, newStudents), // Ensure non-negative
+    existingStudents: Math.max(0, existingStudents)
+  };
 }
