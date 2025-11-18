@@ -688,9 +688,12 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
           objection_handling_comment,
           closing_technique_score,
           closing_technique_comment,
-          raw_markdown_output
+          raw_markdown_output,
+          tokens_used,
+          response_time_ms,
+          api_cost_usd
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
         )
         RETURNING *
       `;
@@ -718,6 +721,9 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
         analysis.closingTechniqueScore,
         analysis.closingTechniqueComment,
         analysis.rawMarkdownOutput,  // Raw AI markdown output
+        analysis.tokensUsed || null,
+        analysis.responseTimeMs || null,
+        analysis.apiCostUsd || null,
       ]);
 
       // DEBUG: Log what was saved

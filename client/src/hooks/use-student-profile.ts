@@ -140,7 +140,10 @@ export interface StudentFullContext {
   trialClasses: TrialClassRecord[];
   eodsRecords: EodsRecord[];
   aiAnalyses: AIAnalysisRecord[];
+  consultationAnalyses: any[];  // Consultation AI analyses
+  aiConversations: any[];  // AI conversations
   purchases: PurchaseRecord[];
+  totalAiCost: number;  // Total AI cost from all sources
 }
 
 export interface PresetQuestion {

@@ -1,21 +1,25 @@
 /**
  * AI Insights Panel
- * AI 預生成洞察面板
+ * AI 預生成洞察面板 + AI 對話框
  */
 
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
+import { Sparkles, ChevronDown, ChevronUp, MessageSquare } from 'lucide-react';
 import type { StudentKnowledgeBase } from '@/hooks/use-student-profile';
 import ReactMarkdown from 'react-markdown';
+import { AIChatBox } from './ai-chat-box';
 
 interface AIInsightsPanelProps {
   kb: StudentKnowledgeBase;
+  studentEmail: string;
+  studentName: string;
 }
 
-export function AIInsightsPanel({ kb }: AIInsightsPanelProps) {
+export function AIInsightsPanel({ kb, studentEmail, studentName }: AIInsightsPanelProps) {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     painPointAnalysis: false,
     conversionStrategy: false,
@@ -37,24 +41,6 @@ export function AIInsightsPanel({ kb }: AIInsightsPanelProps) {
     insights?.conversionStrategy ||
     insights?.executionEvaluation ||
     insights?.nextSteps;
-
-  if (!hasAnyInsights) {
-    return (
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-yellow-500" />
-            <CardTitle>AI 智能洞察</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center text-muted-foreground py-8">
-            尚無 AI 預生成的洞察分析
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
 
   const formatDate = (dateStr: string | undefined) => {
     if (!dateStr) return '';
@@ -188,7 +174,23 @@ export function AIInsightsPanel({ kb }: AIInsightsPanelProps) {
             )}
           </div>
         )}
+
+        {/* AI 對話框區塊 */}
+        {hasAnyInsights && (
+          <>
+            <Separator className="my-6" />
+            <div className="flex items-center gap-2 mb-4">
+              <MessageSquare className="w-5 h-5 text-purple-500" />
+              <h3 className="text-lg font-semibold">AI 對話助手</h3>
+            </div>
+          </>
+        )}
       </CardContent>
+
+      {/* AI 對話框（獨立於 Card） */}
+      <div className="mt-4">
+        <AIChatBox studentEmail={studentEmail} studentName={studentName} />
+      </div>
     </Card>
   );
 }

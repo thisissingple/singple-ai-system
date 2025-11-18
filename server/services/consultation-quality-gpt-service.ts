@@ -58,6 +58,11 @@ export interface ConsultationQualityAnalysis {
 
   // Raw AI output (for display purposes)
   rawMarkdownOutput: string;                 // AI 生成的原始 Markdown 輸出
+
+  // Cost tracking
+  tokensUsed?: number;                       // Total tokens used
+  responseTimeMs?: number;                   // API response time in milliseconds
+  apiCostUsd?: number;                       // Cost in USD
 }
 
 // ============================================================================
@@ -432,6 +437,8 @@ export class ConsultationQualityGPTService {
    * Analyze consultation quality from transcript
    */
   async analyzeConsultationQuality(transcript: string): Promise<ConsultationQualityAnalysis> {
+    const startTime = Date.now();
+
     try {
       const openai = this.getOpenAI();
       const config = await this.loadConfig(); // Load config from database
@@ -446,16 +453,27 @@ export class ConsultationQualityGPTService {
         max_tokens: config.max_tokens,
       });
 
+      const responseTimeMs = Date.now() - startTime;
+      const tokensUsed = completion.usage?.total_tokens || 0;
+
+      // Calculate cost based on model pricing (gpt-4o)
+      const inputTokens = completion.usage?.prompt_tokens || 0;
+      const outputTokens = completion.usage?.completion_tokens || 0;
+      const apiCostUsd = (inputTokens * 0.0025 / 1000) + (outputTokens * 0.01 / 1000);
+
       const content = completion.choices[0]?.message?.content;
       if (!content) {
         throw new Error('No content returned from OpenAI API');
       }
 
       const analysis = parseAnalysisOutput(content);
-      // Add raw markdown output
+      // Add raw markdown output and cost tracking
       return {
         ...analysis,
         rawMarkdownOutput: content,
+        tokensUsed,
+        responseTimeMs,
+        apiCostUsd,
       };
     } catch (error) {
       console.error('Error analyzing consultation quality:', error);

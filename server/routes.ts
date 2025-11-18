@@ -8921,7 +8921,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ) AS filtered_students
       `;
 
-      const countResult = await queryDatabase(countQuery, params);
+      const countResult = await queryDatabase(countQuery, params, 'session');
       const total = parseInt(countResult.rows[0].total);
 
       // Get students list with all required fields
@@ -9103,7 +9103,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ) all_interactions
         ) DESC NULLS LAST
         LIMIT $${limitParam} OFFSET $${offsetParam}
-      `, params);
+      `, params, 'session');
 
       // Get filter options (teachers, consultants)
       const teachersResult = await queryDatabase(`
@@ -9111,14 +9111,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         FROM trial_class_attendance
         WHERE teacher_name IS NOT NULL AND teacher_name != ''
         ORDER BY teacher_name
-      `);
+      `, [], 'session');
 
       const consultantsResult = await queryDatabase(`
         SELECT DISTINCT closer_name as consultant
         FROM eods_for_closers
         WHERE closer_name IS NOT NULL AND closer_name != ''
         ORDER BY closer_name
-      `);
+      `, [], 'session');
 
       res.json({
         success: true,

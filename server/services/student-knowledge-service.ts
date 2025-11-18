@@ -240,7 +240,10 @@ export async function getStudentFullContext(studentEmail: string): Promise<{
   trialClasses: any[];
   eodsRecords: any[];
   aiAnalyses: any[];
+  consultationAnalyses: any[];
+  aiConversations: any[];
   purchases: any[];
+  totalAiCost: number;
 }> {
   // Get KB
   const kb = await getOrCreateStudentKB(studentEmail, 'Unknown');
@@ -268,6 +271,13 @@ export async function getStudentFullContext(studentEmail: string): Promise<{
     ORDER BY analyzed_at ASC
   `, [kb.student_name, studentEmail]);
 
+  // Get AI conversations
+  const conversationsResult = await queryDatabase(`
+    SELECT * FROM teacher_ai_conversations
+    WHERE student_email = $1
+    ORDER BY created_at ASC
+  `, [studentEmail]);
+
   // Get purchases
   const purchasesResult = await queryDatabase(`
     SELECT * FROM trial_class_purchases
@@ -275,12 +285,50 @@ export async function getStudentFullContext(studentEmail: string): Promise<{
     ORDER BY purchase_date ASC
   `, [studentEmail]);
 
+  // Get consultation AI analyses
+  const consultationAnalysesResult = await queryDatabase(`
+    SELECT * FROM consultation_quality_analysis
+    WHERE student_name = $1
+    ORDER BY analyzed_at ASC
+  `, [kb.student_name]);
+
+  // Calculate total AI cost from ALL sources
+  const costResult = await queryDatabase(`
+    SELECT
+      COALESCE(SUM(conv_cost), 0) + COALESCE(SUM(analysis_cost), 0) + COALESCE(SUM(consultation_cost), 0) as total_cost
+    FROM (
+      -- AI Conversations
+      SELECT COALESCE(SUM(api_cost_usd), 0) as conv_cost, 0 as analysis_cost, 0 as consultation_cost
+      FROM teacher_ai_conversations
+      WHERE student_email = $1
+
+      UNION ALL
+
+      -- Teaching Quality Analyses (trial class transcript analyses)
+      SELECT 0 as conv_cost, COALESCE(SUM(api_cost_usd), 0) as analysis_cost, 0 as consultation_cost
+      FROM teaching_quality_analysis
+      WHERE student_name = (SELECT student_name FROM student_knowledge_base WHERE student_email = $1 LIMIT 1)
+
+      UNION ALL
+
+      -- Consultation Quality Analyses (consultation transcript analyses)
+      SELECT 0 as conv_cost, 0 as analysis_cost, COALESCE(SUM(api_cost_usd), 0) as consultation_cost
+      FROM consultation_quality_analysis
+      WHERE student_name = (SELECT student_name FROM student_knowledge_base WHERE student_email = $1 LIMIT 1)
+    ) all_costs
+  `, [studentEmail]);
+
+  const totalAiCost = parseFloat(costResult.rows[0]?.total_cost || 0);
+
   return {
     kb,
     trialClasses: classesResult.rows,
     eodsRecords: eodsResult.rows,
     aiAnalyses: analysesResult.rows,
-    purchases: purchasesResult.rows
+    consultationAnalyses: consultationAnalysesResult.rows,
+    aiConversations: conversationsResult.rows,
+    purchases: purchasesResult.rows,
+    totalAiCost
   };
 }
 

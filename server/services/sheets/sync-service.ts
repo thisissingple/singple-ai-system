@@ -251,7 +251,9 @@ export class SyncService {
    */
   private async clearTable(table: string): Promise<void> {
     console.log(`🗑️  Clearing table ${table}...`);
-    await queryDatabase(`DELETE FROM ${table}`);
+    // ✅ 使用 'session' mode 執行 DELETE（寫入操作）
+    await queryDatabase(`DELETE FROM ${table}`, [], 'session');
+    console.log(`✅ Table ${table} cleared successfully`);
   }
 
   /**
@@ -376,7 +378,8 @@ export class SyncService {
       VALUES ${placeholders.join(', ')}
     `;
 
-    await queryDatabase(sql, values);
+    // ✅ 使用 'session' mode 執行 INSERT（寫入操作）
+    await queryDatabase(sql, values, 'session');
   }
 
   /**

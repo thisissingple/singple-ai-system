@@ -21,6 +21,7 @@ import { StudentProfileCard } from '@/components/student-profile/student-profile
 import { StudentTimeline } from '@/components/student-profile/student-timeline';
 import { StudentInsightsPanel } from '@/components/student-profile/student-insights-panel';
 import { AIInsightsPanel } from '@/components/student-profile/ai-insights-panel';
+import { KnowledgeBaseHistory } from '@/components/student-profile/knowledge-base-history';
 import { CopyableTableCell } from '@/components/ui/copyable-text';
 
 export default function StudentProfilePage() {
@@ -668,14 +669,15 @@ export default function StudentProfilePage() {
             {profileData && !profileLoading && (
               <div className="space-y-6">
                 {/* Profile Card */}
-                <StudentProfileCard kb={profileData.kb} />
+                <StudentProfileCard kb={profileData.kb} totalAiCost={profileData.totalAiCost} />
 
                 {/* Tabs */}
                 <Tabs defaultValue="timeline" className="w-full">
-                  <TabsList className="grid w-full grid-cols-3">
+                  <TabsList className="grid w-full grid-cols-4">
                     <TabsTrigger value="timeline">互動歷程</TabsTrigger>
                     <TabsTrigger value="insights">學員洞察</TabsTrigger>
-                    <TabsTrigger value="ai">AI 分析</TabsTrigger>
+                    <TabsTrigger value="ai">AI 對話</TabsTrigger>
+                    <TabsTrigger value="kb-history">知識庫歷程</TabsTrigger>
                   </TabsList>
 
                   {/* Timeline Tab */}
@@ -695,41 +697,27 @@ export default function StudentProfilePage() {
 
                   {/* AI Analysis Tab */}
                   <TabsContent value="ai" className="mt-6">
-                    <AIInsightsPanel kb={profileData.kb} />
+                    <AIInsightsPanel
+                      kb={profileData.kb}
+                      studentEmail={searchEmail || ''}
+                      studentName={profileData.kb.student_name}
+                    />
+                  </TabsContent>
+
+                  {/* Knowledge Base History Tab */}
+                  <TabsContent value="kb-history" className="mt-6">
+                    <KnowledgeBaseHistory
+                      studentEmail={searchEmail || ''}
+                      dataSources={profileData.kb.data_sources}
+                      trialClasses={profileData.trialClasses}
+                      eodsRecords={profileData.eodsRecords}
+                      aiAnalyses={profileData.aiAnalyses}
+                      consultationAnalyses={profileData.consultationAnalyses || []}
+                      aiConversations={profileData.aiConversations || []}
+                      purchases={profileData.purchases}
+                    />
                   </TabsContent>
                 </Tabs>
-
-                {/* Data Summary */}
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                      <div>
-                        <div className="text-2xl font-bold text-blue-600">
-                          {profileData.trialClasses.length}
-                        </div>
-                        <div className="text-sm text-muted-foreground">上課記錄</div>
-                      </div>
-                      <div>
-                        <div className="text-2xl font-bold text-purple-600">
-                          {profileData.eodsRecords.length}
-                        </div>
-                        <div className="text-sm text-muted-foreground">諮詢記錄</div>
-                      </div>
-                      <div>
-                        <div className="text-2xl font-bold text-green-600">
-                          {profileData.purchases.length}
-                        </div>
-                        <div className="text-sm text-muted-foreground">購買記錄</div>
-                      </div>
-                      <div>
-                        <div className="text-2xl font-bold text-orange-600">
-                          {profileData.aiAnalyses.length}
-                        </div>
-                        <div className="text-sm text-muted-foreground">AI 分析</div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
               </div>
             )}
 

@@ -5,24 +5,27 @@
 
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { User, Mail, Calendar, TrendingUp, CheckCircle2, Clock } from 'lucide-react';
+import { User, Mail, Calendar, TrendingUp, CheckCircle2, Clock, DollarSign } from 'lucide-react';
 import type { StudentKnowledgeBase } from '@/hooks/use-student-profile';
 
 interface StudentProfileCardProps {
   kb: StudentKnowledgeBase;
+  totalAiCost?: number;
 }
 
-export function StudentProfileCard({ kb }: StudentProfileCardProps) {
-  const getConversionStatusBadge = () => {
+export function StudentProfileCard({ kb, totalAiCost = 0 }: StudentProfileCardProps) {
+  const getConversionStatusText = () => {
     switch (kb.conversion_status) {
-      case 'converted':
-        return <Badge className="bg-green-500">已轉換</Badge>;
-      case 'in_progress':
-        return <Badge className="bg-yellow-500">進行中</Badge>;
-      case 'not_converted':
-        return <Badge variant="secondary">未轉換</Badge>;
+      case 'renewed_high':
+        return '已續課高價';
+      case 'purchased_high':
+        return '已購買高價';
+      case 'purchased_trial':
+        return '已購買體驗課';
+      case 'not_purchased':
+        return '未購買';
       default:
-        return <Badge variant="outline">未知</Badge>;
+        return '-';
     }
   };
 
@@ -47,11 +50,13 @@ export function StudentProfileCard({ kb }: StudentProfileCardProps) {
               </div>
             </div>
           </div>
-          {getConversionStatusBadge()}
+          <div className="text-sm font-medium text-gray-700">
+            {getConversionStatusText()}
+          </div>
         </div>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           {/* 總上課次數 */}
           <div className="flex flex-col gap-1">
             <div className="text-sm text-muted-foreground flex items-center gap-1">
@@ -77,6 +82,17 @@ export function StudentProfileCard({ kb }: StudentProfileCardProps) {
               總互動
             </div>
             <div className="text-2xl font-bold">{kb.total_interactions}</div>
+          </div>
+
+          {/* AI 花費 */}
+          <div className="flex flex-col gap-1">
+            <div className="text-sm text-muted-foreground flex items-center gap-1">
+              <DollarSign className="w-4 h-4" />
+              AI 成本
+            </div>
+            <div className="text-lg font-bold text-orange-600">
+              ${totalAiCost.toFixed(4)}
+            </div>
           </div>
 
           {/* 首次接觸 */}

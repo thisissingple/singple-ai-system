@@ -2,10 +2,248 @@
 
 > **最後更新**: 2025-11-18
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ MCP Chrome DevTools 配置完成
-> **當前階段**: 開發環境優化與系統穩定性提升
-> **今日進度**: MCP Chrome DevTools 配置與問題診斷
+> **專案狀態**: ✅ 學員知識庫 AI 成本追蹤與諮詢整合完成
+> **當前階段**: 學員知識庫系統優化
+> **今日進度**: 整合諮詢 AI 分析與逐字稿到知識庫歷程
 > **整體進度**: 99.9% ████████████████████
+
+---
+
+## 📅 2025-11-18 更新日誌（晚上）
+
+### 🎯 學員知識庫 AI 成本追蹤與諮詢整合
+
+#### 功能概述
+系統性整合所有 AI 使用功能到學員知識庫，包含成本追蹤、完整分析報告展示，以及諮詢逐字稿顯示。
+
+#### 實作內容
+
+##### 1. AI 成本追蹤整合
+
+**Migration 056**: 體驗課 AI 分析成本追蹤
+- 檔案：[`supabase/migrations/056_add_cost_tracking_to_teaching_quality_analysis.sql`](supabase/migrations/056_add_cost_tracking_to_teaching_quality_analysis.sql)
+- 新增欄位到 `teaching_quality_analysis` 表：
+  - `tokens_used` - OpenAI API 使用 token 數
+  - `response_time_ms` - API 回應時間（毫秒）
+  - `api_cost_usd` - API 費用（USD）
+- 建立索引加速成本查詢
+
+**Migration 058**: 諮詢 AI 分析成本追蹤
+- 檔案：[`supabase/migrations/058_add_cost_tracking_to_consultation_quality_analysis.sql`](supabase/migrations/058_add_cost_tracking_to_consultation_quality_analysis.sql)
+- 新增相同成本追蹤欄位到 `consultation_quality_analysis` 表
+- 與體驗課分析表結構保持一致
+
+**AI 成本聚合查詢**：
+- 位置：[`student-knowledge-service.ts:284-310`](server/services/student-knowledge-service.ts#L284-L310)
+- 使用 `UNION ALL` 整合三個成本來源：
+  1. 教師 AI 對話（`teacher_ai_conversations.api_cost_usd`）
+  2. 體驗課逐字稿 AI 分析（`teaching_quality_analysis.api_cost_usd`）
+  3. 諮詢逐字稿 AI 分析（`consultation_quality_analysis.api_cost_usd`）
+
+##### 2. AI 服務成本追蹤實作
+
+**諮詢品質分析服務更新**：
+- 檔案：[`consultation-quality-gpt-service.ts:42-66, 439-482`](server/services/consultation-quality-gpt-service.ts#L42-L66)
+- 新增 `ConsultationQualityAnalysis` 介面欄位：
+  ```typescript
+  tokensUsed?: number;
+  responseTimeMs?: number;
+  apiCostUsd?: number;
+  ```
+- 計算邏輯（基於 gpt-4o 定價）：
+  ```typescript
+  const apiCostUsd = (inputTokens * 0.0025 / 1000) + (outputTokens * 0.01 / 1000);
+  ```
+
+**API 路由更新**：
+- 檔案：[`routes-consultation-quality.ts:672-727`](server/routes-consultation-quality.ts#L672-L727)
+- 更新 INSERT 查詢包含成本追蹤欄位
+- 儲存 tokens、回應時間、API 費用到資料庫
+
+##### 3. 前端顯示優化
+
+**學員檔案卡片**：
+- 檔案：[`student-profile-card.tsx:88-96`](client/src/components/student-profile/student-profile-card.tsx#L88-L96)
+- 新增 AI 成本顯示區塊
+- 橙色醒目標示：`text-orange-600`
+- 格式：`$0.0123` (四位小數)
+
+**轉換狀態顯示修正**：
+- 檔案：[`student-profile-card.tsx:17-30, 53-55`](client/src/components/student-profile/student-profile-card.tsx#L17-L30)
+- 從徽章改為純文字顯示
+- 英文資料庫值對應中文：
+  - `renewed_high` → 已續課高價
+  - `purchased_high` → 已購買高價
+  - `purchased_trial` → 已購買體驗課
+  - `not_purchased` → 未購買
+
+##### 4. 諮詢 AI 分析整合
+
+**知識庫歷程時間軸**：
+- 檔案：[`knowledge-base-history.tsx:79-84, 453-509`](client/src/components/student-profile/knowledge-base-history.tsx#L79-L84)
+- 新增諮詢 AI 分析到時間軸
+- 使用粉紅色主題區分（🌸 `bg-pink-500`）
+- 顯示綜合評分和諮詢摘要
+- 完整分析報告展開按鈕
+
+**完整 Markdown 報告展示**：
+- 體驗課：從 `conversion_suggestions.markdownOutput` 讀取
+- 諮詢：從 `raw_markdown_output` 讀取
+- 使用 `ReactMarkdown` 渲染完整 AI 分析報告
+
+##### 5. 諮詢逐字稿顯示
+
+**新增功能**：
+- 檔案：[`knowledge-base-history.tsx:356-400`](client/src/components/student-profile/knowledge-base-history.tsx#L356-L400)
+- 在諮詢記錄（EODS）區塊顯示逐字稿
+- 字數統計：`consultation_transcript.length.toLocaleString()`
+- 摘要預覽：顯示前 200 字
+- 展開按鈕：查看完整逐字稿
+- 紫色主題（`bg-purple-50`）與諮詢記錄配色一致
+- 可滾動容器：`max-h-96 overflow-y-auto`
+
+#### 技術架構
+
+**資料流**：
+```
+1. OpenAI API 呼叫
+   ↓
+2. 成本計算與儲存
+   ├─ teaching_quality_analysis (體驗課)
+   └─ consultation_quality_analysis (諮詢)
+   ↓
+3. 成本聚合查詢 (UNION ALL)
+   ↓
+4. 前端顯示
+   ├─ student-profile-card (總成本)
+   └─ knowledge-base-history (完整歷程)
+```
+
+**視覺主題**：
+- 體驗課 AI 分析：🟠 橙色（`bg-orange-500`）
+- 諮詢 AI 分析：🌸 粉紅色（`bg-pink-500`）
+- 諮詢記錄：🟣 紫色（`bg-purple-500`）
+- 諮詢逐字稿背景：紫色淡色（`bg-purple-50`）
+
+#### 檔案變更清單
+
+**Backend - Database**:
+- `supabase/migrations/056_add_cost_tracking_to_teaching_quality_analysis.sql` ✅ 新增
+- `supabase/migrations/058_add_cost_tracking_to_consultation_quality_analysis.sql` ✅ 新增
+
+**Backend - Services**:
+- `server/services/consultation-quality-gpt-service.ts` ✅ 更新成本追蹤
+- `server/services/student-knowledge-service.ts` ✅ 成本聚合查詢與諮詢分析查詢
+
+**Backend - Routes**:
+- `server/routes-consultation-quality.ts` ✅ 儲存成本資料
+
+**Frontend - Hooks**:
+- `client/src/hooks/use-student-profile.ts` ✅ 新增 consultationAnalyses、totalAiCost
+
+**Frontend - Components**:
+- `client/src/components/student-profile/student-profile-card.tsx` ✅ AI 成本顯示、轉換狀態修正
+- `client/src/components/student-profile/knowledge-base-history.tsx` ✅ 諮詢分析整合、逐字稿顯示
+
+**Frontend - Pages**:
+- `client/src/pages/students/student-profile-page.tsx` ✅ 傳遞 consultationAnalyses prop
+
+**Scripts**:
+- `scripts/rollback-migration-057.ts` ✅ 新增（回滾錯誤的轉換狀態計算）
+- `scripts/check-conversion-status-distribution.ts` ✅ 新增（檢查轉換狀態分佈）
+- `scripts/run-migration-057.ts` ✅ 新增（執行 Migration 057）
+
+#### 重要決策記錄
+
+**Migration 057 回滾**：
+- 原本嘗試自動計算轉換狀態（基於體驗課邏輯）
+- 用戶澄清：直接顯示資料庫現有值即可，不需重新計算
+- 已回滾並移除自動計算邏輯
+- 前端僅將英文值映射為中文顯示
+
+**AI 成本計算模型**：
+- 使用 gpt-4o 定價（2025 年最新）
+- Input tokens: $0.0025 / 1K tokens
+- Output tokens: $0.01 / 1K tokens
+- 保留 6 位小數精度（`NUMERIC(10, 6)`）
+
+#### 用戶反饋與修正
+
+1. ❌ **展開按鈕無法顯示完整報告** → ✅ 修正為讀取 `markdownOutput` / `raw_markdown_output`
+2. ❌ **重複顯示資料摘要卡片** → ✅ 移除底部重複卡片
+3. ❌ **轉換狀態顯示「未知」** → ✅ 顯示資料庫現有值
+4. ❌ **徽章不直觀** → ✅ 改為純文字顯示
+5. ❌ **諮詢逐字稿未顯示** → ✅ 新增逐字稿展開功能
+
+#### 下一步計劃
+
+- ✅ 所有 AI 功能已整合到學員知識庫
+- ✅ 成本追蹤系統完整
+- ✅ 完整分析報告可展開查看
+- ✅ 諮詢逐字稿已顯示
+
+---
+
+## 📅 2025-11-18 更新日誌（傍晚）
+
+### 🔧 Google Sheets 同步資料重複問題修正
+
+#### 問題描述
+Google Sheets 同步後資料重複（例：`eods_for_closers` 從 1034 筆變成 2068 筆）。
+
+#### 根本原因
+PostgreSQL 連線模式使用錯誤，導致 DELETE 和 INSERT 操作在同步時未正確執行：
+
+**錯誤代碼**：
+```typescript
+// ❌ DELETE 使用預設 transaction mode
+await queryDatabase(`DELETE FROM ${table}`);
+
+// ❌ INSERT 使用預設 transaction mode
+await queryDatabase(sql, values);
+```
+
+根據 [`pg-client.ts`](server/services/pg-client.ts) 設計：
+- `'transaction'` mode: 僅適用於**讀取查詢** (SELECT)
+- `'session'` mode: 適用於**寫入操作** (INSERT/UPDATE/DELETE)
+
+#### 修正內容
+
+1. **修正 `clearTable` 方法** ([`sync-service.ts:252-257`](server/services/sheets/sync-service.ts#L252-L257))
+   ```typescript
+   private async clearTable(table: string): Promise<void> {
+     console.log(`🗑️  Clearing table ${table}...`);
+     // ✅ 使用 'session' mode 執行 DELETE
+     await queryDatabase(`DELETE FROM ${table}`, [], 'session');
+     console.log(`✅ Table ${table} cleared successfully`);
+   }
+   ```
+
+2. **修正 `batchInsert` 方法** ([`sync-service.ts:376-383`](server/services/sheets/sync-service.ts#L376-L383))
+   ```typescript
+   // ✅ 使用 'session' mode 執行 INSERT
+   await queryDatabase(sql, values, 'session');
+   ```
+
+#### 新增文件
+- [`docs/SYNC_DUPLICATION_FIX.md`](docs/SYNC_DUPLICATION_FIX.md) - 完整修正記錄與預防措施
+
+#### 開發規範更新
+**所有 `queryDatabase` 寫入操作必須明確指定 `'session'` mode**：
+```typescript
+// ✅ 正確
+await queryDatabase('INSERT INTO ...', values, 'session');
+await queryDatabase('UPDATE ...', values, 'session');
+await queryDatabase('DELETE FROM ...', [], 'session');
+
+// ✅ 讀取可省略（預設 transaction）
+await queryDatabase('SELECT * FROM ...', []);
+```
+
+#### 驗證腳本
+- `scripts/clear-eods-duplicates.ts` - 清除重複資料
+- `scripts/check-eods-count.ts` - 檢查資料筆數
+- `scripts/test-clear-table.ts` - 測試 DELETE 功能
 
 ---
 
