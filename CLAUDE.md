@@ -203,6 +203,51 @@ NODE_ENV=development
 npx tsx tests/test-env-check.ts
 ```
 
+## MCP Chrome DevTools Configuration
+
+**IMPORTANT**: MCP servers are project-level and require Claude Code restart after configuration.
+
+### Configuration Status
+- ✅ Current project (`singple-ai-system-1`): Configured
+- Configuration file: `~/.claude.json` → `projects[project_path].mcpServers`
+
+### Setup Process
+```bash
+# 1. Configure MCP server (if not already done)
+claude mcp add chrome-devtools npx chrome-devtools-mcp@latest
+
+# 2. MUST restart Claude Code for changes to take effect
+# MCP servers only load during session initialization
+
+# 3. Verify tools are available
+# Try: mcp__chrome-devtools__list_pages
+```
+
+### Why Restart is Required
+- MCP server runs as independent process (`npx chrome-devtools-mcp@latest`)
+- Communication via stdio protocol
+- Process spawning happens during session initialization only
+- Running sessions cannot dynamically load new MCP servers
+
+### AI Self-Check Procedure
+When user requests MCP tools:
+1. ✅ Test if tool is available (try calling `mcp__chrome-devtools__list_pages`)
+2. ✅ If unavailable, check `~/.claude.json` configuration
+3. ✅ If configured but unavailable, remind user to restart Claude Code
+4. ✅ If not configured, run `claude mcp add` and request restart
+
+### Common MCP Tools
+- `mcp__chrome-devtools__list_pages` - List open browser pages
+- `mcp__chrome-devtools__navigate_page` - Navigate to URL
+- `mcp__chrome-devtools__take_screenshot` - Capture page screenshot
+- `mcp__chrome-devtools__take_snapshot` - Get page a11y tree
+- `mcp__chrome-devtools__click` - Click elements
+- `mcp__chrome-devtools__fill` - Fill form inputs
+
+See [`PROJECT_PROGRESS.md:540-567`](PROJECT_PROGRESS.md#L540-L567) for detailed usage guide.
+
+---
+
 ## Authentication
 
 Located in [`replitAuth.ts`](server/replitAuth.ts):
