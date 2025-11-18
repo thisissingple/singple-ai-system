@@ -153,7 +153,7 @@ The Form Builder allows admins to create custom forms without coding.
 ## Environment Configuration
 
 **Deployment Workflow**: Local → GitHub → Zeabur
-1. **Local Development**: Test on local machine (localhost:5000)
+1. **Local Development**: Test on local machine (localhost:5001)
 2. **Version Control**: Push to GitHub repository
 3. **Production Deployment**: Auto-deploy to Zeabur via GitHub integration
 
@@ -161,15 +161,46 @@ The Form Builder allows admins to create custom forms without coding.
 - ⚠️ This project is NO LONGER deployed on Replit
 - ✅ Production environment: Zeabur (zeabur.com)
 - ✅ Local testing required before pushing to GitHub
-- Port: 5000 (local development)
+- ✅ **Environment variables are automatically loaded from `.env` file**
+- Port: 5001 (local development)
 
-**Required Variables**:
+### Local Environment Variables
+
+**Auto-loading mechanism** (2025-11-18 update):
+- ✅ `.env` file exists in project root (NOT committed to Git)
+- ✅ `server/index.ts:15` - `dotenv.config({ override: true })` automatically loads `.env`
+- ✅ Test scripts updated to load `.env` automatically
+- ✅ **DO NOT ask the user for environment variables** - they are already configured
+- ✅ See [`ENV_SETUP.md`](ENV_SETUP.md) for complete documentation
+
+**Required Variables** (already configured in `.env`):
 ```env
+# Supabase
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-GOOGLE_SHEETS_CREDENTIALS={"client_email":"...","private_key":"..."}
-PORT=5000  # Set by Replit
-NODE_ENV=development|production
+SUPABASE_DB_URL=postgresql://postgres.xxx:password@host.supabase.com:5432/postgres
+SESSION_DB_URL=postgresql://postgres.xxx:password@host.supabase.com:5432/postgres
+
+# Session & API Keys
+SESSION_SECRET=your-random-session-secret
+OPENAI_API_KEY=sk-proj-xxxxx
+
+# Google Sheets Service Account Credentials (JSON)
+GOOGLE_SHEETS_CREDENTIALS={"type":"service_account","project_id":"your-project",...}
+
+# GitHub Token (optional)
+GITHUB_TOKEN=ghp_xxxxx
+
+# Development settings
+PORT=5001
+NODE_ENV=development
+# SKIP_AUTH=true  # Uncomment to bypass authentication in development
+```
+
+**Verification**:
+```bash
+# Check if environment variables are loaded correctly
+npx tsx tests/test-env-check.ts
 ```
 
 ## Authentication

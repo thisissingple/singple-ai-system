@@ -1,6 +1,10 @@
 /**
  * 環境變數檢查腳本
  */
+import dotenv from 'dotenv';
+
+// 載入環境變數
+dotenv.config({ override: true });
 
 console.log('🔍 檢查環境變數...\n');
 

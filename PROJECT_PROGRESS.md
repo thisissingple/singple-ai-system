@@ -1,11 +1,137 @@
 # 📊 專案進度追蹤文檔
 
-> **最後更新**: 2025-11-17
+> **最後更新**: 2025-11-18
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ 學員清單與詳情頁功能完成（含時間戳排序優化）
-> **當前階段**: 核心功能開發與系統優化
-> **今日進度**: 學員清單排序邏輯修正、資料同步優化、按鈕文字更新
+> **專案狀態**: ✅ 環境變數永久配置完成
+> **當前階段**: 開發環境優化與系統穩定性提升
+> **今日進度**: 建立本地 .env 自動載入機制
 > **整體進度**: 99.9% ████████████████████
+
+---
+
+## 📅 2025-11-18 更新日誌
+
+### 🎯 環境變數永久配置系統完成
+
+#### 問題背景
+每次重開 Claude Code 都需要重新詢問環境變數，造成開發流程中斷。需要建立永久性的環境變數載入機制。
+
+#### 解決方案
+
+**1. 建立本地 `.env` 檔案**
+- 檔案：[`.env`](.env)
+- 位置：專案根目錄
+- 內容：包含 10 個環境變數
+  - Supabase 設定（URL、Service Role Key、DB URL、Session DB URL）
+  - Session Secret
+  - OpenAI API Key
+  - Google Sheets Credentials（JSON 格式）
+  - GitHub Token
+  - 開發環境設定（PORT、NODE_ENV）
+
+**2. 驗證自動載入機制**
+- [`server/index.ts:15`](server/index.ts#L15) - 伺服器已配置 `dotenv.config({ override: true })`
+- 確認啟動時自動載入環境變數
+
+**3. 更新測試腳本**
+- 檔案：[`tests/test-env-check.ts`](tests/test-env-check.ts)
+- 新增：第 4-7 行，載入 dotenv
+  ```typescript
+  import dotenv from 'dotenv';
+
+  // 載入環境變數
+  dotenv.config({ override: true });
+  ```
+- 確保測試腳本也能正確讀取環境變數
+
+**4. 建立設定指南文件**
+- 檔案：[`ENV_SETUP.md`](ENV_SETUP.md)
+- 內容：
+  - 環境變數完整清單
+  - 自動載入機制說明
+  - 安全性提醒（`.gitignore` 排除 `.env`）
+  - 測試指令
+  - 常見問題 Q&A
+  - Zeabur 部署環境變數設定指南
+
+#### 測試驗證
+
+**執行測試腳本**：
+```bash
+npx tsx tests/test-env-check.ts
+```
+
+**測試結果**：
+```
+✓ SUPABASE_URL: 已設定
+✓ SUPABASE_SERVICE_ROLE_KEY: 已設定
+✓ GOOGLE_SHEETS_CREDENTIALS: 已設定
+✓ NODE_ENV: development
+✓ PORT: 5001
+✓ Supabase client: 已初始化
+```
+
+#### 技術重點
+
+**安全性保護**：
+- `.env` 檔案已加入 `.gitignore`（第 25 行）
+- 只保留 `.env.example` 範例檔案上傳 Git
+- 敏感資訊不會外洩
+
+**自動載入優先順序**：
+```typescript
+// server/index.ts
+dotenv.config({ override: true }); // 本地 .env 優先
+
+// server/auth.ts
+dotenv.config({ override: false }); // 不覆蓋已設定的值
+```
+
+**環境變數清單**（10 個）：
+1. `SUPABASE_URL` - Supabase 專案 URL
+2. `SUPABASE_SERVICE_ROLE_KEY` - Service Role Key
+3. `SUPABASE_DB_URL` - PostgreSQL 連線 URL
+4. `SESSION_DB_URL` - Session 儲存資料庫 URL
+5. `SESSION_SECRET` - Session 加密金鑰
+6. `OPENAI_API_KEY` - OpenAI API 金鑰
+7. `GOOGLE_SHEETS_CREDENTIALS` - Google Sheets Service Account JSON
+8. `GITHUB_TOKEN` - GitHub Personal Access Token
+9. `PORT` - 開發伺服器 Port（5001）
+10. `NODE_ENV` - 環境模式（development）
+
+#### 影響範圍
+
+**受益模組**：
+- ✅ 伺服器啟動（`server/index.ts`）
+- ✅ 認證系統（`server/auth.ts`）
+- ✅ 資料庫連線（`pg-client.ts`、`supabase-client.ts`）
+- ✅ Google Sheets 同步（`sync-service.ts`）
+- ✅ OpenAI API 呼叫（KPI 分析、AI 推薦）
+- ✅ 所有測試腳本（`tests/*.ts`）
+
+#### 開發體驗改善
+
+**之前**：
+- ❌ 每次重開 Claude Code 需要重新設定環境變數
+- ❌ 測試腳本找不到環境變數
+- ❌ 開發流程中斷
+
+**現在**：
+- ✅ 自動從 `.env` 載入，不需要重新設定
+- ✅ 測試腳本正常運作
+- ✅ 開發流程順暢
+
+#### 部署注意事項
+
+**Zeabur 生產環境**：
+1. 進入 Zeabur Dashboard → Settings → Environment Variables
+2. 手動新增 `.env` 檔案中的所有變數
+3. `PORT` 由 Zeabur 自動設定，不需手動新增
+4. `NODE_ENV` 設為 `production`
+
+**本地開發環境**：
+- 直接使用 `.env` 檔案
+- 不需要額外設定
 
 ---
 
