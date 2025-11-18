@@ -34,11 +34,12 @@ export default function StudentProfilePage() {
   // Filter states (use 'all' instead of empty string for Radix UI compatibility)
   const [teacherFilter, setTeacherFilter] = useState('all');
   const [consultantFilter, setConsultantFilter] = useState('all');
-  const [conversionFilter, setConversionFilter] = useState<'purchased' | 'in_progress' | 'not_purchased' | 'all'>('all');
+  const [conversionFilter, setConversionFilter] = useState<'renewed_high' | 'purchased_high' | 'purchased_trial' | 'not_purchased' | 'all'>('all');
+  const [consultationFilter, setConsultationFilter] = useState<'consulted' | 'no_show' | 'not_consulted' | 'all'>('all');
   const [lastInteractionFilter, setLastInteractionFilter] = useState<'today' | '3days' | '7days' | '30days' | 'over30days' | 'all'>('all');
 
   // Sorting state - support multiple sort columns with Shift key
-  type SortColumn = 'name' | 'email' | 'phone' | 'total_spent' | 'conversion_status' | 'teacher' | 'consultant' | 'last_interaction';
+  type SortColumn = 'name' | 'email' | 'phone' | 'total_spent' | 'conversion_status' | 'consultation_status' | 'teacher' | 'consultant' | 'last_interaction';
   type SortDirection = 'asc' | 'desc';
   const [sortColumns, setSortColumns] = useState<Array<{ column: SortColumn; direction: SortDirection }>>([
     { column: 'last_interaction', direction: 'desc' } // Default: sort by last interaction descending
@@ -54,6 +55,7 @@ export default function StudentProfilePage() {
     teacher: teacherFilter === 'all' ? '' : teacherFilter,
     consultant: consultantFilter === 'all' ? '' : consultantFilter,
     conversionStatus: conversionFilter === 'all' ? '' : conversionFilter,
+    consultationStatus: consultationFilter === 'all' ? '' : consultationFilter,
     lastInteraction: lastInteractionFilter === 'all' ? '' : lastInteractionFilter,
   });
 
@@ -119,9 +121,14 @@ export default function StudentProfilePage() {
             bVal = parseFloat(b.total_spent) || 0;
             break;
           case 'conversion_status':
-            const statusOrder = { purchased: 3, in_progress: 2, not_purchased: 1 };
+            const statusOrder = { renewed_high: 4, purchased_high: 3, purchased_trial: 2, not_purchased: 1 };
             aVal = statusOrder[a.conversion_status as keyof typeof statusOrder] || 0;
             bVal = statusOrder[b.conversion_status as keyof typeof statusOrder] || 0;
+            break;
+          case 'consultation_status':
+            const consultationOrder = { consulted: 3, no_show: 2, not_consulted: 1 };
+            aVal = consultationOrder[a.consultation_status as keyof typeof consultationOrder] || 0;
+            bVal = consultationOrder[b.consultation_status as keyof typeof consultationOrder] || 0;
             break;
           case 'teacher':
             aVal = a.teacher || '';
@@ -198,12 +205,27 @@ export default function StudentProfilePage() {
 
   const getConversionStatusBadge = (status: string | null) => {
     switch (status) {
-      case 'purchased':
-        return <Badge className="bg-green-100 text-green-700 border-green-300">已購買</Badge>;
-      case 'in_progress':
-        return <Badge className="bg-yellow-100 text-yellow-700 border-yellow-300">進行中</Badge>;
+      case 'renewed_high':
+        return <Badge className="bg-purple-100 text-purple-700 border-purple-300">已續課高價</Badge>;
+      case 'purchased_high':
+        return <Badge className="bg-green-100 text-green-700 border-green-300">已購買高價</Badge>;
+      case 'purchased_trial':
+        return <Badge className="bg-blue-100 text-blue-700 border-blue-300">已購買體驗課</Badge>;
       case 'not_purchased':
         return <Badge className="bg-gray-100 text-gray-700 border-gray-300">未購買</Badge>;
+      default:
+        return <Badge variant="outline">-</Badge>;
+    }
+  };
+
+  const getConsultationStatusBadge = (status: string | null) => {
+    switch (status) {
+      case 'consulted':
+        return <Badge className="bg-green-100 text-green-700 border-green-300">已諮詢</Badge>;
+      case 'no_show':
+        return <Badge className="bg-red-100 text-red-700 border-red-300">放鳥</Badge>;
+      case 'not_consulted':
+        return <Badge className="bg-gray-100 text-gray-700 border-gray-300">未諮詢</Badge>;
       default:
         return <Badge variant="outline">-</Badge>;
     }
@@ -329,9 +351,23 @@ export default function StudentProfilePage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">全部狀態</SelectItem>
-                    <SelectItem value="purchased">已購買</SelectItem>
-                    <SelectItem value="in_progress">進行中</SelectItem>
+                    <SelectItem value="renewed_high">已續課高價</SelectItem>
+                    <SelectItem value="purchased_high">已購買高價</SelectItem>
+                    <SelectItem value="purchased_trial">已購買體驗課</SelectItem>
                     <SelectItem value="not_purchased">未購買</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {/* Consultation Status Filter */}
+                <Select value={consultationFilter} onValueChange={(v) => setConsultationFilter(v as any)}>
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="諮詢狀態" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部狀態</SelectItem>
+                    <SelectItem value="consulted">已諮詢</SelectItem>
+                    <SelectItem value="no_show">放鳥</SelectItem>
+                    <SelectItem value="not_consulted">未諮詢</SelectItem>
                   </SelectContent>
                 </Select>
 
@@ -463,6 +499,15 @@ export default function StudentProfilePage() {
                             </div>
                           </TableHead>
                           <TableHead
+                            className="text-center cursor-pointer hover:bg-muted/50 select-none"
+                            onClick={(e) => handleSort('consultation_status', e)}
+                          >
+                            <div className="flex items-center justify-center">
+                              諮詢狀態
+                              {getSortIcon('consultation_status')}
+                            </div>
+                          </TableHead>
+                          <TableHead
                             className="cursor-pointer hover:bg-muted/50 select-none"
                             onClick={(e) => handleSort('teacher', e)}
                           >
@@ -522,6 +567,9 @@ export default function StudentProfilePage() {
                             </TableCell>
                             <TableCell className="text-center">
                               {getConversionStatusBadge(student.conversion_status)}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {getConsultationStatusBadge(student.consultation_status)}
                             </TableCell>
                             <TableCell className="text-sm">
                               {student.teacher || <span className="text-muted-foreground">-</span>}

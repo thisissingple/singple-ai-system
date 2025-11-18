@@ -8753,6 +8753,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const teacherFilter = req.query.teacher as string || '';
       const consultantFilter = req.query.consultant as string || '';
       const conversionFilter = req.query.conversionStatus as string || '';
+      const consultationFilter = req.query.consultationStatus as string || '';
       const lastInteractionFilter = req.query.lastInteraction as string || '';
 
       // Build WHERE clause
@@ -8793,35 +8794,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
         paramIndex++;
       }
 
-      // Filter by conversion status (使用 actual_amount from eods_for_closers)
+      // Filter by conversion status (4 種狀態)
       if (conversionFilter) {
-        if (conversionFilter === 'purchased') {
-          // Has actual_amount > 0 in eods_for_closers
+        if (conversionFilter === 'renewed_high') {
+          // 已續課高價：購買 2 次以上高價方案
           whereConditions.push(`
-            EXISTS(
-              SELECT 1 FROM eods_for_closers
-              WHERE student_email = skb.student_email
-              AND actual_amount IS NOT NULL
-              AND actual_amount != ''
-              AND actual_amount ~ '^[0-9.]+$'
-              AND CAST(actual_amount AS NUMERIC) > 0
-            )
+            (SELECT COUNT(*) FROM eods_for_closers
+             WHERE student_email = skb.student_email
+             AND plan LIKE '%高階一對一訓練%'
+             AND actual_amount IS NOT NULL
+             AND actual_amount != ''
+             AND REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') ~ '^[0-9.]+$'
+             AND CAST(REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') AS NUMERIC) > 0) >= 2
           `);
-        } else if (conversionFilter === 'in_progress') {
-          // Has consultation records but no actual_amount
+        } else if (conversionFilter === 'purchased_high') {
+          // 已購買高價：購買 1 次高價方案
           whereConditions.push(`
-            EXISTS(SELECT 1 FROM eods_for_closers WHERE student_email = skb.student_email)
-            AND NOT EXISTS(
-              SELECT 1 FROM eods_for_closers
-              WHERE student_email = skb.student_email
-              AND actual_amount IS NOT NULL
-              AND actual_amount != ''
-              AND actual_amount ~ '^[0-9.]+$'
-              AND CAST(actual_amount AS NUMERIC) > 0
-            )
+            (SELECT COUNT(*) FROM eods_for_closers
+             WHERE student_email = skb.student_email
+             AND plan LIKE '%高階一對一訓練%'
+             AND actual_amount IS NOT NULL
+             AND actual_amount != ''
+             AND REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') ~ '^[0-9.]+$'
+             AND CAST(REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') AS NUMERIC) > 0) = 1
+          `);
+        } else if (conversionFilter === 'purchased_trial') {
+          // 已購買體驗課
+          whereConditions.push(`
+            EXISTS(SELECT 1 FROM trial_class_purchases WHERE student_email = skb.student_email)
           `);
         } else if (conversionFilter === 'not_purchased') {
-          // No consultation records
+          // 未購買
+          whereConditions.push(`
+            NOT EXISTS(SELECT 1 FROM trial_class_purchases WHERE student_email = skb.student_email)
+          `);
+        }
+      }
+
+      // Filter by consultation status (3 種狀態)
+      if (consultationFilter) {
+        if (consultationFilter === 'consulted') {
+          // 已諮詢：有諮詢記錄且 is_show = '已上線'
+          whereConditions.push(`
+            EXISTS(SELECT 1 FROM eods_for_closers WHERE student_email = skb.student_email AND is_show = '已上線')
+          `);
+        } else if (consultationFilter === 'no_show') {
+          // 放鳥：有諮詢記錄且 is_show != '已上線'
+          whereConditions.push(`
+            EXISTS(SELECT 1 FROM eods_for_closers WHERE student_email = skb.student_email AND is_show != '已上線')
+          `);
+        } else if (consultationFilter === 'not_consulted') {
+          // 未諮詢：沒有諮詢記錄
           whereConditions.push(`
             NOT EXISTS(SELECT 1 FROM eods_for_closers WHERE student_email = skb.student_email)
           `);
@@ -8954,19 +8977,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
             0
           ) as total_spent,
 
-          -- Conversion status (轉換狀態 - 根據 actual_amount，移除貨幣符號)
+          -- Conversion status (轉換狀態 - 4 種狀態：已續課高價、已購買高價、已購買體驗課、未購買)
           CASE
-            WHEN EXISTS(
-              SELECT 1 FROM eods_for_closers
+            -- 已續課高價：購買 2 次以上高價方案
+            WHEN (
+              SELECT COUNT(*) FROM eods_for_closers
               WHERE student_email = skb.student_email
+              AND plan LIKE '%高階一對一訓練%'
               AND actual_amount IS NOT NULL
               AND actual_amount != ''
               AND REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') ~ '^[0-9.]+$'
               AND CAST(REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') AS NUMERIC) > 0
-            ) THEN 'purchased'
-            WHEN EXISTS(SELECT 1 FROM eods_for_closers WHERE student_email = skb.student_email) THEN 'in_progress'
+            ) >= 2 THEN 'renewed_high'
+
+            -- 已購買高價：購買 1 次高價方案
+            WHEN (
+              SELECT COUNT(*) FROM eods_for_closers
+              WHERE student_email = skb.student_email
+              AND plan LIKE '%高階一對一訓練%'
+              AND actual_amount IS NOT NULL
+              AND actual_amount != ''
+              AND REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') ~ '^[0-9.]+$'
+              AND CAST(REGEXP_REPLACE(actual_amount, '[^0-9.]', '', 'g') AS NUMERIC) > 0
+            ) = 1 THEN 'purchased_high'
+
+            -- 已購買體驗課：在 trial_class_purchases 有記錄
+            WHEN EXISTS(
+              SELECT 1 FROM trial_class_purchases
+              WHERE student_email = skb.student_email
+            ) THEN 'purchased_trial'
+
+            -- 未購買：沒有任何購買記錄
             ELSE 'not_purchased'
           END as conversion_status,
+
+          -- Consultation status (諮詢狀態 - 3 種狀態：已諮詢、放鳥、未諮詢)
+          CASE
+            -- 放鳥：有諮詢記錄且 is_show != '已上線'
+            WHEN EXISTS(
+              SELECT 1 FROM eods_for_closers
+              WHERE student_email = skb.student_email
+              AND is_show != '已上線'
+            ) THEN 'no_show'
+
+            -- 已諮詢：有諮詢記錄且 is_show = '已上線'
+            WHEN EXISTS(
+              SELECT 1 FROM eods_for_closers
+              WHERE student_email = skb.student_email
+              AND is_show = '已上線'
+            ) THEN 'consulted'
+
+            -- 未諮詢：沒有諮詢記錄
+            ELSE 'not_consulted'
+          END as consultation_status,
 
           -- Teacher (最近的負責老師)
           (SELECT teacher_name FROM trial_class_attendance
