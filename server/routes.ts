@@ -40,6 +40,7 @@ import { z } from "zod";
 import * as teachingQualityGPT from "./services/teaching-quality-gpt-service";
 import { registerTeachingQualityRoutes } from "./routes-teaching-quality-new";
 import { registerConsultationQualityRoutes } from "./routes-consultation-quality";
+import { registerConsultantAIRoutes } from "./routes-consultant-ai";
 import { registerEmployeeManagementRoutes } from "./routes-employee-management";
 import { registerAuthRoutes } from "./routes-auth";
 import { registerKnowItAllRoutes } from "./routes-know-it-all";
@@ -6630,6 +6631,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Register consultation quality analysis routes (manual-trigger only)
   registerConsultationQualityRoutes(app, isAuthenticated, requireAdmin);
+
+  // Register consultant AI conversation routes
+  registerConsultantAIRoutes(app);
 
   // Register employee management routes
   registerEmployeeManagementRoutes(app);

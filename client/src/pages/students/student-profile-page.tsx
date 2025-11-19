@@ -714,6 +714,8 @@ export default function StudentProfilePage() {
                       aiAnalyses={profileData.aiAnalyses}
                       consultationAnalyses={profileData.consultationAnalyses || []}
                       aiConversations={profileData.aiConversations || []}
+                      consultantConversations={profileData.consultantConversations || []}
+                      chatRecaps={profileData.chatRecaps || []}
                       purchases={profileData.purchases}
                     />
                   </TabsContent>

@@ -242,6 +242,7 @@ export async function getStudentFullContext(studentEmail: string): Promise<{
   aiAnalyses: any[];
   consultationAnalyses: any[];
   aiConversations: any[];
+  chatRecaps: any[];
   purchases: any[];
   totalAiCost: number;
 }> {
@@ -271,9 +272,16 @@ export async function getStudentFullContext(studentEmail: string): Promise<{
     ORDER BY analyzed_at ASC
   `, [kb.student_name, studentEmail]);
 
-  // Get AI conversations
+  // Get AI conversations (teacher)
   const conversationsResult = await queryDatabase(`
     SELECT * FROM teacher_ai_conversations
+    WHERE student_email = $1
+    ORDER BY created_at ASC
+  `, [studentEmail]);
+
+  // Get AI conversations (consultant)
+  const consultantConversationsResult = await queryDatabase(`
+    SELECT * FROM consultant_ai_conversations
     WHERE student_email = $1
     ORDER BY created_at ASC
   `, [studentEmail]);
@@ -292,27 +300,60 @@ export async function getStudentFullContext(studentEmail: string): Promise<{
     ORDER BY analyzed_at ASC
   `, [kb.student_name]);
 
-  // Calculate total AI cost from ALL sources
+  // Get consultation chat recaps
+  const chatRecapsResult = await queryDatabase(`
+    SELECT * FROM consultation_chat_recaps
+    WHERE student_email = $1
+    ORDER BY generated_at ASC
+  `, [studentEmail]);
+
+  // Calculate total AI cost from ALL sources (4 sources now)
   const costResult = await queryDatabase(`
     SELECT
-      COALESCE(SUM(conv_cost), 0) + COALESCE(SUM(analysis_cost), 0) + COALESCE(SUM(consultation_cost), 0) as total_cost
+      COALESCE(SUM(teacher_conv_cost), 0) +
+      COALESCE(SUM(consultant_conv_cost), 0) +
+      COALESCE(SUM(analysis_cost), 0) +
+      COALESCE(SUM(consultation_cost), 0) as total_cost
     FROM (
-      -- AI Conversations
-      SELECT COALESCE(SUM(api_cost_usd), 0) as conv_cost, 0 as analysis_cost, 0 as consultation_cost
+      -- Teacher AI Conversations
+      SELECT
+        COALESCE(SUM(api_cost_usd), 0) as teacher_conv_cost,
+        0 as consultant_conv_cost,
+        0 as analysis_cost,
+        0 as consultation_cost
       FROM teacher_ai_conversations
       WHERE student_email = $1
 
       UNION ALL
 
+      -- Consultant AI Conversations
+      SELECT
+        0 as teacher_conv_cost,
+        COALESCE(SUM(api_cost_usd), 0) as consultant_conv_cost,
+        0 as analysis_cost,
+        0 as consultation_cost
+      FROM consultant_ai_conversations
+      WHERE student_email = $1
+
+      UNION ALL
+
       -- Teaching Quality Analyses (trial class transcript analyses)
-      SELECT 0 as conv_cost, COALESCE(SUM(api_cost_usd), 0) as analysis_cost, 0 as consultation_cost
+      SELECT
+        0 as teacher_conv_cost,
+        0 as consultant_conv_cost,
+        COALESCE(SUM(api_cost_usd), 0) as analysis_cost,
+        0 as consultation_cost
       FROM teaching_quality_analysis
       WHERE student_name = (SELECT student_name FROM student_knowledge_base WHERE student_email = $1 LIMIT 1)
 
       UNION ALL
 
       -- Consultation Quality Analyses (consultation transcript analyses)
-      SELECT 0 as conv_cost, 0 as analysis_cost, COALESCE(SUM(api_cost_usd), 0) as consultation_cost
+      SELECT
+        0 as teacher_conv_cost,
+        0 as consultant_conv_cost,
+        0 as analysis_cost,
+        COALESCE(SUM(api_cost_usd), 0) as consultation_cost
       FROM consultation_quality_analysis
       WHERE student_name = (SELECT student_name FROM student_knowledge_base WHERE student_email = $1 LIMIT 1)
     ) all_costs
@@ -327,6 +368,8 @@ export async function getStudentFullContext(studentEmail: string): Promise<{
     aiAnalyses: analysesResult.rows,
     consultationAnalyses: consultationAnalysesResult.rows,
     aiConversations: conversationsResult.rows,
+    consultantConversations: consultantConversationsResult.rows,
+    chatRecaps: chatRecapsResult.rows,
     purchases: purchasesResult.rows,
     totalAiCost
   };

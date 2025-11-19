@@ -117,6 +117,9 @@ ${chatTranscript}
     const recommendations = extractListItems(recapSummary, '## 建議事項');
 
     // Save to database
+    const chatSessionEnd = new Date().toISOString();  // UTC timestamp as ISO string
+    const generatedAt = new Date().toISOString();     // UTC timestamp as ISO string
+
     const insertResult = await queryDatabase(`
       INSERT INTO consultation_chat_recaps (
         eod_id,
@@ -136,7 +139,12 @@ ${chatTranscript}
         full_chat_history,
         generated_by,
         generated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7,
+        ($8::timestamptz AT TIME ZONE 'UTC'),
+        $9, $10, $11, $12, $13, $14, $15, $16,
+        ($17::timestamptz AT TIME ZONE 'UTC')
+      )
       RETURNING *
     `, [
       eodId,
@@ -146,6 +154,7 @@ ${chatTranscript}
       consultantEmail,
       consultantName,
       chatSessionStart,
+      chatSessionEnd,        // UTC ISO string
       totalMessages,
       totalQuestions,
       recapSummary,
@@ -153,7 +162,8 @@ ${chatTranscript}
       keyFindings,
       recommendations,
       JSON.stringify(chatHistory),
-      generatedBy
+      generatedBy,
+      generatedAt           // UTC ISO string
     ]);
 
     console.log(`✅ Generated chat recap for consultation ${eodId}`);

@@ -34,6 +34,7 @@ interface KnowledgeBaseHistoryProps {
   aiAnalyses: any[];
   consultationAnalyses: any[];
   aiConversations: any[];
+  consultantConversations: any[];
   purchases: any[];
 }
 
@@ -45,6 +46,7 @@ export function KnowledgeBaseHistory({
   aiAnalyses,
   consultationAnalyses,
   aiConversations,
+  consultantConversations,
   purchases,
 }: KnowledgeBaseHistoryProps) {
   const [expandedTranscripts, setExpandedTranscripts] = useState<Record<string, boolean>>({});
@@ -88,6 +90,12 @@ export function KnowledgeBaseHistory({
       date: conv.created_at,
       data: conv,
     })),
+    ...consultantConversations.map((conv) => ({
+      id: conv.id,
+      type: 'consultant_conversation' as const,
+      date: conv.created_at,
+      data: conv,
+    })),
     ...purchases.map((p) => ({
       id: p.id,
       type: 'purchase' as const,
@@ -103,6 +111,7 @@ export function KnowledgeBaseHistory({
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: 'Asia/Taipei',
     });
   };
 
@@ -137,6 +146,7 @@ export function KnowledgeBaseHistory({
     aiAnalyses: aiAnalyses.length,
     consultationAnalyses: consultationAnalyses.length,
     aiConversations: aiConversations.length,
+    consultantConversations: consultantConversations.length,
     purchases: purchases.length,
   };
 
@@ -148,7 +158,7 @@ export function KnowledgeBaseHistory({
           <CardTitle className="text-lg">📊 資料來源統計</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
             <div className="text-center p-4 bg-blue-50 rounded-lg">
               <div className="text-3xl font-bold text-blue-600">{stats.trialClasses}</div>
               <div className="text-sm text-gray-600 mt-1">上課記錄</div>
@@ -167,7 +177,11 @@ export function KnowledgeBaseHistory({
             </div>
             <div className="text-center p-4 bg-yellow-50 rounded-lg">
               <div className="text-3xl font-bold text-yellow-600">{stats.aiConversations}</div>
-              <div className="text-sm text-gray-600 mt-1">AI 對話</div>
+              <div className="text-sm text-gray-600 mt-1">老師 AI 對話</div>
+            </div>
+            <div className="text-center p-4 bg-indigo-50 rounded-lg">
+              <div className="text-3xl font-bold text-indigo-600">{stats.consultantConversations}</div>
+              <div className="text-sm text-gray-600 mt-1">諮詢師 AI 對話</div>
             </div>
             <div className="text-center p-4 bg-green-50 rounded-lg">
               <div className="text-3xl font-bold text-green-600">{stats.purchases}</div>
@@ -212,6 +226,8 @@ export function KnowledgeBaseHistory({
                             ? 'bg-pink-500'
                             : source.type === 'ai_conversation'
                             ? 'bg-yellow-500'
+                            : source.type === 'consultant_conversation'
+                            ? 'bg-indigo-500'
                             : 'bg-green-500'
                         }`}
                       >
@@ -220,6 +236,7 @@ export function KnowledgeBaseHistory({
                         {source.type === 'ai_analysis' && '🟠'}
                         {source.type === 'consultation_analysis' && '🌸'}
                         {source.type === 'ai_conversation' && '🟡'}
+                        {source.type === 'consultant_conversation' && '🟪'}
                         {source.type === 'purchase' && '🟢'}
                       </div>
                     </div>
@@ -422,7 +439,7 @@ export function KnowledgeBaseHistory({
                             <div className="space-y-3">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
-                                  <Badge className="bg-orange-500">AI 分析</Badge>
+                                  <Badge className="bg-orange-500">體驗課 AI 分析</Badge>
                                   <span className="text-sm font-semibold">
                                     {formatDate(source.data.analyzed_at)}
                                   </span>
@@ -559,7 +576,7 @@ export function KnowledgeBaseHistory({
                             <div className="space-y-3">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
-                                  <Badge className="bg-yellow-500">AI 對話</Badge>
+                                  <Badge className="bg-yellow-500">老師 AI 對話</Badge>
                                   <span className="text-sm font-semibold">
                                     {formatDate(source.data.created_at)}
                                   </span>
@@ -611,6 +628,109 @@ export function KnowledgeBaseHistory({
                                   </Button>
 
                                   {expandedTranscripts[`conv-${source.id}`] && (
+                                    <div className="mt-3 prose prose-sm max-w-none">
+                                      <ReactMarkdown>{source.data.answer}</ReactMarkdown>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* 統計資訊 */}
+                                <div className="flex gap-4 text-xs text-gray-600 mt-2">
+                                  {source.data.tokens_used && (
+                                    <span>{source.data.tokens_used} tokens</span>
+                                  )}
+                                  {source.data.api_cost_usd && (
+                                    <span>${parseFloat(source.data.api_cost_usd).toFixed(4)}</span>
+                                  )}
+                                  {source.data.is_cached && (
+                                    <Badge variant="outline" className="text-xs">快取</Badge>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* 已存入知識庫項目 */}
+                              <div className="ml-6 mt-3">
+                                <div className="text-xs text-gray-600 mb-2 flex items-center gap-1">
+                                  <CheckCircle2 className="h-3 w-3 text-green-500" />
+                                  已存入知識庫項目：
+                                </div>
+                                <div className="space-y-1">
+                                  <div className="text-xs text-gray-700 pl-4">
+                                    • 問題：{source.data.question}
+                                  </div>
+                                  <div className="text-xs text-gray-700 pl-4">
+                                    • AI 回答：{source.data.answer.length.toLocaleString()} 字
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Consultant Conversation Record */}
+                          {source.type === 'consultant_conversation' && (
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <Badge className="bg-indigo-500">諮詢師 AI 對話</Badge>
+                                  <span className="text-sm font-semibold">
+                                    {formatDate(source.data.created_at)}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2 text-sm">
+                                {/* 問題類型 */}
+                                <div className="flex items-center gap-2 text-gray-700">
+                                  <MessageSquare className="h-4 w-4" />
+                                  {source.data.question_type === 'preset' ? '預設問題' : '自訂問題'}
+                                  {source.data.preset_question_key && (
+                                    <Badge variant="outline" className="text-xs">
+                                      {source.data.preset_question_key}
+                                    </Badge>
+                                  )}
+                                </div>
+
+                                {/* 諮詢師資訊 */}
+                                {source.data.consultant_id && (
+                                  <div className="flex items-center gap-2 text-gray-700">
+                                    <User className="h-4 w-4" />
+                                    諮詢師：{source.data.consultant_id}
+                                  </div>
+                                )}
+
+                                {/* 問題 */}
+                                <div className="bg-indigo-50 rounded-lg p-3">
+                                  <div className="text-xs text-gray-600 mb-1">👤 問：</div>
+                                  <p className="text-sm text-gray-800">{source.data.question}</p>
+                                </div>
+
+                                {/* 回答預覽 */}
+                                <div className="bg-purple-50 rounded-lg p-3">
+                                  <div className="text-xs text-gray-600 mb-1">🤖 答：</div>
+                                  <p className="text-sm text-gray-800 line-clamp-3">
+                                    {source.data.answer.substring(0, 150)}...
+                                  </p>
+
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="mt-2 text-xs"
+                                    onClick={() => toggleTranscript(`consultant-conv-${source.id}`)}
+                                  >
+                                    {expandedTranscripts[`consultant-conv-${source.id}`] ? (
+                                      <>
+                                        <ChevronUp className="h-3 w-3 mr-1" />
+                                        收起完整回答
+                                      </>
+                                    ) : (
+                                      <>
+                                        <ChevronDown className="h-3 w-3 mr-1" />
+                                        查看完整回答
+                                      </>
+                                    )}
+                                  </Button>
+
+                                  {expandedTranscripts[`consultant-conv-${source.id}`] && (
                                     <div className="mt-3 prose prose-sm max-w-none">
                                       <ReactMarkdown>{source.data.answer}</ReactMarkdown>
                                     </div>

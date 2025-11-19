@@ -16,10 +16,9 @@ import {
   Bot,
   MessageSquare,
   Trash2,
-  Save,
   Loader2,
   FileText,
-  History,
+  Save,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useToast } from '@/hooks/use-toast';
@@ -30,6 +29,10 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  tokensUsed?: number;
+  apiCostUsd?: number;
+  saved?: boolean; // 是否已儲存到知識庫
+  saving?: boolean; // 是否正在儲存中
 }
 
 function ConsultationQualityDetailContent() {
@@ -43,10 +46,6 @@ function ConsultationQualityDetailContent() {
   const [inputMessage, setInputMessage] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [generatingRecap, setGeneratingRecap] = useState(false);
-  const [showRecapsModal, setShowRecapsModal] = useState(false);
-  const [recaps, setRecaps] = useState<any[]>([]);
-  const chatSessionStart = useRef(new Date());
   const messageIdCounter = useRef(0);
 
   // Fetch consultation data
@@ -97,6 +96,7 @@ function ConsultationQualityDetailContent() {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let aiResponseContent = '';
+      let metadata: { tokensUsed?: number; apiCostUsd?: number; model?: string } = {};
 
       const aiMessage: ChatMessage = {
         id: `assistant-${messageIdCounter.current++}`,
@@ -114,15 +114,40 @@ function ConsultationQualityDetailContent() {
           const chunk = decoder.decode(value, { stream: true });
           aiResponseContent += chunk;
 
-          // Update the last message (AI response) with accumulated content
-          setChatMessages(prev => {
-            const newMessages = [...prev];
-            newMessages[newMessages.length - 1] = {
-              ...newMessages[newMessages.length - 1],
-              content: aiResponseContent,
-            };
-            return newMessages;
-          });
+          // Check if metadata is included (after <<<METADATA>>> delimiter)
+          if (aiResponseContent.includes('\n<<<METADATA>>>\n')) {
+            const parts = aiResponseContent.split('\n<<<METADATA>>>\n');
+            const textContent = parts[0];
+            const metadataJson = parts[1];
+
+            try {
+              metadata = JSON.parse(metadataJson);
+            } catch (e) {
+              console.error('Failed to parse metadata:', e);
+            }
+
+            // Update the message with text content only (exclude metadata)
+            setChatMessages(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1] = {
+                ...newMessages[newMessages.length - 1],
+                content: textContent,
+                tokensUsed: metadata.tokensUsed,
+                apiCostUsd: metadata.apiCostUsd,
+              };
+              return newMessages;
+            });
+          } else {
+            // Update the message with accumulated content (streaming in progress)
+            setChatMessages(prev => {
+              const newMessages = [...prev];
+              newMessages[newMessages.length - 1] = {
+                ...newMessages[newMessages.length - 1],
+                content: aiResponseContent,
+              };
+              return newMessages;
+            });
+          }
         }
       }
     } catch (error) {
@@ -140,65 +165,63 @@ function ConsultationQualityDetailContent() {
     }
   };
 
-  // Handle generating chat recap
-  const handleGenerateRecap = async () => {
-    if (chatMessages.length === 0) {
-      toast({
-        title: '無對話記錄',
-        description: '請先進行對話後再生成摘要',
-        variant: 'destructive',
-      });
-      return;
-    }
 
-    setGeneratingRecap(true);
+  // Handle saving individual conversation to KB
+  const handleSaveConversation = async (messageId: string) => {
+    const messageIndex = chatMessages.findIndex(m => m.id === messageId);
+    if (messageIndex === -1 || messageIndex === 0) return; // Need at least question + answer
+
+    const userMessage = chatMessages[messageIndex - 1];
+    const aiMessage = chatMessages[messageIndex];
+
+    if (userMessage.role !== 'user' || aiMessage.role !== 'assistant') return;
+
+    // Mark as saving
+    setChatMessages(prev =>
+      prev.map(m =>
+        m.id === messageId ? { ...m, saving: true } : m
+      )
+    );
+
     try {
-      const response = await fetch(`/api/consultation-quality/${eodId}/chat/generate-recap`, {
+      const response = await fetch(`/api/consultation-quality/chat/save-conversation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          chatHistory: chatMessages,
-          chatSessionStart: chatSessionStart.current,
+          eodId,
+          question: userMessage.content,
+          answer: aiMessage.content,
+          tokensUsed: aiMessage.tokensUsed,
+          apiCostUsd: aiMessage.apiCostUsd,
         }),
       });
 
-      if (!response.ok) throw new Error('生成摘要失敗');
+      if (!response.ok) throw new Error('儲存失敗');
 
-      const result = await response.json();
       toast({
-        title: '✅ 摘要生成成功',
-        description: '對話摘要已儲存',
+        title: '✅ 已儲存',
+        description: '對話已存入知識庫',
       });
 
-      // Clear current chat after generating recap
-      setChatMessages([]);
-      chatSessionStart.current = new Date();
+      // Mark as saved
+      setChatMessages(prev =>
+        prev.map(m =>
+          m.id === messageId ? { ...m, saved: true, saving: false } : m
+        )
+      );
     } catch (error: any) {
       toast({
         title: '❌ 失敗',
         description: error.message,
         variant: 'destructive',
       });
-    } finally {
-      setGeneratingRecap(false);
-    }
-  };
 
-  // Handle viewing recap history
-  const handleViewRecaps = async () => {
-    try {
-      const response = await fetch(`/api/consultation-quality/${eodId}/chat/recaps`);
-      if (!response.ok) throw new Error('獲取歷史摘要失敗');
-
-      const result = await response.json();
-      setRecaps(result.data);
-      setShowRecapsModal(true);
-    } catch (error: any) {
-      toast({
-        title: '❌ 失敗',
-        description: error.message,
-        variant: 'destructive',
-      });
+      // Reset saving state
+      setChatMessages(prev =>
+        prev.map(m =>
+          m.id === messageId ? { ...m, saving: false } : m
+        )
+      );
     }
   };
 
@@ -430,18 +453,9 @@ function ConsultationQualityDetailContent() {
                     )}
                   </div>
                   <div className="flex gap-2">
-                    <Button
-                      onClick={() => saveToKBMutation.mutate()}
-                      disabled={saveToKBMutation.isPending}
-                      size="sm"
-                      variant="outline"
-                    >
-                      {saveToKBMutation.isPending ? (
-                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" />儲存中</>
-                      ) : (
-                        <><Save className="h-4 w-4 mr-2" />存入知識庫</>
-                      )}
-                    </Button>
+                    <div className="px-3 py-2 text-sm font-medium text-green-700 bg-green-50 rounded-md border border-green-200">
+                      ✓ 已自動存入
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -535,6 +549,31 @@ function ConsultationQualityDetailContent() {
                         >
                           <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                         </div>
+
+                        {/* AI response metadata: tokens, cost, and save button */}
+                        {message.role === 'assistant' && (
+                          <div className="mt-2 flex items-center gap-3 text-xs text-gray-500">
+                            {message.tokensUsed && (
+                              <span>🎯 {message.tokensUsed} tokens</span>
+                            )}
+                            {message.apiCostUsd && (
+                              <span>💰 ${message.apiCostUsd.toFixed(4)}</span>
+                            )}
+                            <button
+                              onClick={() => handleSaveConversation(message.id)}
+                              disabled={message.saved || message.saving}
+                              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                                message.saved
+                                  ? 'bg-green-100 text-green-700 cursor-default'
+                                  : message.saving
+                                  ? 'bg-gray-100 text-gray-400 cursor-wait'
+                                  : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                              }`}
+                            >
+                              {message.saving ? '儲存中...' : message.saved ? '✓ 已存入' : '存入知識庫'}
+                            </button>
+                          </div>
+                        )}
                       </div>
                       {message.role === 'user' && (
                         <div className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center flex-shrink-0 text-xs font-medium">
@@ -597,121 +636,34 @@ function ConsultationQualityDetailContent() {
                   </button>
                 </div>
 
-                {/* Recap Action Buttons */}
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    onClick={handleGenerateRecap}
-                    disabled={generatingRecap || chatMessages.length === 0}
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                  >
-                    {generatingRecap ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        儲存中...
-                      </>
-                    ) : (
-                      <>
-                        <Save className="h-4 w-4 mr-2" />
-                        存入知識庫
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={handleViewRecaps}
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                  >
-                    <History className="h-4 w-4 mr-2" />
-                    查看歷史摘要
-                  </Button>
-                </div>
+                {/* Total Statistics */}
+                {chatMessages.length > 0 && (() => {
+                  const totalTokens = chatMessages
+                    .filter(m => m.role === 'assistant' && m.tokensUsed)
+                    .reduce((sum, m) => sum + (m.tokensUsed || 0), 0);
+                  const totalCost = chatMessages
+                    .filter(m => m.role === 'assistant' && m.apiCostUsd)
+                    .reduce((sum, m) => sum + (m.apiCostUsd || 0), 0);
+
+                  return (
+                    <div className="border-t pt-3 mt-3">
+                      <div className="bg-blue-50 rounded-lg px-4 py-3">
+                        <div className="text-sm font-medium text-blue-900 mb-2">📊 本次對話統計</div>
+                        <div className="flex items-center gap-4 text-sm text-blue-700">
+                          <span>總 tokens: <strong>{totalTokens}</strong></span>
+                          <span className="text-blue-300">|</span>
+                          <span>總花費: <strong>${totalCost.toFixed(4)}</strong></span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </CardContent>
           </Card>
 
         </div>
       </div>
-
-      {/* Recaps History Modal */}
-      {showRecapsModal && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
-          onClick={() => setShowRecapsModal(false)}
-        >
-          <div
-            className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="border-b px-6 py-4 flex items-center justify-between">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
-                <History className="h-5 w-5 text-blue-600" />
-                歷史對話摘要
-              </h2>
-              <button
-                onClick={() => setShowRecapsModal(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <span className="text-2xl">&times;</span>
-              </button>
-            </div>
-
-            {/* Modal Content */}
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              {recaps.length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground">
-                  <History className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                  <p>尚無歷史摘要記錄</p>
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  {recaps.map((recap) => (
-                    <Card key={recap.id}>
-                      <CardHeader>
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <CardTitle className="text-base">
-                              對話摘要 #{recap.id.slice(0, 8)}
-                            </CardTitle>
-                            <p className="text-sm text-muted-foreground mt-1">
-                              {new Date(recap.generated_at).toLocaleString('zh-TW', {
-                                year: 'numeric',
-                                month: '2-digit',
-                                day: '2-digit',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                hour12: false,
-                              })} |{' '}
-                              {recap.total_messages} 則訊息 | {recap.total_questions} 個提問
-                            </p>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="prose prose-lg max-w-none">
-                          <ReactMarkdown>{recap.recap_summary}</ReactMarkdown>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="border-t px-6 py-4">
-              <Button onClick={() => setShowRecapsModal(false)} className="w-full">
-                關閉
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -76,7 +76,7 @@ export interface StudentKnowledgeBase {
   total_interactions: number;
   first_contact_date: string | null;
   last_interaction_date: string | null;
-  conversion_status: 'not_converted' | 'converted' | 'in_progress' | null;
+  conversion_status: 'renewed_high' | 'purchased_high' | 'purchased_trial' | 'not_purchased' | 'not_converted' | 'converted' | 'in_progress' | null;
   created_at: string;
   updated_at: string;
 }
@@ -141,9 +141,11 @@ export interface StudentFullContext {
   eodsRecords: EodsRecord[];
   aiAnalyses: AIAnalysisRecord[];
   consultationAnalyses: any[];  // Consultation AI analyses
-  aiConversations: any[];  // AI conversations
+  aiConversations: any[];  // Teacher AI conversations
+  consultantConversations: any[];  // Consultant AI conversations
+  chatRecaps: any[];  // Consultation chat recaps
   purchases: PurchaseRecord[];
-  totalAiCost: number;  // Total AI cost from all sources
+  totalAiCost: number;  // Total AI cost from all sources (4 sources)
 }
 
 export interface PresetQuestion {
@@ -161,6 +163,10 @@ export interface Conversation {
   question_type?: string;
   answer: string;
   created_at: string;
+  tokens_used?: number;
+  api_cost_usd?: number;
+  response_time_ms?: number;
+  is_cached?: boolean;
 }
 
 // ============================================================================

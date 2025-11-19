@@ -55,7 +55,7 @@ export function AIChatBox({ studentEmail, studentName }: AIChatBoxProps) {
     if (!customQuestion.trim()) return;
 
     askCustomMutation.mutate(
-      { question: customQuestion },
+      customQuestion,
       {
         onSuccess: () => {
           setCustomQuestion('');
@@ -68,7 +68,7 @@ export function AIChatBox({ studentEmail, studentName }: AIChatBoxProps) {
   const stats = conversations?.reduce(
     (acc, conv) => ({
       totalTokens: acc.totalTokens + (conv.tokens_used || 0),
-      totalCost: acc.totalCost + (parseFloat(conv.api_cost_usd || '0')),
+      totalCost: acc.totalCost + (typeof conv.api_cost_usd === 'number' ? conv.api_cost_usd : parseFloat(String(conv.api_cost_usd || '0'))),
       cachedCount: acc.cachedCount + (conv.is_cached ? 1 : 0),
     }),
     { totalTokens: 0, totalCost: 0, cachedCount: 0 }
@@ -174,7 +174,7 @@ export function AIChatBox({ studentEmail, studentName }: AIChatBoxProps) {
                   <div className="flex items-center gap-4 text-xs text-gray-500 ml-6 pl-10">
                     <span className="flex items-center gap-1">
                       <DollarSign className="h-3 w-3" />
-                      ${conv.api_cost_usd ? parseFloat(conv.api_cost_usd).toFixed(4) : '0.0000'}
+                      ${conv.api_cost_usd ? (typeof conv.api_cost_usd === 'number' ? conv.api_cost_usd : parseFloat(String(conv.api_cost_usd))).toFixed(4) : '0.0000'}
                     </span>
                     <span>{conv.tokens_used || 0} tokens</span>
                     <span>{conv.response_time_ms ? `${conv.response_time_ms}ms` : '-'}</span>

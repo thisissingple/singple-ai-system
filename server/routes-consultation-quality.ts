@@ -691,16 +691,22 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
           raw_markdown_output,
           tokens_used,
           response_time_ms,
-          api_cost_usd
+          api_cost_usd,
+          analyzed_at
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+          ($22::timestamptz AT TIME ZONE 'UTC')
         )
         RETURNING *
       `;
 
+      // Get current UTC timestamp as ISO string (timestamptz compatible)
+      const analyzedAt = new Date().toISOString();
+
       // DEBUG: Log raw markdown output before saving
       console.log('🔍 [DEBUG] Raw markdown output length:', analysis.rawMarkdownOutput?.length || 0);
       console.log('🔍 [DEBUG] Raw markdown preview:', analysis.rawMarkdownOutput?.substring(0, 200));
+      console.log('🔍 [DEBUG] analyzed_at (UTC):', analyzedAt);
 
       const insertResult = await pool.query(insertQuery, [
         eodId,
@@ -724,6 +730,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
         analysis.tokensUsed || null,
         analysis.responseTimeMs || null,
         analysis.apiCostUsd || null,
+        analyzedAt,  // Explicit UTC timestamp from Node.js
       ]);
 
       // DEBUG: Log what was saved
@@ -834,6 +841,39 @@ ${aiAnalysis || '（無分析結果）'}`;
         res.write(chunk);
       }
 
+      // After streaming completes, send metadata
+      const usage = await result.usage;
+
+      console.log('[Chat API] Raw usage object:', usage);
+
+      // AI SDK v5 uses inputTokens/outputTokens instead of promptTokens/completionTokens
+      const promptTokens = usage?.inputTokens || 0;
+      const completionTokens = usage?.outputTokens || 0;
+      const totalTokens = usage?.totalTokens || (promptTokens + completionTokens);
+
+      // Calculate cost based on model (gpt-4o pricing: $2.50/1M input, $10/1M output)
+      const apiCostUsd = config.chat_ai_model.includes('gpt-4o')
+        ? (promptTokens * 0.0000025 + completionTokens * 0.00001)
+        : (promptTokens * 0.0000005 + completionTokens * 0.0000015); // gpt-3.5-turbo fallback
+
+      console.log('[Chat API] Usage:', {
+        model: config.chat_ai_model,
+        inputTokens: promptTokens,
+        outputTokens: completionTokens,
+        totalTokens,
+        apiCostUsd,
+      });
+
+      const metadata = {
+        tokensUsed: totalTokens,
+        model: config.chat_ai_model,
+        apiCostUsd,
+      };
+
+      // Send metadata after a delimiter
+      res.write('\n<<<METADATA>>>\n');
+      res.write(JSON.stringify(metadata));
+
       res.end();
     } catch (error: any) {
       console.error('Chat error:', error);
@@ -928,6 +968,144 @@ ${aiAnalysis || '（無分析結果）'}`;
       });
     } catch (error: any) {
       console.error('Failed to generate chat recap:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // 9.5. POST /api/consultation-quality/chat/save-conversation
+  // Save single Q&A conversation to consultant_ai_conversations
+  // ============================================================================
+  app.post('/api/consultation-quality/chat/save-conversation', isAuthenticated, async (req: any, res) => {
+    try {
+      const {
+        eodId,
+        question,
+        answer,
+        tokensUsed,
+        apiCostUsd,
+        responseTimeMs,
+        model = 'gpt-4o',
+      } = req.body;
+
+      if (!question || !answer) {
+        return res.status(400).json({ error: '問題和答案不能為空' });
+      }
+
+      const pool = createPool();
+
+      // Get consultation info for redundant fields
+      let studentEmail, studentName, consultantId, consultantName, analysisId, consultationDate;
+
+      if (eodId) {
+        const consultationQuery = `
+          SELECT
+            e.student_email,
+            e.student_name,
+            e.closer_name,
+            e.consultation_date,
+            cqa.id as analysis_id
+          FROM eods_for_closers e
+          LEFT JOIN consultation_quality_analysis cqa ON e.id = cqa.eod_id
+          WHERE e.id = $1
+        `;
+        const result = await pool.query(consultationQuery, [eodId]);
+
+        if (result.rows.length > 0) {
+          const record = result.rows[0];
+          studentEmail = record.student_email;
+          studentName = record.student_name;
+          consultantName = record.closer_name;
+          consultationDate = record.consultation_date;
+          analysisId = record.analysis_id;
+
+          // Find consultant email from users table
+          const userQuery = await pool.query(`
+            SELECT email FROM users
+            WHERE (
+              first_name = $1
+              OR CONCAT(first_name, ' ', COALESCE(last_name, '')) = $1
+              OR CONCAT(first_name, last_name) = $1
+            )
+            AND 'consultant' = ANY(roles)
+            LIMIT 1
+          `, [consultantName]);
+
+          consultantId = userQuery.rows.length > 0 ? userQuery.rows[0].email : consultantName;
+        }
+      }
+
+      // Default values if not found
+      consultantId = consultantId || req.session?.user?.email || 'unknown';
+      studentEmail = studentEmail || 'unknown';
+
+      // Insert conversation
+      const insertQuery = `
+        INSERT INTO consultant_ai_conversations (
+          consultant_id,
+          student_email,
+          eod_id,
+          analysis_id,
+          question,
+          answer,
+          question_type,
+          tokens_used,
+          model,
+          response_time_ms,
+          api_cost_usd,
+          created_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, 'custom', $7, $8, $9, $10, NOW()
+        )
+        RETURNING *
+      `;
+
+      const insertResult = await pool.query(insertQuery, [
+        consultantId,
+        studentEmail,
+        eodId || null,
+        analysisId || null,
+        question,
+        answer,
+        tokensUsed || null,
+        model,
+        responseTimeMs || null,
+        apiCostUsd || null,
+      ]);
+
+      await pool.end();
+
+      const savedConversation = insertResult.rows[0];
+
+      // Save to student knowledge base
+      if (studentEmail && studentEmail !== 'unknown') {
+        try {
+          await getOrCreateStudentKB(studentEmail, studentName || studentEmail);
+          await addDataSourceRef(studentEmail, 'consultant_conversations', savedConversation.id);
+          console.log(`✅ Saved conversation ${savedConversation.id} to student KB for ${studentEmail}`);
+        } catch (err) {
+          console.error('Failed to save to student KB:', err);
+        }
+      }
+
+      // Save to consultant knowledge base
+      if (consultantId && consultantName) {
+        try {
+          await getOrCreateConsultantKB(consultantId, consultantName);
+          await addConsultantDataSourceRef(consultantId, 'consultant_conversations', savedConversation.id);
+          console.log(`✅ Saved conversation ${savedConversation.id} to consultant KB for ${consultantName}`);
+        } catch (err) {
+          console.error('Failed to save to consultant KB:', err);
+        }
+      }
+
+      res.json({
+        success: true,
+        data: savedConversation,
+        message: '對話已儲存至知識庫',
+      });
+    } catch (error: any) {
+      console.error('Failed to save conversation:', error);
       res.status(500).json({ error: error.message });
     }
   });
