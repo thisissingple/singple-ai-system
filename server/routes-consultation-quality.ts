@@ -790,6 +790,24 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
     try {
       const { messages, eodId, consultationTranscript, aiAnalysis } = req.body;
 
+      // 🔍 DEBUG: Log incoming messages to detect image data
+      console.log('[Chat API] Incoming request:', {
+        messageCount: messages?.length || 0,
+        eodId,
+        hasTranscript: !!consultationTranscript,
+        hasAnalysis: !!aiAnalysis,
+      });
+
+      // 🔍 Validate messages array - ensure no image content
+      if (messages && Array.isArray(messages)) {
+        messages.forEach((msg: any, index: number) => {
+          if (typeof msg.content !== 'string') {
+            console.error(`[Chat API] ❌ Message ${index} has non-string content:`, typeof msg.content);
+            console.error(`[Chat API] Content structure:`, JSON.stringify(msg.content).substring(0, 200));
+          }
+        });
+      }
+
       if (!process.env.OPENAI_API_KEY) {
         return res.status(500).json({ error: 'OpenAI API key not configured' });
       }

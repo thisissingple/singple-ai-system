@@ -1,11 +1,70 @@
 # 📊 專案進度追蹤文檔
 
-> **最後更新**: 2025-11-18
+> **最後更新**: 2025-11-20
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ 學員知識庫 AI 成本追蹤與諮詢整合完成
-> **當前階段**: 學員知識庫系統優化
-> **今日進度**: 整合諮詢 AI 分析與逐字稿到知識庫歷程
+> **專案狀態**: ✅ 修復諮詢 AI 分析級聯刪除問題
+> **當前階段**: 資料庫架構修正與穩定性提升
+> **今日進度**: 修復 Google Sheets 同步時 AI 分析記錄遺失問題
 > **整體進度**: 99.9% ████████████████████
+
+---
+
+## 📅 2025-11-20 更新日誌
+
+### 🐛 修復諮詢 AI 分析級聯刪除問題
+
+#### 問題描述
+當執行 Google Sheets 同步時，系統報錯：
+```
+同步失敗: null value in column "eod_id" of relation "consultation_quality_analysis" violates not-null constraint
+```
+
+#### 根因分析
+1. **Migration 060** 將 `consultation_quality_analysis.eod_id` 的外鍵約束從 `ON DELETE CASCADE` 改為 `ON DELETE SET NULL`
+   - 目的：當 `eods_for_closers` 被 Google Sheets 同步刪除時，保留 AI 分析記錄
+   - 檔案：[`supabase/migrations/060_fix_consultation_cascade_deletion.sql:39-44`](supabase/migrations/060_fix_consultation_cascade_deletion.sql#L39-L44)
+
+2. **問題**：`eod_id` 欄位仍有 `NOT NULL` 約束（來自 Migration 046）
+   - 原始定義：`eod_id UUID NOT NULL REFERENCES eods_for_closers(id) ON DELETE CASCADE`
+   - 檔案：[`supabase/migrations/046_add_consultation_ai_analysis.sql:32`](supabase/migrations/046_add_consultation_ai_analysis.sql#L32)
+
+3. **矛盾**：
+   - 外鍵約束：刪除時設為 NULL ❌
+   - NOT NULL 約束：此欄位不能為 NULL ❌
+   - 結果：PostgreSQL 無法執行 `SET NULL` 操作，違反 NOT NULL 約束
+
+#### 解決方案
+
+**Migration 061**: 移除 `eod_id` NOT NULL 約束
+- 檔案：[`supabase/migrations/061_remove_eod_id_not_null_constraint.sql`](supabase/migrations/061_remove_eod_id_not_null_constraint.sql)
+- 執行命令：
+  ```sql
+  ALTER TABLE consultation_quality_analysis
+    ALTER COLUMN eod_id DROP NOT NULL;
+  ```
+
+#### 驗證測試
+執行完整的級聯刪除測試：
+1. ✅ 建立測試諮詢記錄
+2. ✅ 建立 AI 分析記錄（關聯到諮詢記錄）
+3. ✅ 刪除諮詢記錄（模擬 Google Sheets 同步）
+4. ✅ AI 分析記錄保留，`eod_id` 成功設為 NULL
+5. ✅ 重要資訊從 `*_cached` 欄位正常讀取
+
+#### 效果
+現在當 Google Sheets 同步刪除 `eods_for_closers` 記錄時：
+- ✅ AI 分析記錄會保留（不再遺失）
+- ✅ `eod_id` 被設為 NULL（不再報錯）
+- ✅ 關鍵資訊仍可從冗餘欄位取得：
+  - `student_email_cached`
+  - `consultation_date_cached`
+  - `consultant_name_cached`
+
+#### 受影響的表
+同樣的架構也應用於以下表：
+- `consultation_quality_analysis` ← **本次修復**
+- `consultation_chat_recaps`
+- `consultant_ai_conversations`
 
 ---
 
