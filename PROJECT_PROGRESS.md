@@ -11,22 +11,26 @@
 
 ## 📅 2025-11-20 更新日誌
 
-### 🐛 修復諮詢 AI 分析級聯刪除問題
+### 🐛 修復諮詢相關表級聯刪除問題（完整修復）
 
 #### 問題描述
-當執行 Google Sheets 同步時，系統報錯：
-```
-同步失敗: null value in column "eod_id" of relation "consultation_quality_analysis" violates not-null constraint
-```
+當執行 Google Sheets 同步時，系統連續報錯：
+1. 第一次錯誤：`null value in column "eod_id" of relation "consultation_quality_analysis" violates not-null constraint`
+2. 第二次錯誤：`null value in column "eod_id" of relation "consultation_chat_recaps" violates not-null constraint`
 
 #### 根因分析
-1. **Migration 060** 將 `consultation_quality_analysis.eod_id` 的外鍵約束從 `ON DELETE CASCADE` 改為 `ON DELETE SET NULL`
-   - 目的：當 `eods_for_closers` 被 Google Sheets 同步刪除時，保留 AI 分析記錄
-   - 檔案：[`supabase/migrations/060_fix_consultation_cascade_deletion.sql:39-44`](supabase/migrations/060_fix_consultation_cascade_deletion.sql#L39-L44)
+**Migration 060 的不完整修復**：
 
-2. **問題**：`eod_id` 欄位仍有 `NOT NULL` 約束（來自 Migration 046）
-   - 原始定義：`eod_id UUID NOT NULL REFERENCES eods_for_closers(id) ON DELETE CASCADE`
-   - 檔案：[`supabase/migrations/046_add_consultation_ai_analysis.sql:32`](supabase/migrations/046_add_consultation_ai_analysis.sql#L32)
+1. **Migration 060** 將三個表的外鍵約束從 `ON DELETE CASCADE` 改為 `ON DELETE SET NULL`：
+   - `consultation_quality_analysis`
+   - `consultation_chat_recaps`
+   - `consultant_ai_conversations`
+   - 目的：當 `eods_for_closers` 被 Google Sheets 同步刪除時，保留 AI 相關記錄
+   - 檔案：[`supabase/migrations/060_fix_consultation_cascade_deletion.sql`](supabase/migrations/060_fix_consultation_cascade_deletion.sql)
+
+2. **問題**：`eod_id` 欄位仍有 `NOT NULL` 約束（來自原始 migrations）
+   - `consultation_quality_analysis`: Migration 046 第 32 行
+   - `consultation_chat_recaps`: Migration 051 第 11 行
 
 3. **矛盾**：
    - 外鍵約束：刪除時設為 NULL ❌
@@ -35,7 +39,7 @@
 
 #### 解決方案
 
-**Migration 061**: 移除 `eod_id` NOT NULL 約束
+**Migration 061**: 移除 `consultation_quality_analysis.eod_id` NOT NULL 約束
 - 檔案：[`supabase/migrations/061_remove_eod_id_not_null_constraint.sql`](supabase/migrations/061_remove_eod_id_not_null_constraint.sql)
 - 執行命令：
   ```sql
@@ -43,28 +47,52 @@
     ALTER COLUMN eod_id DROP NOT NULL;
   ```
 
+**Migration 062**: 移除 `consultation_chat_recaps.eod_id` NOT NULL 約束
+- 檔案：[`supabase/migrations/062_remove_chat_recaps_eod_id_not_null.sql`](supabase/migrations/062_remove_chat_recaps_eod_id_not_null.sql)
+- 執行命令：
+  ```sql
+  ALTER TABLE consultation_chat_recaps
+    ALTER COLUMN eod_id DROP NOT NULL;
+  ```
+
 #### 驗證測試
-執行完整的級聯刪除測試：
+
+**測試 1: consultation_quality_analysis**
 1. ✅ 建立測試諮詢記錄
 2. ✅ 建立 AI 分析記錄（關聯到諮詢記錄）
 3. ✅ 刪除諮詢記錄（模擬 Google Sheets 同步）
 4. ✅ AI 分析記錄保留，`eod_id` 成功設為 NULL
 5. ✅ 重要資訊從 `*_cached` 欄位正常讀取
 
+**測試 2: consultation_chat_recaps**
+1. ✅ 建立測試諮詢記錄
+2. ✅ 建立對話摘要記錄（關聯到諮詢記錄）
+3. ✅ 刪除諮詢記錄（模擬 Google Sheets 同步）
+4. ✅ 對話摘要記錄保留，`eod_id` 成功設為 NULL
+5. ✅ 重要資訊從 `consultation_date_cached` 欄位正常讀取
+
+#### 最終狀態檢查
+
+| 表名 | eod_id 可為 NULL | FK DELETE 規則 | 狀態 |
+|------|-----------------|----------------|------|
+| `consultation_quality_analysis` | ✅ YES | ✅ SET NULL | ✅ 正常 |
+| `consultation_chat_recaps` | ✅ YES | ✅ SET NULL | ✅ 正常 |
+| `consultant_ai_conversations` | ✅ YES | ✅ SET NULL | ✅ 正常 |
+
 #### 效果
 現在當 Google Sheets 同步刪除 `eods_for_closers` 記錄時：
-- ✅ AI 分析記錄會保留（不再遺失）
+- ✅ 所有 AI 相關記錄會保留（不再遺失）
 - ✅ `eod_id` 被設為 NULL（不再報錯）
 - ✅ 關鍵資訊仍可從冗餘欄位取得：
   - `student_email_cached`
   - `consultation_date_cached`
   - `consultant_name_cached`
 
-#### 受影響的表
-同樣的架構也應用於以下表：
-- `consultation_quality_analysis` ← **本次修復**
-- `consultation_chat_recaps`
-- `consultant_ai_conversations`
+#### 為什麼需要兩次修復？
+Google Sheets 同步會刪除 `eods_for_closers` 記錄，觸發**所有相關表**的級聯刪除：
+1. 第一次同步：`consultation_quality_analysis` 報錯 → Migration 061 修復
+2. 第二次同步：`consultation_chat_recaps` 報錯 → Migration 062 修復
+3. `consultant_ai_conversations` 已經是正確的（可能在 Migration 060 中已處理）
 
 ---
 
