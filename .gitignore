@@ -47,3 +47,10 @@ logs/
 *.temp
 .DS_Store
 .github-credentials
+
+# Employee Demo Pages (private, local only)
+client/src/pages/students/student-profile-demo.tsx
+client/src/pages/students/student-profile-gamified.tsx
+client/src/pages/reports/trial-overview-gamified.tsx
+client/src/pages/teacher-workspace.tsx
+Duolingo web Oct 2025/
