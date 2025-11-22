@@ -36,7 +36,9 @@ import {
   Wand2,
   Search,
   BarChart3,
-  Users
+  Users,
+  CheckCircle2,
+  XCircle
 } from 'lucide-react';
 import type { PeriodType, TotalReportData } from '@/types/trial-report';
 
@@ -58,6 +60,7 @@ interface StudentAnalysisRecord {
   conversion_status: 'converted' | 'not_converted' | 'pending' | null;
   has_transcript: boolean;
   attendance_id: string;
+  is_showed?: boolean;
 }
 
 interface Teacher {
@@ -108,6 +111,7 @@ export default function TrialOverview() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(true);
   const [analyzingIds, setAnalyzingIds] = useState<string[]>([]);
+  const [dataQualityWarnings, setDataQualityWarnings] = useState<any[]>([]); // 🆕 資料品質警告
 
   // 🆕 Progress tracking for each analyzing record
   type ProgressInfo = {
@@ -240,6 +244,7 @@ export default function TrialOverview() {
       const data = await response.json();
       setAnalysisRecords(data.data.records || []);
       setTeachers(data.data.teachers || []);
+      setDataQualityWarnings(data.data.dataQualityWarnings || []); // 🆕 儲存資料品質警告
     } catch (error: any) {
       console.error('Failed to fetch analysis data:', error);
       toast({
@@ -686,6 +691,48 @@ export default function TrialOverview() {
 
           {/* ==================== Tab 2: 體驗課分析 ==================== */}
           <TabsContent value="analysis" className="mt-6 space-y-6">
+            {/* 🆕 資料品質警告 */}
+            {dataQualityWarnings.length > 0 && (
+              <Alert variant="default" className="border-yellow-500 bg-yellow-50">
+                <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                <AlertTitle className="text-yellow-800">資料品質問題</AlertTitle>
+                <AlertDescription className="text-yellow-700">
+                  {dataQualityWarnings.map((warning, index) => (
+                    <div key={index} className="mb-4 last:mb-0">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <p className="font-medium mb-2">{warning.message}</p>
+                          {warning.affectedStudents && warning.affectedStudents.length > 0 && (
+                            <div className="text-sm">
+                              <span className="font-medium">受影響學員：</span>
+                              <span className="ml-2">
+                                {warning.affectedStudents.slice(0, 3).map((s: any) => s.name).join('、')}
+                                {warning.affectedStudents.length > 3 && ` 等 ${warning.affectedStudents.length} 位`}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            // 暫時使用 alert，之後可以導向到資料修正頁面
+                            const studentList = warning.affectedStudents
+                              .map((s: any) => `${s.name} (${s.email})`)
+                              .join('\n');
+                            alert(`需要修正的學員：\n\n${studentList}`);
+                          }}
+                          className="shrink-0"
+                        >
+                          查看並修正
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </AlertDescription>
+              </Alert>
+            )}
+
             {/* 篩選選項 */}
             <Card>
               <CardHeader>
@@ -774,6 +821,7 @@ export default function TrialOverview() {
                           <TableHead className="whitespace-nowrap">學員姓名</TableHead>
                           <TableHead className="whitespace-nowrap">諮詢師/老師</TableHead>
                           <TableHead className="whitespace-nowrap">體驗課日期</TableHead>
+                          <TableHead className="text-center whitespace-nowrap">是否上線</TableHead>
                           <TableHead className="text-center whitespace-nowrap">老師表現總評分</TableHead>
                           <TableHead className="whitespace-nowrap">方案名稱</TableHead>
                           <TableHead className="whitespace-nowrap">剩餘堂數</TableHead>
@@ -787,6 +835,23 @@ export default function TrialOverview() {
                             <TableCell className="font-medium">{record.student_name}</TableCell>
                             <TableCell>{record.teacher_name}</TableCell>
                             <TableCell>{formatDate(record.class_date)}</TableCell>
+                            <TableCell className="text-center">
+                              {record.is_showed !== undefined && record.is_showed !== null ? (
+                                record.is_showed ? (
+                                  <div className="flex items-center justify-center gap-1 text-green-600">
+                                    <CheckCircle2 className="w-4 h-4" />
+                                    <span className="text-sm">已上線</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-center gap-1 text-red-600">
+                                    <XCircle className="w-4 h-4" />
+                                    <span className="text-sm">未上線</span>
+                                  </div>
+                                )
+                              ) : (
+                                <span className="text-sm text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
                             <TableCell className="text-center">
                               {record.id && record.overall_score !== null ? (
                                 <div className="flex flex-col items-center gap-1">

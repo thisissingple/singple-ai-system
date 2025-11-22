@@ -10,6 +10,99 @@ import { parseScoresFromMarkdown } from './services/parse-teaching-scores';
 import { getOrCreateStudentKB, addDataSourceRef } from './services/student-knowledge-service';
 import { parseNumberField } from './services/reporting/field-mapping-v2';
 
+/**
+ * 根據方案名稱推斷總堂數
+ */
+function inferTotalLessons(packageName: string): number {
+  if (!packageName) return 4; // 預設值
+
+  if (packageName.includes('pro')) return 2;
+  if (packageName.includes('終極')) return 1;
+  if (packageName.includes('12堂')) return 12;
+
+  // 預設為初學專案 4 堂
+  return 4;
+}
+
+/**
+ * 處理學員的多筆購買記錄
+ * 支援：
+ * 1. 相同方案合併（例如兩個初學專案 = 8 堂）
+ * 2. 按購買日期排序
+ * 3. 按時間順序分配打卡記錄
+ */
+interface PurchasePackage {
+  name: string;
+  totalLessons: number;
+  purchaseDate: Date;
+  usedLessons: number; // 已使用堂數
+}
+
+function processPurchases(purchaseData: any[], attendanceData: any[]): {
+  packages: PurchasePackage[];
+  displayText: string;
+  totalRemaining: number;
+} {
+  // 1. 過濾掉無效的購買記錄（package_name 為 null），然後按購買日期排序
+  const sortedPurchases = purchaseData
+    .filter(p => p.package_name) // 🆕 過濾掉 package_name 為 null 的記錄
+    .map(p => ({
+      name: p.package_name,
+      totalLessons: inferTotalLessons(p.package_name),
+      purchaseDate: p.purchase_date ? new Date(p.purchase_date) : new Date(0),
+    }))
+    .sort((a, b) => a.purchaseDate.getTime() - b.purchaseDate.getTime());
+
+  // 2. 合併相同方案
+  const mergedPackages: PurchasePackage[] = [];
+  sortedPurchases.forEach(p => {
+    const existing = mergedPackages.find(pkg => pkg.name === p.name);
+    if (existing) {
+      existing.totalLessons += p.totalLessons;
+    } else {
+      mergedPackages.push({
+        ...p,
+        usedLessons: 0
+      });
+    }
+  });
+
+  // 3. 按時間順序分配打卡記錄
+  const sortedAttendance = attendanceData
+    .slice()
+    .sort((a, b) => new Date(a.class_date).getTime() - new Date(b.class_date).getTime());
+
+  let packageIndex = 0;
+  sortedAttendance.forEach(attendance => {
+    // 找到還有剩餘堂數的方案
+    while (packageIndex < mergedPackages.length) {
+      const pkg = mergedPackages[packageIndex];
+      if (pkg.usedLessons < pkg.totalLessons) {
+        pkg.usedLessons++;
+        break;
+      } else {
+        packageIndex++;
+      }
+    }
+  });
+
+  // 4. 計算總剩餘堂數
+  const totalRemaining = mergedPackages.reduce((sum, pkg) => {
+    return sum + (pkg.totalLessons - pkg.usedLessons);
+  }, 0);
+
+  // 5. 生成顯示文字（只顯示方案名稱，不顯示剩餘次數）
+  const displayText = mergedPackages
+    .map(pkg => pkg.name)
+    .join(', ');
+
+  return {
+    packages: mergedPackages,
+    displayText,
+    totalRemaining
+  };
+}
+
 export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
   // 0. Get student records with analysis status (for main list page)
   app.get('/api/teaching-quality/student-records', isAuthenticated, async (req: any, res) => {
@@ -29,7 +122,8 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
           class_date,
           class_transcript,
           no_conversion_reason,
-          ai_analysis_id
+          ai_analysis_id,
+          is_showed
         `)
         .order('class_date', { ascending: false })
         .limit(200);
@@ -80,7 +174,9 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
       // Get purchase data for students and calculate remaining classes dynamically
       // Keep original emails for database queries
       const studentEmails = attendanceRecords?.map(r => r.student_email).filter(Boolean) || [];
-      let purchaseMap = new Map();
+
+      // 🆕 儲存每個學員的「所有」購買記錄（支援多筆）
+      let purchasesByEmail = new Map<string, any[]>();
 
       // Get ALL attendance records for calculating "remaining classes at that time"
       let allAttendanceByEmail = new Map<string, any[]>();
@@ -105,27 +201,17 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
       if (studentEmails.length > 0) {
         const { data: purchaseData, error: purchaseError } = await supabase
           .from('trial_class_purchases')
-          .select('student_email, package_name, remaining_classes, current_status')
-          .in('student_email', studentEmails);
+          .select('student_email, package_name, purchase_date')
+          .in('student_email', studentEmails)
+          .order('purchase_date', { ascending: true });
 
         if (!purchaseError && purchaseData) {
+          // 🆕 收集所有購買記錄（不覆蓋）
           purchaseData.forEach((p: any) => {
-            // 假設「初學專案」是 4 堂，「高音pro」是 2 堂，「高音終極方程式」是 1 堂
-            let totalLessons = 4; // 預設
-            if (p.package_name?.includes('pro')) {
-              totalLessons = 2;
-            } else if (p.package_name?.includes('終極')) {
-              totalLessons = 1;
-            } else if (p.package_name?.includes('12堂')) {
-              totalLessons = 12;
-            }
-
-            // Normalize email to lowercase for consistent matching
             const normalizedEmail = p.student_email?.toLowerCase();
-            purchaseMap.set(normalizedEmail, {
-              ...p,
-              total_lessons: totalLessons
-            });
+            const records = purchasesByEmail.get(normalizedEmail) || [];
+            records.push(p);
+            purchasesByEmail.set(normalizedEmail, records);
           });
         }
       }
@@ -166,11 +252,37 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         const analysis = analysisMap.get(row.ai_analysis_id);
         // Normalize email for lookup
         const normalizedEmail = row.student_email?.toLowerCase();
-        const purchase = purchaseMap.get(normalizedEmail);
 
         const strengths = analysis?.strengths ? (typeof analysis.strengths === 'string' ? JSON.parse(analysis.strengths) : analysis.strengths) : [];
         const weaknesses = analysis?.weaknesses ? (typeof analysis.weaknesses === 'string' ? JSON.parse(analysis.weaknesses) : analysis.weaknesses) : [];
         const suggestions = analysis?.suggestions ? (typeof analysis.suggestions === 'string' ? JSON.parse(analysis.suggestions) : analysis.suggestions) : [];
+
+        // 🆕 處理多筆購買記錄
+        const studentPurchases = purchasesByEmail.get(normalizedEmail) || [];
+        const studentAttendance = allAttendanceByEmail.get(normalizedEmail) || [];
+
+        // 使用 processPurchases 函數計算剩餘堂數和方案名稱
+        let packageDisplay = null;
+        let remainingDisplay = null;
+        let totalRemaining = 0;
+
+        if (studentPurchases.length > 0) {
+          // 取得「在該上課日期當下」的出席記錄
+          const attendanceBeforeOrOn = studentAttendance.filter((a: any) => {
+            const aDate = new Date(a.class_date);
+            const rowDate = new Date(row.class_date);
+            return aDate <= rowDate;
+          });
+
+          const purchaseInfo = processPurchases(studentPurchases, attendanceBeforeOrOn);
+
+          // 🆕 只有在有有效方案時才設定顯示值
+          if (purchaseInfo.displayText) {
+            packageDisplay = purchaseInfo.displayText;
+            remainingDisplay = `${purchaseInfo.totalRemaining} 堂`;
+            totalRemaining = purchaseInfo.totalRemaining;
+          }
+        }
 
         // 🆕 Calculate conversion status using the same logic as total-report-service
         // Priority: 已轉高 > 未轉高 > 體驗中 > 未開始
@@ -178,38 +290,18 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         const hasAttendance = true; // We're already looking at an attendance record
         const hasHighLevelDeal = (dealAmountMap.get(normalizedEmail) || 0) > 0;
 
-        // Use normalized email for Map lookup
-        const studentAttendance = allAttendanceByEmail.get(normalizedEmail) || [];
-        const noRemainingClasses = purchase?.total_lessons && studentAttendance.length >= purchase.total_lessons;
-
         if (hasHighLevelDeal) {
-          // 1. 優先級最高：有成交記錄 → 已轉高
+          // 1. 優先級最高：有高階一對一或高音的成交記錄 → 已轉高
           conversionStatus = '已轉高';
-        } else if (noRemainingClasses && hasAttendance) {
-          // 2. 剩餘堂數 = 0 且沒有成交 → 未轉高
+        } else if (totalRemaining === 0 && hasAttendance) {
+          // 2. 剩餘堂數 = 0 且沒有高階成交 → 未轉高
           conversionStatus = '未轉高';
-        } else if (hasAttendance) {
-          // 3. 有打卡記錄 → 體驗中
+        } else if (hasAttendance && totalRemaining > 0) {
+          // 3. 有打卡記錄且還有剩餘堂數 → 體驗中
           conversionStatus = '體驗中';
         } else {
-          // 4. 沒有打卡記錄 → 未開始 (此分支在此 API 不會執行,因為我們只查詢有出席記錄的學生)
+          // 4. 沒有打卡記錄 → 未開始 (此分支在此 API 不會執行)
           conversionStatus = '未開始';
-        }
-
-        // Calculate remaining classes AT THIS CLASS DATE
-        let calculatedRemaining = null;
-        if (purchase) {
-          // Use normalized email for Map lookup
-          const studentAttendance = allAttendanceByEmail.get(normalizedEmail) || [];
-          // Count classes BEFORE or ON this class date
-          const classesBeforeOrOn = studentAttendance.filter((a: any) => {
-            const aDate = new Date(a.class_date);
-            const rowDate = new Date(row.class_date);
-            return aDate <= rowDate;
-          }).length;
-
-          // Remaining = Total - Classes completed (including this one)
-          calculatedRemaining = Math.max(0, purchase.total_lessons - classesBeforeOrOn);
         }
 
         return {
@@ -218,6 +310,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
           teacher_name: row.teacher_name,
           class_date: row.class_date,
           has_transcript: !!row.class_transcript && row.class_transcript.trim().length > 0,
+          is_showed: row.is_showed,
           id: analysis?.id || null,
           overall_score: analysis?.overall_score || null,
 
@@ -232,9 +325,9 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
           suggestions: suggestions,
           class_summary: analysis?.class_summary || null,
 
-          // Purchase info (使用動態計算的剩餘堂數 - 基於該上課日期)
-          package_name: purchase?.package_name || null,
-          remaining_classes: calculatedRemaining !== null ? `${calculatedRemaining} 堂` : null,
+          // 🆕 Purchase info (支援多筆購買記錄)
+          package_name: packageDisplay,
+          remaining_classes: remainingDisplay,
           conversion_status: conversionStatus
         };
       }) || [];
@@ -273,11 +366,77 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         .map(([name, count]) => ({ name, count }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
+      // 🆕 資料品質檢查
+      const dataQualityWarnings: any[] = [];
+
+      if (studentEmails.length > 0) {
+        // 1. 檢查是否有 package_name 為 null 的購買記錄
+        const { data: invalidPurchases, error: invalidError } = await supabase
+          .from('trial_class_purchases')
+          .select('student_name, student_email')
+          .in('student_email', studentEmails)
+          .is('package_name', null);
+
+        if (!invalidError && invalidPurchases && invalidPurchases.length > 0) {
+          const uniqueStudents = Array.from(new Set(invalidPurchases.map(p => p.student_email)))
+            .map(email => {
+              const record = invalidPurchases.find(p => p.student_email === email);
+              return {
+                email,
+                name: record?.student_name || '未知'
+              };
+            });
+
+          dataQualityWarnings.push({
+            type: 'missing_package_name',
+            severity: 'warning',
+            message: `${uniqueStudents.length} 位學員的購買記錄缺少方案名稱`,
+            affectedStudents: uniqueStudents,
+            actionUrl: '/settings/data-quality' // 假設有這個頁面
+          });
+        }
+
+        // 2. 檢查是否有學員有出席記錄但沒有購買記錄
+        const { data: allPurchases, error: purchaseError } = await supabase
+          .from('trial_class_purchases')
+          .select('student_email')
+          .in('student_email', studentEmails);
+
+        if (!purchaseError) {
+          const studentsWithPurchase = new Set(
+            allPurchases?.map(p => p.student_email.toLowerCase()) || []
+          );
+
+          const studentsWithoutPurchase = attendanceRecords
+            ?.filter(r => !studentsWithPurchase.has(r.student_email?.toLowerCase()))
+            .map(r => ({
+              email: r.student_email,
+              name: r.student_name
+            })) || [];
+
+          // 去重
+          const uniqueNoPurchase = Array.from(
+            new Map(studentsWithoutPurchase.map(s => [s.email, s])).values()
+          );
+
+          if (uniqueNoPurchase.length > 0) {
+            dataQualityWarnings.push({
+              type: 'missing_purchase_record',
+              severity: 'warning',
+              message: `${uniqueNoPurchase.length} 位學員有出席記錄但缺少購買記錄`,
+              affectedStudents: uniqueNoPurchase,
+              actionUrl: '/settings/data-quality'
+            });
+          }
+        }
+      }
+
       res.json({
         success: true,
         data: {
           records,
-          teachers
+          teachers,
+          dataQualityWarnings
         }
       });
     } catch (error: any) {
