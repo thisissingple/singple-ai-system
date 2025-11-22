@@ -89,7 +89,10 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
           cqa.analyzed_at
 
         FROM eods_for_closers e
-        LEFT JOIN consultation_quality_analysis cqa ON e.id = cqa.eod_id
+        LEFT JOIN consultation_quality_analysis cqa
+          ON e.student_email = cqa.student_email
+          AND e.consultation_date = cqa.consultation_date
+          AND e.closer_name = cqa.closer_name
         ${whereClause}
         ORDER BY e.consultation_date DESC
         LIMIT 200
@@ -498,7 +501,10 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
           cqa.analyzed_at,
           cqa.analysis_version
         FROM eods_for_closers e
-        LEFT JOIN consultation_quality_analysis cqa ON e.id = cqa.eod_id
+        LEFT JOIN consultation_quality_analysis cqa
+          ON e.student_email = cqa.student_email
+          AND e.consultation_date = cqa.consultation_date
+          AND e.closer_name = cqa.closer_name
         WHERE e.id = $1
       `;
 
@@ -547,7 +553,10 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
           cqa.overall_rating,
           cqa.analyzed_at
         FROM eods_for_closers e
-        LEFT JOIN consultation_quality_analysis cqa ON e.id = cqa.eod_id
+        LEFT JOIN consultation_quality_analysis cqa
+          ON e.student_email = cqa.student_email
+          AND e.consultation_date = cqa.consultation_date
+          AND e.closer_name = cqa.closer_name
         WHERE e.id = $1 AND cqa.id IS NOT NULL
       `;
 
@@ -629,6 +638,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
         SELECT
           e.id,
           e.student_name,
+          e.student_email,
           e.closer_name,
           e.consultation_date,
           e.consultation_transcript
@@ -651,11 +661,16 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
         return res.status(400).json({ error: '此諮詢記錄沒有轉錄內容，無法進行 AI 分析' });
       }
 
-      // Check if analysis already exists
+      // Check if analysis already exists (using multi-condition key instead of eod_id)
       const existingAnalysisQuery = `
-        SELECT id FROM consultation_quality_analysis WHERE eod_id = $1
+        SELECT id FROM consultation_quality_analysis
+        WHERE student_email = $1 AND consultation_date = $2 AND closer_name = $3
       `;
-      const existingResult = await pool.query(existingAnalysisQuery, [eodId]);
+      const existingResult = await pool.query(existingAnalysisQuery, [
+        consultation.student_email,
+        consultation.consultation_date,
+        consultation.closer_name
+      ]);
 
       if (existingResult.rows.length > 0) {
         await pool.end();
@@ -668,11 +683,12 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
         consultation.consultation_transcript
       );
 
-      // Insert analysis result
+      // Insert analysis result (include student_email for multi-condition JOIN)
       const insertQuery = `
         INSERT INTO consultation_quality_analysis (
           eod_id,
           student_name,
+          student_email,
           closer_name,
           consultation_date,
           overall_rating,
@@ -694,8 +710,8 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
           api_cost_usd,
           analyzed_at
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-          ($22::timestamptz AT TIME ZONE 'UTC')
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
+          ($23::timestamptz AT TIME ZONE 'UTC')
         )
         RETURNING *
       `;
@@ -709,8 +725,9 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
       console.log('🔍 [DEBUG] analyzed_at (UTC):', analyzedAt);
 
       const insertResult = await pool.query(insertQuery, [
-        eodId,
+        eodId,  // Keep for backwards compatibility but not used for JOINs
         consultation.student_name,
+        consultation.student_email,  // New: for multi-condition JOIN
         consultation.closer_name,
         consultation.consultation_date,
         analysis.overallScore,
@@ -758,13 +775,28 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
       const { eodId } = req.params;
       const pool = createPool();
 
+      // First get the consultation details for multi-condition delete
+      const consultationQuery = `
+        SELECT student_email, consultation_date, closer_name
+        FROM eods_for_closers WHERE id = $1
+      `;
+      const consultationResult = await pool.query(consultationQuery, [eodId]);
+
+      if (consultationResult.rows.length === 0) {
+        await pool.end();
+        return res.status(404).json({ error: '找不到此諮詢記錄' });
+      }
+
+      const { student_email, consultation_date, closer_name } = consultationResult.rows[0];
+
+      // Delete using multi-condition key instead of eod_id
       const deleteQuery = `
         DELETE FROM consultation_quality_analysis
-        WHERE eod_id = $1
+        WHERE student_email = $1 AND consultation_date = $2 AND closer_name = $3
         RETURNING id
       `;
 
-      const result = await pool.query(deleteQuery, [eodId]);
+      const result = await pool.query(deleteQuery, [student_email, consultation_date, closer_name]);
 
       await pool.end();
 
@@ -922,9 +954,13 @@ ${aiAnalysis || '（無分析結果）'}`;
           e.student_name,
           e.student_email,
           e.closer_name,
+          e.consultation_date,
           cqa.id as analysis_id
         FROM eods_for_closers e
-        LEFT JOIN consultation_quality_analysis cqa ON e.id = cqa.eod_id
+        LEFT JOIN consultation_quality_analysis cqa
+          ON e.student_email = cqa.student_email
+          AND e.consultation_date = cqa.consultation_date
+          AND e.closer_name = cqa.closer_name
         WHERE e.id = $1
       `;
 
@@ -1024,7 +1060,10 @@ ${aiAnalysis || '（無分析結果）'}`;
             e.consultation_date,
             cqa.id as analysis_id
           FROM eods_for_closers e
-          LEFT JOIN consultation_quality_analysis cqa ON e.id = cqa.eod_id
+          LEFT JOIN consultation_quality_analysis cqa
+            ON e.student_email = cqa.student_email
+            AND e.consultation_date = cqa.consultation_date
+            AND e.closer_name = cqa.closer_name
           WHERE e.id = $1
         `;
         const result = await pool.query(consultationQuery, [eodId]);

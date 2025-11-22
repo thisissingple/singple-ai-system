@@ -124,7 +124,10 @@ export async function syncConsultantStats(consultantEmail: string): Promise<void
         MIN(e.consultation_date) as first_consultation,
         MAX(e.consultation_date) as last_consultation
       FROM eods_for_closers e
-      LEFT JOIN consultation_quality_analysis cqa ON e.id = cqa.eod_id
+      LEFT JOIN consultation_quality_analysis cqa
+        ON e.student_email = cqa.student_email
+        AND e.consultation_date = cqa.consultation_date
+        AND e.closer_name = cqa.closer_name
       WHERE e.closer_email = $1
     )
     UPDATE consultant_knowledge_base ckb

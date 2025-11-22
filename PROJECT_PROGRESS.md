@@ -2,14 +2,117 @@
 
 > **最後更新**: 2025-11-22
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ 體驗課分析頁面優化完成
-> **當前階段**: 資料品質管理與 UI 優化
-> **今日進度**: 修復方案名稱、剩餘堂數顯示邏輯，新增資料品質警告系統
+> **專案狀態**: ✅ 諮詢 AI 分析資料關聯架構重構完成
+> **當前階段**: 資料持久化與架構優化
+> **今日進度**: 將 consultation_quality_analysis 從 eod_id 外鍵改為多條件自然鍵 JOIN
 > **整體進度**: 99.9% ████████████████████
 
 ---
 
-## 📅 2025-11-22 更新日誌
+## 📅 2025-11-22 更新日誌（下午）
+
+### 🔧 諮詢 AI 分析資料關聯架構重構
+
+#### 問題描述
+昨天生成的 AI 分析紀錄今天看不到了。
+
+#### 根因分析
+- `consultation_quality_analysis` 表使用 `eod_id` (UUID) 作為外鍵連接 `eods_for_closers` 表
+- 每天從 Google Sheets 同步資料時會**刪除並重建** `eods_for_closers` 的資料
+- 重建後 UUID 每次都不同，導致 LEFT JOIN 失效
+- 之前的 Migration 060-062 雖然解決了級聯刪除問題（`SET NULL`），但 `eod_id` 變成 NULL 後仍無法關聯
+
+#### 解決方案：改用多條件自然鍵 JOIN
+
+**新的 JOIN 策略**：
+```sql
+-- 舊方式（已廢棄）
+LEFT JOIN consultation_quality_analysis cqa ON e.id = cqa.eod_id
+
+-- 新方式（自然鍵）
+LEFT JOIN consultation_quality_analysis cqa
+  ON e.student_email = cqa.student_email
+  AND e.consultation_date = cqa.consultation_date
+  AND e.closer_name = cqa.closer_name
+```
+
+**為什麼這樣更好**：
+- `student_email` + `consultation_date` + `closer_name` 是業務上的唯一識別
+- 即使 `eods_for_closers` 資料重建、UUID 改變，仍可正確關聯
+- 不再依賴會變動的 UUID 外鍵
+
+#### 資料庫變更
+
+**Migration 063**: 新增 student_email 欄位
+- 檔案：[`supabase/migrations/063_add_student_email_to_consultation_analysis.sql`](supabase/migrations/063_add_student_email_to_consultation_analysis.sql)
+- 內容：
+  ```sql
+  -- 新增欄位
+  ALTER TABLE consultation_quality_analysis
+  ADD COLUMN IF NOT EXISTS student_email VARCHAR(255);
+
+  -- 建立複合索引
+  CREATE INDEX IF NOT EXISTS idx_consultation_quality_analysis_multi_key
+  ON consultation_quality_analysis (student_email, consultation_date, closer_name);
+
+  -- 回填現有資料
+  UPDATE consultation_quality_analysis cqa
+  SET student_email = e.student_email
+  FROM eods_for_closers e
+  WHERE cqa.eod_id = e.id AND cqa.student_email IS NULL;
+  ```
+
+#### 程式碼修改
+
+| 檔案 | 變更 |
+|------|------|
+| [`server/routes-consultation-quality.ts`](server/routes-consultation-quality.ts) | 所有 JOIN 改為多條件、INSERT 新增 student_email、DELETE 改用多條件查詢 |
+| [`server/services/consultant-knowledge-service.ts`](server/services/consultant-knowledge-service.ts) | syncConsultantStats 的 JOIN 改為多條件 |
+
+#### 修改的 API 端點
+
+1. **GET `/api/consultation-quality/list`** - 列表查詢
+2. **GET `/api/consultation-quality/:eodId`** - 詳情查詢
+3. **POST `/api/consultation-quality/:eodId/save-to-kb`** - 儲存至知識庫
+4. **POST `/api/consultation-quality/:eodId/analyze`** - AI 分析（檢查重複 + INSERT）
+5. **DELETE `/api/consultation-quality/:eodId/analysis`** - 刪除分析
+6. **POST `/api/consultation-quality/:eodId/chat/generate-recap`** - 對話摘要
+7. **POST `/api/consultation-quality/chat/save-conversation`** - 儲存對話
+
+#### 向後兼容
+
+- `eod_id` 欄位保留但不再用於 JOIN
+- INSERT 時仍會記錄 `eod_id`（供 debug 參考）
+- 舊記錄已透過 Migration 063 回填 `student_email`
+
+#### 驗證結果
+
+✅ API 回傳正確的 5 筆已分析記錄
+✅ 前端「AI 分析紀錄」頁籤正常顯示
+✅ 「已分析 (5)」標籤正確計數
+
+---
+
+### ⚠️ [ARCHIVED] 舊方案：eod_id SET NULL（已廢棄）
+
+> **注意**：以下為 2025-11-20 的舊方案，已被上述新方案取代。
+> 舊方案的問題是：即使 `eod_id` 設為 NULL 保留了記錄，但 JOIN 仍會失效。
+
+<details>
+<summary>點擊展開舊方案詳情（僅供參考）</summary>
+
+原本的 Migration 060-062 解決了「級聯刪除」問題，但沒解決「JOIN 失效」問題：
+- Migration 060：將外鍵從 CASCADE 改為 SET NULL
+- Migration 061：移除 consultation_quality_analysis.eod_id NOT NULL 約束
+- Migration 062：移除 consultation_chat_recaps.eod_id NOT NULL 約束
+
+這些修改讓記錄不會被刪除，但 `eod_id = NULL` 後，`ON e.id = cqa.eod_id` 永遠無法匹配。
+
+</details>
+
+---
+
+## 📅 2025-11-22 更新日誌（早上）
 
 ### ✨ 體驗課分析頁面優化
 
@@ -59,7 +162,14 @@ function processPurchases(purchaseData, attendanceData) {
 
 ## 📅 2025-11-20 更新日誌
 
-### 🐛 修復諮詢相關表級聯刪除問題（完整修復）
+### ⚠️ [ARCHIVED] 修復諮詢相關表級聯刪除問題
+
+> **注意**：此方案已被 2025-11-22 的「多條件自然鍵 JOIN」方案取代。
+> Migration 060-062 雖然解決了「級聯刪除」問題，但沒解決「JOIN 失效」問題。
+> 請參考 2025-11-22 下午的更新日誌了解最新方案。
+
+<details>
+<summary>點擊展開舊方案詳情（僅供參考）</summary>
 
 #### 問題描述
 當執行 Google Sheets 同步時，系統連續報錯：
@@ -103,44 +213,14 @@ function processPurchases(purchaseData, attendanceData) {
     ALTER COLUMN eod_id DROP NOT NULL;
   ```
 
-#### 驗證測試
+#### ⚠️ 此方案的問題
 
-**測試 1: consultation_quality_analysis**
-1. ✅ 建立測試諮詢記錄
-2. ✅ 建立 AI 分析記錄（關聯到諮詢記錄）
-3. ✅ 刪除諮詢記錄（模擬 Google Sheets 同步）
-4. ✅ AI 分析記錄保留，`eod_id` 成功設為 NULL
-5. ✅ 重要資訊從 `*_cached` 欄位正常讀取
+雖然記錄保留了，但 `eod_id = NULL` 後，原本的 JOIN 條件 `ON e.id = cqa.eod_id` 永遠無法匹配，
+導致「AI 分析紀錄」頁面看不到任何已分析的記錄。
 
-**測試 2: consultation_chat_recaps**
-1. ✅ 建立測試諮詢記錄
-2. ✅ 建立對話摘要記錄（關聯到諮詢記錄）
-3. ✅ 刪除諮詢記錄（模擬 Google Sheets 同步）
-4. ✅ 對話摘要記錄保留，`eod_id` 成功設為 NULL
-5. ✅ 重要資訊從 `consultation_date_cached` 欄位正常讀取
+**最終解決方案**：改用多條件自然鍵 JOIN（2025-11-22 實作）
 
-#### 最終狀態檢查
-
-| 表名 | eod_id 可為 NULL | FK DELETE 規則 | 狀態 |
-|------|-----------------|----------------|------|
-| `consultation_quality_analysis` | ✅ YES | ✅ SET NULL | ✅ 正常 |
-| `consultation_chat_recaps` | ✅ YES | ✅ SET NULL | ✅ 正常 |
-| `consultant_ai_conversations` | ✅ YES | ✅ SET NULL | ✅ 正常 |
-
-#### 效果
-現在當 Google Sheets 同步刪除 `eods_for_closers` 記錄時：
-- ✅ 所有 AI 相關記錄會保留（不再遺失）
-- ✅ `eod_id` 被設為 NULL（不再報錯）
-- ✅ 關鍵資訊仍可從冗餘欄位取得：
-  - `student_email_cached`
-  - `consultation_date_cached`
-  - `consultant_name_cached`
-
-#### 為什麼需要兩次修復？
-Google Sheets 同步會刪除 `eods_for_closers` 記錄，觸發**所有相關表**的級聯刪除：
-1. 第一次同步：`consultation_quality_analysis` 報錯 → Migration 061 修復
-2. 第二次同步：`consultation_chat_recaps` 報錯 → Migration 062 修復
-3. `consultant_ai_conversations` 已經是正確的（可能在 Migration 060 中已處理）
+</details>
 
 ---
 

@@ -19,6 +19,8 @@ import {
   Loader2,
   FileText,
   Save,
+  Copy,
+  Check,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useToast } from '@/hooks/use-toast';
@@ -46,6 +48,27 @@ function ConsultationQualityDetailContent() {
   const [inputMessage, setInputMessage] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [copiedTranscript, setCopiedTranscript] = useState(false);
+
+  // Copy transcript to clipboard
+  const copyTranscriptToClipboard = async () => {
+    if (!record?.consultation_transcript) return;
+    try {
+      await navigator.clipboard.writeText(record.consultation_transcript);
+      setCopiedTranscript(true);
+      setTimeout(() => setCopiedTranscript(false), 2000);
+      toast({
+        title: '複製成功',
+        description: '逐字稿已複製到剪貼簿',
+      });
+    } catch (err) {
+      toast({
+        title: '複製失敗',
+        description: '無法複製到剪貼簿',
+        variant: 'destructive',
+      });
+    }
+  };
   const messageIdCounter = useRef(0);
 
   // Fetch consultation data
@@ -483,11 +506,31 @@ function ConsultationQualityDetailContent() {
 
           {/* Section 2: Transcript */}
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="flex items-center gap-2">
                 <MessageSquare className="h-5 w-5 text-gray-600" />
                 諮詢逐字稿
               </CardTitle>
+              {record?.consultation_transcript && (
+                <Button
+                  onClick={copyTranscriptToClipboard}
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                >
+                  {copiedTranscript ? (
+                    <>
+                      <Check className="h-4 w-4 text-green-600" />
+                      已複製
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4" />
+                      一鍵複製
+                    </>
+                  )}
+                </Button>
+              )}
             </CardHeader>
             <CardContent>
               <button
