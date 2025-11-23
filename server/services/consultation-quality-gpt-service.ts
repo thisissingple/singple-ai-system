@@ -18,7 +18,7 @@ import { createPool } from './pg-client';
 interface AnalysisConfig {
   ai_model: string;
   temperature: number;
-  max_tokens: number;
+  max_completion_tokens: number;  // Updated: GPT-4.1+ uses max_completion_tokens instead of max_tokens
   analysis_prompt: string;
 }
 
@@ -404,18 +404,19 @@ export class ConsultationQualityGPTService {
       if (result.rows.length === 0) {
         // If no config in database, use hardcoded defaults as fallback
         this.config = {
-          ai_model: 'gpt-4o',
+          ai_model: 'gpt-5',
           temperature: 0.7,
-          max_tokens: 4000,
+          max_completion_tokens: 16000,  // Fixed: auto-set for optimal output
           analysis_prompt: CONSULTATION_QUALITY_ANALYSIS_PROMPT,
         };
       } else {
         const row = result.rows[0];
-        // Convert temperature and max_tokens from database strings to numbers
+        // Convert temperature from database string to number
+        // max_completion_tokens is fixed (not from DB) for consistency
         this.config = {
-          ai_model: row.ai_model,
+          ai_model: row.ai_model || 'gpt-5',
           temperature: parseFloat(row.temperature),
-          max_tokens: parseInt(row.max_tokens, 10),
+          max_completion_tokens: 16000,  // Fixed: auto-set for optimal output
           analysis_prompt: row.analysis_prompt,
         };
       }
@@ -450,7 +451,7 @@ export class ConsultationQualityGPTService {
           { role: 'user', content: `請分析以下諮詢逐字稿：\n\n${transcript}` },
         ],
         temperature: config.temperature,
-        max_tokens: config.max_tokens,
+        max_completion_tokens: config.max_completion_tokens,  // GPT-5 uses max_completion_tokens
       });
 
       const responseTimeMs = Date.now() - startTime;

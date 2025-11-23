@@ -38,13 +38,13 @@ function ConsultationAnalysisConfigContent() {
   const { toast } = useToast();
 
   const [formData, setFormData] = useState({
-    ai_model: 'gpt-4o',
+    ai_model: 'gpt-5',
     temperature: 0.7,
-    max_tokens: 4000,
+    max_tokens: 16000,
     analysis_prompt: '',
-    chat_ai_model: 'gpt-4o',
+    chat_ai_model: 'gpt-5',
     chat_temperature: 0.7,
-    chat_max_tokens: 2000,
+    chat_max_tokens: 8000,
     chat_system_prompt: '',
   });
 
@@ -273,23 +273,14 @@ function ConsultationAnalysisConfigContent() {
                 </p>
               </div>
 
-              {/* Max Tokens */}
+              {/* Max Tokens - 自動根據模型決定 */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium">Max Tokens (輸出長度)</label>
-                  <Badge variant="outline">{formData.max_tokens} tokens</Badge>
+                  <Badge variant="secondary">自動: 16000 tokens</Badge>
                 </div>
-                <input
-                  type="number"
-                  min={1000}
-                  max={8000}
-                  step={100}
-                  value={formData.max_tokens}
-                  onChange={(e) => setFormData({ ...formData, max_tokens: parseInt(e.target.value) })}
-                  className="w-full border rounded-md px-3 py-2 bg-background"
-                />
                 <p className="text-xs text-muted-foreground">
-                  範圍：1000-8000 tokens，推薦值：4000 (約 3000 字)
+                  系統自動設定最佳輸出長度，無需手動調整
                 </p>
               </div>
             </CardContent>
@@ -379,23 +370,14 @@ function ConsultationAnalysisConfigContent() {
                 </p>
               </div>
 
-              {/* Max Tokens */}
+              {/* Max Tokens - 自動根據模型決定 */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium">Max Tokens (單次回應長度)</label>
-                  <Badge variant="outline">{formData.chat_max_tokens} tokens</Badge>
+                  <Badge variant="secondary">自動: 8000 tokens</Badge>
                 </div>
-                <input
-                  type="number"
-                  min={500}
-                  max={4000}
-                  step={100}
-                  value={formData.chat_max_tokens}
-                  onChange={(e) => setFormData({ ...formData, chat_max_tokens: parseInt(e.target.value) })}
-                  className="w-full border rounded-md px-3 py-2 bg-background"
-                />
                 <p className="text-xs text-muted-foreground">
-                  範圍：500-4000 tokens，推薦值：2000 (約 1500 字)
+                  系統自動設定最佳輸出長度，無需手動調整
                 </p>
               </div>
             </CardContent>

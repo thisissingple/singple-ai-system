@@ -98,13 +98,13 @@ export async function askConsultantPresetQuestion(
   // Call OpenAI
   const startTime = Date.now();
   const completion = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-5',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: questionConfig.description }
     ],
     temperature: 0.7,
-    max_tokens: 2000,
+    max_completion_tokens: 8000,  // Fixed: auto-set for optimal chat output
   });
 
   const responseTime = Date.now() - startTime;
@@ -144,7 +144,7 @@ export async function askConsultantPresetQuestion(
     'preset',
     questionKey,
     tokensUsed,
-    'gpt-4o',
+    'gpt-5',
     responseTime,
     apiCostUsd,
     false
@@ -171,13 +171,13 @@ export async function askConsultantCustomQuestion(
   // Call OpenAI
   const startTime = Date.now();
   const completion = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-5',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: question }
     ],
     temperature: 0.7,
-    max_tokens: 2000,
+    max_completion_tokens: 8000,  // Fixed: auto-set for optimal chat output
   });
 
   const responseTime = Date.now() - startTime;
@@ -215,7 +215,7 @@ export async function askConsultantCustomQuestion(
     answer,
     'custom',
     tokensUsed,
-    'gpt-4o',
+    'gpt-5',
     responseTime,
     apiCostUsd,
     false

@@ -440,13 +440,13 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
       const query = `
         UPDATE consultation_analysis_config
         SET
-          ai_model = 'gpt-4o',
+          ai_model = 'gpt-5',
           temperature = 0.7,
-          max_tokens = 4000,
+          max_tokens = 16000,
           analysis_prompt = $1,
-          chat_ai_model = 'gpt-4o',
+          chat_ai_model = 'gpt-5',
           chat_temperature = 0.7,
-          chat_max_tokens = 2000,
+          chat_max_tokens = 8000,
           chat_system_prompt = $2,
           updated_at = NOW(),
           updated_by = $3
