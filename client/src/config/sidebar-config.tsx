@@ -29,6 +29,7 @@ import {
   Shield,
   RefreshCw,
   UserCircle,
+  Wallet,
 } from 'lucide-react';
 import { SidebarSectionConfig } from '@/components/layout/sidebar';
 import type { Role } from './permissions';
@@ -160,6 +161,12 @@ export const sidebarConfig: SidebarSection[] = [
         href: '/reports/income-expense',
         icon: Calculator,
         requiredModule: 'income_expense',
+      },
+      {
+        label: '薪資計算器',
+        href: '/salary/calculator',
+        icon: Wallet,
+        requiredRoles: ['admin'],
       },
       {
         label: '資料庫瀏覽器',
