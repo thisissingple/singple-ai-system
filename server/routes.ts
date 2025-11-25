@@ -57,7 +57,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       status: 'healthy',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      environment: 'replit'
+      environment: process.env.NODE_ENV || 'development'
+    });
+  });
+
+  // API health check (used by Zeabur)
+  app.get('/api/health', (req, res) => {
+    res.status(200).json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: process.env.NODE_ENV || 'development',
+      version: '1.0.0'
     });
   });
 
@@ -7207,49 +7218,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ============================================
-  // 收支紀錄表 API (Phase 18)
+  // 收支紀錄表 API (Phase 18 - 更新於 2025-11-25)
   // ============================================
   const { incomeExpenseService } = await import('./services/income-expense-service');
 
   // 查詢收支記錄（支援多種篩選）
   app.get('/api/income-expense/records', isAuthenticated, requireModulePermission('income_expense'), async (req: any, res) => {
     try {
-      // 建立額外過濾條件
-      const conditions: string[] = [];
-      if (req.query.month) conditions.push(`transaction_date >= '${req.query.month}-01' AND transaction_date < '${req.query.month}-01'::date + interval '1 month'`);
-      if (req.query.transaction_type) conditions.push(`transaction_type = '${req.query.transaction_type}'`);
-      if (req.query.category) conditions.push(`category = '${req.query.category}'`);
-      if (req.query.is_confirmed !== undefined) conditions.push(`is_confirmed = ${req.query.is_confirmed === 'true'}`);
-      if (req.query.start_date) conditions.push(`transaction_date >= '${req.query.start_date}'`);
-      if (req.query.end_date) conditions.push(`transaction_date <= '${req.query.end_date}'`);
-      if (req.query.search) conditions.push(`(description ILIKE '%${req.query.search}%' OR student_name ILIKE '%${req.query.search}%')`);
+      // 使用 service 的查詢方法
+      const result = await incomeExpenseService.queryRecords({
+        month: req.query.month as string,
+        transaction_category: req.query.transaction_category as string,
+        course_category: req.query.course_category as string,
+        teacher_id: req.query.teacher_id as string,
+        closer_id: req.query.closer_id as string,
+        setter_id: req.query.setter_id as string,
+        customer_email: req.query.customer_email as string,
+        search: req.query.search as string,
+        is_confirmed: req.query.is_confirmed ? req.query.is_confirmed === 'true' : undefined,
+        start_date: req.query.start_date as string,
+        end_date: req.query.end_date as string,
+        page: req.query.page ? parseInt(req.query.page as string) : 1,
+        limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
+      });
 
-      // 建立權限過濾條件（開發模式跳過權限檢查）
-      let permissionFilter: string;
-      if (process.env.SKIP_AUTH === 'true') {
-        // 開發模式：顯示所有記錄
-        permissionFilter = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
-      } else {
-        // 正式模式：套用權限過濾
-        permissionFilter = await buildPermissionFilter({
-          userId: req.user.id,
-          tableName: 'income_expense_records',
-          additionalConditions: conditions.length > 0 ? conditions.join(' AND ') : undefined
-        });
-      }
-
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
-      const offset = req.query.page ? (parseInt(req.query.page as string) - 1) * limit : 0;
-
-      const query = `
-        SELECT * FROM income_expense_records
-        WHERE ${permissionFilter}
-        ORDER BY transaction_date DESC, created_at DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `;
-
-      const result = await queryDatabase(query);
-      res.json({ success: true, data: { records: result.rows } });
+      res.json({ success: true, data: result });
     } catch (error: any) {
       console.error('查詢收支記錄失敗:', error);
       res.status(500).json({ success: false, error: error.message });
@@ -7321,29 +7314,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ success: false, error: '沒有權限查看此教師的資料' });
       }
 
-      // 建立額外條件
-      const conditions: string[] = [`teacher_id = '${teacherId}'`, `transaction_type = 'income'`];
-      if (req.query.month) conditions.push(`transaction_date >= '${req.query.month}-01' AND transaction_date < '${req.query.month}-01'::date + interval '1 month'`);
-
-      // 建立權限過濾條件
-      const permissionFilter = await buildPermissionFilter({
-        userId: req.user.id,
-        tableName: 'income_expense_records',
-        additionalConditions: conditions.join(' AND ')
+      // 使用 service 的查詢方法
+      const result = await incomeExpenseService.queryRecords({
+        teacher_id: teacherId,
+        month: req.query.month as string,
+        page: req.query.page ? parseInt(req.query.page as string) : 1,
+        limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
       });
 
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
-      const offset = req.query.page ? (parseInt(req.query.page as string) - 1) * limit : 0;
-
-      const query = `
-        SELECT * FROM income_expense_records
-        WHERE ${permissionFilter}
-        ORDER BY transaction_date DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `;
-
-      const result = await queryDatabase(query);
-      res.json({ success: true, data: result.rows });
+      res.json({ success: true, data: result });
     } catch (error: any) {
       console.error('取得教師記錄失敗:', error);
       res.status(500).json({ success: false, error: error.message });
@@ -9252,7 +9231,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const api = new GoogleSheetsAPI(getGoogleCredentials());
       const worksheets = await api.listWorksheets(source.sheet_id);
 
-      res.json({ success: true, data: worksheets });
+      // 過濾掉空字串的工作表名稱（避免前端 Select 元件錯誤）
+      const validWorksheets = worksheets.filter((name: string) => name && name.trim() !== '');
+
+      res.json({ success: true, data: validWorksheets });
     } catch (error: any) {
       console.error('Error listing worksheets:', error);
       res.status(500).json({ success: false, error: error.message });
@@ -9628,6 +9610,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error('Failed to fetch users list:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // =================================================================
+  // 薪資計算器 API
+  // =================================================================
+
+  // 獲取所有員工設定
+  app.get('/api/salary/employees', async (req, res) => {
+    try {
+      const { salaryCalculatorService } = await import('./services/salary-calculator-service');
+      const employees = await salaryCalculatorService.getAllEmployeeSettings();
+      res.json({ success: true, data: employees });
+    } catch (error: any) {
+      console.error('Failed to fetch employee settings:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 獲取單一員工設定
+  app.get('/api/salary/employees/:name', async (req, res) => {
+    try {
+      const { salaryCalculatorService } = await import('./services/salary-calculator-service');
+      const employee = await salaryCalculatorService.getEmployeeSetting(req.params.name);
+
+      if (!employee) {
+        return res.status(404).json({ error: '找不到該員工' });
+      }
+
+      res.json({ success: true, data: employee });
+    } catch (error: any) {
+      console.error('Failed to fetch employee setting:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 計算薪資 (核心功能)
+  app.post('/api/salary/calculate', async (req, res) => {
+    try {
+      const { employee_name, period_start, period_end, manual_adjustments } = req.body;
+
+      if (!employee_name || !period_start || !period_end) {
+        return res.status(400).json({ error: '缺少必要參數' });
+      }
+
+      const { salaryCalculatorService } = await import('./services/salary-calculator-service');
+      const result = await salaryCalculatorService.calculateSalary(
+        employee_name,
+        period_start,
+        period_end,
+        manual_adjustments
+      );
+
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error('Failed to calculate salary:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 儲存薪資計算結果
+  app.post('/api/salary/save', async (req, res) => {
+    try {
+      const calculation = req.body;
+
+      const { salaryCalculatorService } = await import('./services/salary-calculator-service');
+      const id = await salaryCalculatorService.saveSalaryCalculation(calculation);
+
+      res.json({ success: true, data: { id } });
+    } catch (error: any) {
+      console.error('Failed to save salary calculation:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 更新員工設定
+  app.put('/api/salary/employees/:name', async (req, res) => {
+    try {
+      const { salaryCalculatorService } = await import('./services/salary-calculator-service');
+      await salaryCalculatorService.updateEmployeeSetting(req.params.name, req.body);
+
+      res.json({ success: true, message: '更新成功' });
+    } catch (error: any) {
+      console.error('Failed to update employee setting:', error);
       res.status(500).json({ error: error.message });
     }
   });

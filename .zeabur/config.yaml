@@ -1,18 +1,31 @@
 # Zeabur 資源配置
-# 降低資源需求以避免 NotTriggerScaleUp 錯誤
+# 針對 Node.js 應用優化
 
+# 部署設定
+deploy:
+  buildCommand: "npm run build"
+  startCommand: "node dist/index.js"
+  port: 5001
+
+# 資源限制(降低需求避免 NotTriggerScaleUp)
 resources:
   requests:
-    memory: "256Mi"  # 最小記憶體需求
-    cpu: "100m"      # 最小 CPU 需求（0.1 core）
+    memory: "128Mi"   # 最小記憶體(降低至 128Mi)
+    cpu: "50m"        # 最小 CPU(0.05 core)
   limits:
-    memory: "512Mi"  # 最大記憶體限制
-    cpu: "500m"      # 最大 CPU 限制（0.5 core）
+    memory: "512Mi"   # 最大記憶體
+    cpu: "500m"       # 最大 CPU(0.5 core)
 
 # Health check 配置
 healthCheck:
   path: "/api/health"
   port: 5001
-  initialDelaySeconds: 30  # 給予更多時間啟動
+  initialDelaySeconds: 40   # 延長啟動時間
   timeoutSeconds: 10
   periodSeconds: 30
+  failureThreshold: 5       # 允許 5 次失敗
+
+# 環境變數設定(在 Zeabur dashboard 配置)
+# env:
+#   NODE_ENV: production
+#   PORT: 5001

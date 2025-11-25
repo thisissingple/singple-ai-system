@@ -1,0 +1,45 @@
+# Dependencies
+node_modules
+package-lock.json
+
+# Development files
+.git
+.github
+.vscode
+.idea
+*.log
+*.swp
+*.swo
+*~
+
+# Test and scripts
+tests
+scripts
+NLP
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Build artifacts (will be created in container)
+dist
+.turbo
+.cache
+
+# Client public assets (not needed in production)
+client/public
+
+# Database migrations (run separately)
+supabase/migrations
+
+# Miscellaneous
+.DS_Store
+*.orig
+coverage
+.nyc_output

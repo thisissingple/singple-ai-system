@@ -6,10 +6,10 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install ALL dependencies (including devDependencies for build)
-RUN npm install --include=dev
+# Install dependencies with production flag (but include dev for build tools)
+RUN npm ci --include=dev --omit=optional
 
-# Copy source code
+# Copy source code (respects .dockerignore)
 COPY . .
 
 # Build the application
@@ -20,17 +20,31 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files
+# Install only production dependencies
 COPY package*.json ./
-
-# Install ALL dependencies (vite is needed at runtime for this app)
-RUN npm install --include=dev
+RUN npm ci --only=production --omit=optional && \
+    npm cache clean --force
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
 
-# Expose port
-EXPOSE 5000
+# Copy necessary runtime files
+COPY --from=builder /app/server ./server
+COPY --from=builder /app/configs ./configs
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app
+
+USER nodejs
+
+# Expose port (Zeabur will override this)
+EXPOSE 5001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:5001/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["node", "dist/index.js"]

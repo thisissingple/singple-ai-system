@@ -1,0 +1,41 @@
+# Zeabur deployment ignore list
+# These files will not be uploaded to Zeabur
+
+# Dependencies
+node_modules
+
+# Development files
+.git
+.github
+.vscode
+.idea
+*.log
+*.swp
+*.swo
+
+# Test and scripts
+tests
+scripts
+NLP
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Build artifacts
+dist
+.turbo
+.cache
+
+# Environment files (configure in Zeabur dashboard)
+.env
+.env.*
+
+# Database migrations (run separately)
+supabase/migrations
+
+# Miscellaneous
+.DS_Store
+*.orig
+coverage
