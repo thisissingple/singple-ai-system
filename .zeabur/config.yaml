@@ -1,0 +1,18 @@
+# Zeabur 資源配置
+# 降低資源需求以避免 NotTriggerScaleUp 錯誤
+
+resources:
+  requests:
+    memory: "256Mi"  # 最小記憶體需求
+    cpu: "100m"      # 最小 CPU 需求（0.1 core）
+  limits:
+    memory: "512Mi"  # 最大記憶體限制
+    cpu: "500m"      # 最大 CPU 限制（0.5 core）
+
+# Health check 配置
+healthCheck:
+  path: "/api/health"
+  port: 5001
+  initialDelaySeconds: 30  # 給予更多時間啟動
+  timeoutSeconds: 10
+  periodSeconds: 30
