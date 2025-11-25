@@ -6,8 +6,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies with production flag (but include dev for build tools)
-RUN npm ci --include=dev --omit=optional
+# Install ALL dependencies (needed for build)
+RUN npm ci && npm cache clean --force
 
 # Copy source code (respects .dockerignore)
 COPY . .
@@ -22,8 +22,7 @@ WORKDIR /app
 
 # Install only production dependencies
 COPY package*.json ./
-RUN npm ci --only=production --omit=optional && \
-    npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
