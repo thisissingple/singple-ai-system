@@ -6,14 +6,17 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install ALL dependencies (needed for build)
-RUN npm ci && npm cache clean --force
+# Install ALL dependencies (including devDependencies for build tools like vite)
+RUN npm ci
 
 # Copy source code (respects .dockerignore)
 COPY . .
 
 # Build the application
 RUN npm run build
+
+# Clean up after build
+RUN npm cache clean --force
 
 # Production stage
 FROM node:20-alpine
