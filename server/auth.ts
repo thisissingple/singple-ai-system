@@ -8,61 +8,94 @@ import pg from "pg";
 // This is critical for local development where .env is not auto-loaded
 dotenv.config({ override: false }); // Don't override if already set
 
-export function getSession() {
-  const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
-  // 使用 PostgreSQL session store 以保持 session 在重啟後依然有效
-  let sessionStore;
+// 🔧 全局變數：用於儲存 session store 初始化結果
+let sessionStoreInitialized = false;
+let sessionStoreInstance: any = undefined;
 
-  // 🆕 使用 PostgreSQL session store（開發和生產環境都用）
-  // 這樣 nodemon 重啟時 session 不會丟失
-  // 優先使用 Session Pooler (port 6543) 避免長時間查詢被中斷
+/**
+ * 非同步初始化 PostgreSQL session store
+ * 必須在 getSession() 之前呼叫
+ */
+export async function initSessionStore(): Promise<void> {
+  if (sessionStoreInitialized) {
+    return;
+  }
+
   const dbUrl = process.env.SUPABASE_SESSION_DB_URL || process.env.SESSION_DB_URL || process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
 
-  if (dbUrl) {
-    try {
-      const pgStore = connectPg(session);
-
-      // 🔧 建立具有錯誤處理的連線池，解決 Supabase Transaction Pooler 連線中斷問題
-      const pool = new pg.Pool({
-        connectionString: dbUrl,
-        max: 5, // 最大連線數
-        idleTimeoutMillis: 30000, // 閒置 30 秒後關閉連線
-        connectionTimeoutMillis: 10000, // 連線超時 10 秒
-      });
-
-      // 處理連線池錯誤，避免 unhandled error 導致 crash
-      pool.on('error', (err) => {
-        console.error('⚠️  Session store pool error (will reconnect):', err.message);
-        // 不要 throw，讓連線池自動重連
-      });
-
-      sessionStore = new pgStore({
-        pool: pool, // 使用自訂的連線池而非 conString
-        createTableIfMissing: true,  // Auto-create table if missing
-        ttl: sessionTtl,
-        tableName: "sessions",
-        pruneSessionInterval: 60 * 15, // 每 15 分鐘清理過期 session（預設 60 秒太頻繁）
-        errorLog: (err) => {
-          // 自訂錯誤日誌，避免 unhandled rejection
-          console.error('⚠️  Session store error:', err.message);
-        },
-      });
-      console.log("✓ Using PostgreSQL session store (persistent across restarts)");
-    } catch (error) {
-      console.error("⚠️  PostgreSQL session store error:", error);
-      console.warn("⚠️  Falling back to memory session store");
-      console.warn("ℹ️  Session will be lost on server restart");
-      // Fallback to memory store if PostgreSQL fails
-    }
-  } else {
-    console.log("ℹ️  Using memory session store (development mode)");
+  if (!dbUrl) {
+    console.log("ℹ️  No database URL configured, using memory session store");
     console.warn("⚠️  Session will be lost on server restart");
-    console.warn("💡 Tip: Set DATABASE_URL to use persistent sessions");
+    sessionStoreInitialized = true;
+    return;
+  }
+
+  console.log("🔌 Testing database connection for session store...");
+
+  try {
+    // 🔧 先測試連線是否可用
+    const testPool = new pg.Pool({
+      connectionString: dbUrl,
+      max: 1,
+      connectionTimeoutMillis: 5000, // 5 秒測試超時
+    });
+
+    // 測試連線
+    const client = await testPool.connect();
+    await client.query('SELECT 1');
+    client.release();
+    await testPool.end();
+
+    console.log("✅ Database connection test passed");
+
+    // 連線測試成功，建立實際的 session store
+    const pgStore = connectPg(session);
+    const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
+
+    const pool = new pg.Pool({
+      connectionString: dbUrl,
+      max: 5,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
+
+    pool.on('error', (err) => {
+      console.error('⚠️  Session store pool error (will reconnect):', err.message);
+    });
+
+    sessionStoreInstance = new pgStore({
+      pool: pool,
+      createTableIfMissing: true,
+      ttl: sessionTtl,
+      tableName: "sessions",
+      pruneSessionInterval: 60 * 15,
+      errorLog: (err: Error) => {
+        console.error('⚠️  Session store error:', err.message);
+      },
+    });
+
+    console.log("✓ Using PostgreSQL session store (persistent across restarts)");
+  } catch (error: any) {
+    console.error("⚠️  Database connection failed:", error.message);
+    console.warn("⚠️  Falling back to memory session store");
+    console.warn("ℹ️  Session will be lost on server restart");
+    sessionStoreInstance = undefined;
+  }
+
+  sessionStoreInitialized = true;
+}
+
+export function getSession() {
+  const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
+
+  // 如果尚未初始化（同步呼叫），使用 memory store
+  if (!sessionStoreInitialized) {
+    console.warn("⚠️  getSession() called before initSessionStore(), using memory store");
   }
 
   return session({
     secret: process.env.SESSION_SECRET || 'dev-session-secret-' + Math.random().toString(36).substring(7),
-    store: sessionStore,
+    store: sessionStoreInstance,
     resave: false,
     saveUninitialized: false,
     cookie: {
