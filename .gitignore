@@ -48,9 +48,6 @@ logs/
 .DS_Store
 .github-credentials
 
-# Employee Demo Pages (private, local only)
-client/src/pages/students/student-profile-demo.tsx
-client/src/pages/students/student-profile-gamified.tsx
-client/src/pages/reports/trial-overview-gamified.tsx
-client/src/pages/teacher-workspace.tsx
+# Note: Employee Demo Pages were moved to production
+# Previously excluded files are now tracked for deployment consistency
 Duolingo web Oct 2025/
