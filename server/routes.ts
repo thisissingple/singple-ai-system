@@ -46,6 +46,7 @@ import { registerAuthRoutes } from "./routes-auth";
 import { registerKnowItAllRoutes } from "./routes-know-it-all";
 import { registerPermissionRoutes, requireModulePermission } from "./routes-permissions";
 import { buildPermissionFilter } from "./services/permission-filter-service";
+import { apiCache, CACHE_KEYS, CACHE_TTL, APICache } from "./services/api-cache";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Setup authentication FIRST (before any routes)
@@ -3640,6 +3641,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try{
       const period = (req.query.period as 'daily' | 'weekly' | 'lastWeek' | 'monthly') || 'daily';
       const baseDate = req.query.baseDate as string | undefined;
+      const noCache = req.query.noCache === 'true'; // 支援強制刷新
 
       // Validate period
       if (!['daily', 'weekly', 'lastWeek', 'monthly', 'all'].includes(period)) {
@@ -3674,11 +3676,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // 🚀 快取機制：檢查是否有快取資料
+      const cacheKey = APICache.generateKey(CACHE_KEYS.TRIAL_CLASS_REPORT, {
+        period,
+        baseDate,
+        userId: userId || 'all', // userId 也納入快取鍵
+      });
+
+      // 如果不是強制刷新，先檢查快取
+      if (!noCache) {
+        const cachedData = apiCache.get(cacheKey);
+        if (cachedData) {
+          return res.json({
+            success: true,
+            data: cachedData,
+            cached: true, // 標記這是快取資料
+          });
+        }
+      }
+
+      // 快取未命中或強制刷新，執行實際查詢
+      const startTime = Date.now();
       const reportData = await totalReportService.generateReport({
         period,
         baseDate,
         userId, // 新增：用於權限過濾
       });
+      const queryTime = Date.now() - startTime;
+      console.log(`[API] /api/reports/trial-class query took ${queryTime}ms`);
 
       if (!reportData) {
         return res.json({
@@ -3688,9 +3713,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // 💾 存入快取（TTL: 5 分鐘）
+      apiCache.set(cacheKey, reportData, CACHE_TTL.MEDIUM);
+
       res.json({
         success: true,
         data: reportData,
+        cached: false,
+        queryTime: `${queryTime}ms`,
       });
     } catch (error: any) {
       console.error('Error generating total report:', error);
@@ -3719,6 +3749,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: '產生報表時發生錯誤',
       });
     }
+  });
+
+  // 🧹 清除報表快取 API
+  app.post('/api/reports/clear-cache', isAuthenticated, async (req, res) => {
+    try {
+      const { type } = req.body;
+
+      if (type === 'trial-class') {
+        apiCache.clearByPattern(CACHE_KEYS.TRIAL_CLASS_REPORT);
+      } else if (type === 'all') {
+        apiCache.clear();
+      } else {
+        // 預設清除所有報表快取
+        apiCache.clearByPattern(CACHE_KEYS.TRIAL_CLASS_REPORT);
+        apiCache.clearByPattern(CACHE_KEYS.OVERVIEW_REPORT);
+        apiCache.clearByPattern(CACHE_KEYS.CONSULTANT_REPORT);
+      }
+
+      const stats = apiCache.getStats();
+      res.json({
+        success: true,
+        message: '快取已清除',
+        remainingCacheSize: stats.size,
+      });
+    } catch (error) {
+      console.error('Error clearing cache:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to clear cache',
+      });
+    }
+  });
+
+  // 📊 取得快取狀態 API
+  app.get('/api/reports/cache-stats', isAuthenticated, async (req, res) => {
+    const stats = apiCache.getStats();
+    res.json({
+      success: true,
+      data: stats,
+    });
   });
 
   // Consultant Report API - 諮詢師報表
