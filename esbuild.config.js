@@ -16,4 +16,6 @@ esbuild.build({
   resolveExtensions: ['.ts', '.js', '.json'],
   loader: { '.ts': 'ts' },
   logLevel: 'info',
+  // Exclude vite-related files from bundling (development only)
+  external: ['./vite', './vite.js', '../vite.config', '../vite.config.js'],
 }).catch(() => process.exit(1));
