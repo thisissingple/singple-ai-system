@@ -2,6 +2,7 @@ import session from "express-session";
 import type { Express, RequestHandler } from "express";
 import connectPg from "connect-pg-simple";
 import dotenv from "dotenv";
+import pg from "pg";
 
 // Load .env file BEFORE checking environment variables
 // This is critical for local development where .env is not auto-loaded
@@ -20,11 +21,31 @@ export function getSession() {
   if (dbUrl) {
     try {
       const pgStore = connectPg(session);
+
+      // 🔧 建立具有錯誤處理的連線池，解決 Supabase Transaction Pooler 連線中斷問題
+      const pool = new pg.Pool({
+        connectionString: dbUrl,
+        max: 5, // 最大連線數
+        idleTimeoutMillis: 30000, // 閒置 30 秒後關閉連線
+        connectionTimeoutMillis: 10000, // 連線超時 10 秒
+      });
+
+      // 處理連線池錯誤，避免 unhandled error 導致 crash
+      pool.on('error', (err) => {
+        console.error('⚠️  Session store pool error (will reconnect):', err.message);
+        // 不要 throw，讓連線池自動重連
+      });
+
       sessionStore = new pgStore({
-        conString: dbUrl,
+        pool: pool, // 使用自訂的連線池而非 conString
         createTableIfMissing: true,  // Auto-create table if missing
         ttl: sessionTtl,
         tableName: "sessions",
+        pruneSessionInterval: 60 * 15, // 每 15 分鐘清理過期 session（預設 60 秒太頻繁）
+        errorLog: (err) => {
+          // 自訂錯誤日誌，避免 unhandled rejection
+          console.error('⚠️  Session store error:', err.message);
+        },
       });
       console.log("✓ Using PostgreSQL session store (persistent across restarts)");
     } catch (error) {
