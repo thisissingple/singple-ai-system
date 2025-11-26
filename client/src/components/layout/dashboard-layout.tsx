@@ -2,9 +2,12 @@
  * 儀表板主佈局
  * 包含：頂部導航欄、側邊選單、主內容區
  * 支援：拖曳收合側邊欄
+ *
+ * 注意：使用 DashboardLayoutContext 避免重複嵌套
+ * 當 AppLayout 已經提供了 DashboardLayout 時，頁面內的 DashboardLayout 會自動跳過
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, createContext, useContext } from 'react';
 import { useLocation } from 'wouter';
 import { Sidebar, type SidebarSectionConfig } from './sidebar';
 import { Button } from '@/components/ui/button';
@@ -21,6 +24,12 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
+// Context 用於檢測是否已經在 DashboardLayout 內部
+const DashboardLayoutContext = createContext<boolean>(false);
+
+// 導出 hook 供外部使用
+export const useInsideDashboardLayout = () => useContext(DashboardLayoutContext);
+
 interface DashboardLayoutProps {
   children: React.ReactNode;
   sidebarSections: SidebarSectionConfig[];
@@ -34,11 +43,19 @@ export function DashboardLayout({
   title = '簡單歌唱 Singple',
   className,
 }: DashboardLayoutProps) {
+  // 檢測是否已經在 DashboardLayout 內部
+  const isInsideLayout = useContext(DashboardLayoutContext);
+
   const [, setLocation] = useLocation();
   const { user, logout } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+
+  // 如果已經在 DashboardLayout 內部，直接返回 children 避免重複嵌套
+  if (isInsideLayout) {
+    return <>{children}</>;
+  }
 
   // 登出處理
   const handleLogout = async () => {
@@ -199,7 +216,8 @@ export function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <DashboardLayoutContext.Provider value={true}>
+      <div className="min-h-screen bg-background">
       {/* 頂部導航欄 */}
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex h-14 items-center px-4 gap-4">
@@ -326,6 +344,7 @@ export function DashboardLayout({
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
-    </div>
+      </div>
+    </DashboardLayoutContext.Provider>
   );
 }

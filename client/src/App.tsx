@@ -8,6 +8,7 @@ import { AuthProvider } from "@/contexts/auth-context";
 import { TeachingQualityProvider } from "@/contexts/teaching-quality-context";
 import { ProtectedRoute } from "@/components/auth/protected-route";
 import { ImpersonationBanner } from "@/components/impersonation-banner";
+import { AppLayout } from "@/components/layout/app-layout";
 
 // 只有這些頁面需要立即載入（登入頁面和 404）
 import NotFound from "@/pages/not-found";
@@ -60,8 +61,8 @@ const KnowItAllChat = lazy(() => import("@/pages/archive/tools/know-it-all-chat"
 const KnowItAllDocuments = lazy(() => import("@/pages/archive/tools/know-it-all-documents"));
 const TeachingQualityList = lazy(() => import("@/pages/archive/teaching-quality/teaching-quality-list"));
 
-// Loading 元件
-function PageLoader() {
+// 全螢幕 Loading（用於登入頁等非 Layout 頁面）
+function FullPageLoader() {
   return (
     <div className="flex items-center justify-center min-h-screen">
       <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
@@ -69,209 +70,136 @@ function PageLoader() {
   );
 }
 
-function Router() {
+// 受保護的路由內容（在 AppLayout 內部）
+function ProtectedRoutes() {
   return (
-    <Suspense fallback={<PageLoader />}>
-      <Switch>
-        {/* 公開路由 - 無需登入 */}
-        <Route path="/login" component={LoginPage} />
-        <Route path="/login-debug" component={LoginDebugPage} />
-        <Route path="/forgot-password" component={ForgotPasswordPage} />
-        <Route path="/forms/share/:id" component={PublicFormPage} />
-        <Route path="/forms/public/trial-class" component={PublicTrialClassForm} />
+    <Switch>
+      {/* 首頁 */}
+      <Route path="/" component={DashboardOverview} />
 
-      {/* 需要登入但可在未修改密碼時訪問 */}
-      <Route path="/change-password">
-        <ProtectedRoute>
-          <ChangePasswordPage />
-        </ProtectedRoute>
-      </Route>
-
-      {/* 受保護的路由 - 需要登入 */}
-      <Route path="/">
-        <ProtectedRoute>
-          <DashboardOverview />
-        </ProtectedRoute>
-      </Route>
-
-      {/* 報表路由（新，包含側邊選單） */}
-
-      {/* 新的整合頁面：體驗課總覽 */}
-      <Route path="/reports/trial-overview">
-        <ProtectedRoute><TrialOverviewPage /></ProtectedRoute>
-      </Route>
-
-      {/* 遊戲化版本體驗課總覽 (Demo) */}
-      <Route path="/reports/trial-overview-gamified">
-        <ProtectedRoute><TrialOverviewGamified /></ProtectedRoute>
-      </Route>
-
-      {/* 舊路由重導向到新的整合頁面 */}
+      {/* 報表路由 */}
+      <Route path="/reports/trial-overview" component={TrialOverviewPage} />
+      <Route path="/reports/trial-overview-gamified" component={TrialOverviewGamified} />
       <Route path="/reports/trial-report">
-        <ProtectedRoute>
-          <Redirect to="/reports/trial-overview?tab=data" />
-        </ProtectedRoute>
+        <Redirect to="/reports/trial-overview?tab=data" />
       </Route>
-
-      <Route path="/reports/cost-profit">
-        <ProtectedRoute><CostProfitUnifiedPage /></ProtectedRoute>
-      </Route>
-      <Route path="/reports/income-expense">
-        <ProtectedRoute><IncomeExpenseManager /></ProtectedRoute>
-      </Route>
-      <Route path="/reports/consultants">
-        <ProtectedRoute><ConsultantsPage /></ProtectedRoute>
-      </Route>
+      <Route path="/reports/cost-profit" component={CostProfitUnifiedPage} />
+      <Route path="/reports/income-expense" component={IncomeExpenseManager} />
+      <Route path="/reports/consultants" component={ConsultantsPage} />
 
       {/* 諮詢品質分析詳情頁 */}
-      <Route path="/consultation-quality/:eodId">
-        <ProtectedRoute><ConsultationQualityDetail /></ProtectedRoute>
-      </Route>
+      <Route path="/consultation-quality/:eodId" component={ConsultationQualityDetail} />
 
       {/* 學員管理路由 */}
-      <Route path="/students/profile">
-        <ProtectedRoute><StudentProfilePage /></ProtectedRoute>
-      </Route>
-
-      {/* 學員檔案 - 遊戲化版本 (Demo) */}
-      <Route path="/students/profile-gamified">
-        <ProtectedRoute><StudentProfileGamified /></ProtectedRoute>
-      </Route>
-
-      {/* 學員檔案 - Demo 模擬數據版本 */}
-      <Route path="/students/profile-demo">
-        <ProtectedRoute><StudentProfileDemo /></ProtectedRoute>
-      </Route>
+      <Route path="/students/profile" component={StudentProfilePage} />
+      <Route path="/students/profile-gamified" component={StudentProfileGamified} />
+      <Route path="/students/profile-demo" component={StudentProfileDemo} />
 
       {/* 教師工作區 */}
-      <Route path="/teacher/workspace">
-        <ProtectedRoute><TeacherWorkspace /></ProtectedRoute>
-      </Route>
+      <Route path="/teacher/workspace" component={TeacherWorkspace} />
 
-      {/* 工具路由（新，包含側邊選單） */}
-      <Route path="/tools/kpi-calculator">
-        <ProtectedRoute><KPICalculatorPage /></ProtectedRoute>
-      </Route>
-      <Route path="/tools/ai-analysis">
-        <ProtectedRoute><AIAnalysisPage /></ProtectedRoute>
-      </Route>
-      <Route path="/tools/raw-data-mvp">
-        <ProtectedRoute><RawDataMVPPage /></ProtectedRoute>
-      </Route>
-      <Route path="/tools/database-browser">
-        <ProtectedRoute><DatabaseBrowser /></ProtectedRoute>
-      </Route>
-      <Route path="/tools/know-it-all-chat">
-        <ProtectedRoute><KnowItAllChat /></ProtectedRoute>
-      </Route>
-      <Route path="/tools/know-it-all-documents">
-        <ProtectedRoute><KnowItAllDocuments /></ProtectedRoute>
-      </Route>
-      <Route path="/forms">
-        <ProtectedRoute><FormsPage /></ProtectedRoute>
-      </Route>
+      {/* 工具路由 */}
+      <Route path="/tools/kpi-calculator" component={KPICalculatorPage} />
+      <Route path="/tools/ai-analysis" component={AIAnalysisPage} />
+      <Route path="/tools/raw-data-mvp" component={RawDataMVPPage} />
+      <Route path="/tools/database-browser" component={DatabaseBrowser} />
+      <Route path="/tools/know-it-all-chat" component={KnowItAllChat} />
+      <Route path="/tools/know-it-all-documents" component={KnowItAllDocuments} />
+      <Route path="/forms" component={FormsPage} />
 
       {/* 電訪系統路由 */}
-      <Route path="/telemarketing/student-follow-up">
-        <ProtectedRoute><StudentFollowUp /></ProtectedRoute>
-      </Route>
-      <Route path="/telemarketing/ad-leads">
-        <ProtectedRoute><AdLeadsList /></ProtectedRoute>
-      </Route>
-      <Route path="/telemarketing/call-records">
-        <ProtectedRoute><CallRecordsList /></ProtectedRoute>
-      </Route>
-      <Route path="/telemarketing/ad-performance">
-        <ProtectedRoute><AdPerformanceReport /></ProtectedRoute>
-      </Route>
+      <Route path="/telemarketing/student-follow-up" component={StudentFollowUp} />
+      <Route path="/telemarketing/ad-leads" component={AdLeadsList} />
+      <Route path="/telemarketing/call-records" component={CallRecordsList} />
+      <Route path="/telemarketing/ad-performance" component={AdPerformanceReport} />
 
       {/* GoHighLevel 聯絡人 */}
-      <Route path="/leads/gohighlevel">
-        <ProtectedRoute><GoHighLevelContacts /></ProtectedRoute>
-      </Route>
+      <Route path="/leads/gohighlevel" component={GoHighLevelContacts} />
 
       {/* 教學品質路由 */}
-      {/* 舊的列表頁重導向到新的整合頁面的學員分析 Tab */}
       <Route path="/teaching-quality">
-        <ProtectedRoute>
-          <Redirect to="/reports/trial-overview?tab=analysis" />
-        </ProtectedRoute>
+        <Redirect to="/reports/trial-overview?tab=analysis" />
       </Route>
-
-      {/* 詳情頁保持獨立 */}
-      <Route path="/teaching-quality/:id">
-        <ProtectedRoute><TeachingQualityDetail /></ProtectedRoute>
-      </Route>
+      <Route path="/teaching-quality/:id" component={TeachingQualityDetail} />
 
       {/* 設定路由 */}
-      <Route path="/settings/data-sources">
-        <ProtectedRoute><DataSourcesPage /></ProtectedRoute>
-      </Route>
-      <Route path="/settings/form-builder">
-        <ProtectedRoute><FormBuilderList /></ProtectedRoute>
-      </Route>
-      <Route path="/settings/form-builder/new">
-        <ProtectedRoute><FormBuilderEditor /></ProtectedRoute>
-      </Route>
-      <Route path="/settings/form-builder/edit/:id">
-        <ProtectedRoute><FormBuilderEditor /></ProtectedRoute>
-      </Route>
-      <Route path="/settings/google-sheets-sync">
-        <ProtectedRoute><GoogleSheetsSync /></ProtectedRoute>
-      </Route>
-      <Route path="/settings/users">
-        <ProtectedRoute><UserManagement /></ProtectedRoute>
-      </Route>
-      <Route path="/settings/employees">
-        <ProtectedRoute><EmployeesPage /></ProtectedRoute>
-      </Route>
-      <Route path="/settings/permissions">
-        <ProtectedRoute><PermissionsPage /></ProtectedRoute>
-      </Route>
-      <Route path="/settings/consultation-analysis-config">
-        <ProtectedRoute><ConsultationAnalysisConfig /></ProtectedRoute>
-      </Route>
-      <Route path="/salary/calculator">
-        <ProtectedRoute><SalaryCalculator /></ProtectedRoute>
-      </Route>
-      <Route path="/settings/user-impersonation">
-        <ProtectedRoute><UserImpersonationPage /></ProtectedRoute>
-      </Route>
-      <Route path="/settings/facebook">
-        <ProtectedRoute><FacebookSettings /></ProtectedRoute>
-      </Route>
+      <Route path="/settings/data-sources" component={DataSourcesPage} />
+      <Route path="/settings/form-builder" component={FormBuilderList} />
+      <Route path="/settings/form-builder/new" component={FormBuilderEditor} />
+      <Route path="/settings/form-builder/edit/:id" component={FormBuilderEditor} />
+      <Route path="/settings/google-sheets-sync" component={GoogleSheetsSync} />
+      <Route path="/settings/users" component={UserManagement} />
+      <Route path="/settings/employees" component={EmployeesPage} />
+      <Route path="/settings/permissions" component={PermissionsPage} />
+      <Route path="/settings/consultation-analysis-config" component={ConsultationAnalysisConfig} />
+      <Route path="/salary/calculator" component={SalaryCalculator} />
+      <Route path="/settings/user-impersonation" component={UserImpersonationPage} />
+      <Route path="/settings/facebook" component={FacebookSettings} />
 
       {/* 舊路由重導向（向後兼容） */}
       <Route path="/dashboard/kpi-calculator">
-        <ProtectedRoute>
-          <Redirect to="/tools/kpi-calculator" />
-        </ProtectedRoute>
+        <Redirect to="/tools/kpi-calculator" />
       </Route>
       <Route path="/dashboard/trial-report">
-        <ProtectedRoute>
-          <Redirect to="/reports/trial-overview?tab=data" />
-        </ProtectedRoute>
+        <Redirect to="/reports/trial-overview?tab=data" />
       </Route>
       <Route path="/dashboard/total-report">
-        <ProtectedRoute>
-          <Redirect to="/reports/trial-overview?tab=data" />
-        </ProtectedRoute>
+        <Redirect to="/reports/trial-overview?tab=data" />
       </Route>
       <Route path="/dashboard/ai-analysis">
-        <ProtectedRoute>
-          <Redirect to="/tools/ai-analysis" />
-        </ProtectedRoute>
+        <Redirect to="/tools/ai-analysis" />
       </Route>
       <Route path="/dashboard/raw-data-mvp">
+        <Redirect to="/tools/raw-data-mvp" />
+      </Route>
+
+      {/* 404 */}
+      <Route component={NotFound} />
+    </Switch>
+  );
+}
+
+// 主路由（包含公開和受保護路由的分流）
+function Router() {
+  return (
+    <Switch>
+      {/* 公開路由 - 無需登入，獨立頁面 */}
+      <Route path="/login" component={LoginPage} />
+      <Route path="/login-debug" component={LoginDebugPage} />
+      <Route path="/forgot-password">
+        <Suspense fallback={<FullPageLoader />}>
+          <ForgotPasswordPage />
+        </Suspense>
+      </Route>
+      <Route path="/forms/share/:id">
+        <Suspense fallback={<FullPageLoader />}>
+          <PublicFormPage />
+        </Suspense>
+      </Route>
+      <Route path="/forms/public/trial-class">
+        <Suspense fallback={<FullPageLoader />}>
+          <PublicTrialClassForm />
+        </Suspense>
+      </Route>
+
+      {/* 修改密碼（受保護但無 Layout） */}
+      <Route path="/change-password">
         <ProtectedRoute>
-          <Redirect to="/tools/raw-data-mvp" />
+          <Suspense fallback={<FullPageLoader />}>
+            <ChangePasswordPage />
+          </Suspense>
         </ProtectedRoute>
       </Route>
 
-        {/* 404 */}
-        <Route component={NotFound} />
-      </Switch>
-    </Suspense>
+      {/* 受保護的路由 - 需要登入，使用 AppLayout */}
+      <Route>
+        <ProtectedRoute>
+          <AppLayout>
+            <ProtectedRoutes />
+          </AppLayout>
+        </ProtectedRoute>
+      </Route>
+    </Switch>
   );
 }
 
@@ -283,7 +211,11 @@ function App() {
         <ImpersonationBanner />
         <Switch>
           {/* 完全公開的路由 - 不需要 AuthProvider */}
-          <Route path="/forms/share/:id" component={PublicFormPage} />
+          <Route path="/forms/share/:id">
+            <Suspense fallback={<FullPageLoader />}>
+              <PublicFormPage />
+            </Suspense>
+          </Route>
 
           {/* 其他路由 - 需要 AuthProvider */}
           <Route>

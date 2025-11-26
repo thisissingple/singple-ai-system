@@ -1,11 +1,125 @@
 # 📊 專案進度追蹤文檔
 
-> **最後更新**: 2025-11-23
+> **最後更新**: 2025-11-26
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ GPT-5 模型升級與 API 參數優化完成
-> **當前階段**: AI 模型配置優化
-> **今日進度**: 將 AI 預設模型改為 gpt-5，並更新 API 參數為 max_completion_tokens
+> **專案狀態**: ✅ 導航載入體驗優化完成
+> **當前階段**: UX 效能優化
+> **今日進度**: 修復導航時側邊欄閃爍問題，實現只有內容區顯示載入狀態
 > **整體進度**: 100% ████████████████████
+
+---
+
+## 📅 2025-11-26 更新日誌
+
+### 🎯 導航載入體驗優化 - 側邊欄不再閃爍
+
+#### 問題描述
+用戶反映：點擊側邊欄導航時，整個頁面（包括側邊欄）都會變成「載入中」狀態，導致視覺閃爍，體驗不佳。
+
+#### 預期行為
+- 側邊欄應保持穩定，不受導航影響
+- 只有右側內容區顯示載入動畫
+
+#### 根因分析
+- 原架構：每個頁面都獨自包含 `DashboardLayout` 或 `ReportsLayout`
+- `Suspense` 包裹整個 `Router`，導致 lazy loading 時整個頁面（包括 Layout）都被替換
+- 結果：導航時側邊欄隨內容一起重新渲染
+
+#### 解決方案
+
+**架構重構：Layout 提升到路由外層**
+
+```
+舊架構：
+Router → Suspense → Page (含 DashboardLayout)
+        ↓
+導航時整個 Page + Layout 都被 fallback 替換
+
+新架構：
+Router → AppLayout (含 DashboardLayout) → Suspense → Page (無 Layout)
+                                           ↓
+導航時只有內容區被 fallback 替換，Layout 保持穩定
+```
+
+**使用 Context 避免重複嵌套**
+
+由於現有頁面仍保留 `DashboardLayout` 引用，我們使用 React Context 自動檢測並跳過重複的 Layout：
+
+```tsx
+// dashboard-layout.tsx
+const DashboardLayoutContext = createContext<boolean>(false);
+
+export function DashboardLayout({ children, ... }) {
+  const isInsideLayout = useContext(DashboardLayoutContext);
+
+  // 如果已經在 Layout 內部，直接返回 children
+  if (isInsideLayout) {
+    return <>{children}</>;
+  }
+
+  return (
+    <DashboardLayoutContext.Provider value={true}>
+      {/* 完整 Layout 內容 */}
+    </DashboardLayoutContext.Provider>
+  );
+}
+```
+
+#### 修改的檔案
+
+| 檔案 | 變更內容 |
+|------|----------|
+| [`client/src/App.tsx`](client/src/App.tsx) | 重構路由架構，將 Layout 提升到外層 |
+| [`client/src/components/layout/app-layout.tsx`](client/src/components/layout/app-layout.tsx) | **新增** - 統一的 App 佈局元件 |
+| [`client/src/components/layout/dashboard-layout.tsx`](client/src/components/layout/dashboard-layout.tsx) | 加入 Context 檢測避免重複嵌套 |
+| [`client/src/pages/reports-layout.tsx`](client/src/pages/reports-layout.tsx) | 簡化為透傳 children |
+
+#### 技術細節
+
+**app-layout.tsx（新增）**
+```tsx
+export function AppLayout({ children }: AppLayoutProps) {
+  const filteredSidebar = useFilteredSidebar();
+  return (
+    <DashboardLayout sidebarSections={filteredSidebar}>
+      <Suspense fallback={<ContentLoader />}>
+        {children}
+      </Suspense>
+    </DashboardLayout>
+  );
+}
+```
+
+**ContentLoader 動畫**
+```tsx
+function ContentLoader() {
+  return (
+    <div className="flex items-center justify-center h-full min-h-[400px]">
+      <div className="flex flex-col items-center gap-3">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
+        <p className="text-sm text-muted-foreground">載入中...</p>
+      </div>
+    </div>
+  );
+}
+```
+
+#### 驗收結果
+
+| 測試項目 | 狀態 |
+|----------|------|
+| 儀表板總覽 → 體驗課總覽 | ✅ 側邊欄不閃爍 |
+| 體驗課總覽 → 薪資計算器 | ✅ 側邊欄不閃爍 |
+| 薪資計算器 → 儀表板總覽 | ✅ 側邊欄不閃爍 |
+| 所有頁面只有一個側邊欄 | ✅ 無重複嵌套 |
+| 內容區正確顯示載入動畫 | ✅ |
+
+#### 優點
+
+1. **向後兼容**：現有頁面代碼無需修改，Context 自動處理重複 Layout
+2. **更好的 UX**：側邊欄穩定，只有內容區顯示載入
+3. **減少重繪**：導航時不再重新創建整個 Layout DOM
+4. **維護性**：未來新增頁面可選擇使用或不使用 Layout
 
 ---
 
