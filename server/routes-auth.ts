@@ -124,6 +124,23 @@ export function registerAuthRoutes(app: Express) {
    */
   app.get('/api/auth/me', async (req, res) => {
     try {
+      // Handle SKIP_AUTH mode for development
+      if (process.env.SKIP_AUTH === 'true') {
+        console.log('[AUTH /me] 🔓 SKIP_AUTH enabled - returning mock admin user');
+        return res.json({
+          success: true,
+          user: {
+            id: 'admin-test-123',
+            name: 'Admin (Dev)',
+            email: 'admin@test.com',
+            roles: ['admin', 'teacher', 'consultant', 'telemarketer'],
+            isAdmin: true,
+            isActive: true,
+            isImpersonating: false,
+          },
+        });
+      }
+
       const userId = (req as any).session?.userId;
       const sessionUser = (req as any).session?.user;
 

@@ -319,7 +319,17 @@ async function saveToCustomTable(
 
   for (const [fieldId, columnName] of Object.entries(form.field_mappings)) {
     if (data[fieldId] !== undefined) {
-      insertData[columnName] = data[fieldId];
+      let value = data[fieldId];
+
+      // 特殊處理：將字串 "true"/"false" 轉換為 boolean
+      // 這是為了處理 select 欄位返回的字串值
+      if (value === 'true') {
+        value = true;
+      } else if (value === 'false') {
+        value = false;
+      }
+
+      insertData[columnName] = value;
     }
   }
 

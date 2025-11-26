@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>測試工作表 API</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #00ff00;
+        }
+        pre {
+            background: #000;
+            padding: 15px;
+            border: 1px solid #00ff00;
+            overflow-x: auto;
+        }
+        button {
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #00cc00;
+        }
+        .error {
+            color: #ff0000;
+        }
+        .success {
+            color: #00ff00;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 測試 Google Sheets Worksheets API</h1>
+
+    <button onclick="testAPI()">測試 API</button>
+    <button onclick="location.reload()">重新載入</button>
+
+    <h2>結果：</h2>
+    <pre id="result">等待測試...</pre>
+
+    <script>
+        async function testAPI() {
+            const resultEl = document.getElementById('result');
+            resultEl.textContent = '正在測試...';
+
+            try {
+                // 測試工作表 API
+                const sourceId = '95f010b7-95e9-4009-9de3-f4b43e3f17de';
+                const response = await fetch(`http://localhost:5001/api/sheets/${sourceId}/worksheets`);
+                const data = await response.json();
+
+                let result = '✅ API 測試成功！\n\n';
+                result += `返回的工作表數量: ${data.data.length}\n\n`;
+                result += `工作表列表:\n`;
+
+                data.data.forEach((name, index) => {
+                    const isEmpty = name === '' || name.trim() === '';
+                    result += `  ${index + 1}. "${name}" ${isEmpty ? '❌ 空字串！' : '✅'}\n`;
+                });
+
+                // 檢查是否有空字串
+                const emptyCount = data.data.filter(name => !name || name.trim() === '').length;
+                result += `\n空字串數量: ${emptyCount}`;
+
+                if (emptyCount === 0) {
+                    result += ' ✅ 沒有空字串！';
+                    resultEl.className = 'success';
+                } else {
+                    result += ` ❌ 發現 ${emptyCount} 個空字串！`;
+                    resultEl.className = 'error';
+                }
+
+                resultEl.textContent = result;
+
+            } catch (error) {
+                resultEl.className = 'error';
+                resultEl.textContent = `❌ 測試失敗:\n${error.message}\n\n${error.stack}`;
+            }
+        }
+
+        // 頁面載入時自動測試
+        window.addEventListener('load', testAPI);
+    </script>
+</body>
+</html>

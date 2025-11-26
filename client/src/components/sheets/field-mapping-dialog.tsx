@@ -320,7 +320,7 @@ export function FieldMappingDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {isEditMode ? '編輯欄位映射' : '設定欄位映射'}
@@ -336,6 +336,18 @@ export function FieldMappingDialog({
           </DialogTitle>
         </DialogHeader>
 
+        {/* 調試資訊 - 可見狀態 */}
+        {process.env.NODE_ENV === 'development' && (
+          <div className="mb-4 p-3 bg-muted rounded text-xs">
+            <strong>調試資訊:</strong>
+            <div>worksheets: {worksheets.length} 個</div>
+            <div>tables: {tables.length} 個</div>
+            <div>selectedWorksheet: {selectedWorksheet || '(未選擇)'}</div>
+            <div>selectedTable: {selectedTable || '(未選擇)'}</div>
+            <div>loading: {loading ? '是' : '否'}</div>
+          </div>
+        )}
+
         <div className="space-y-6">
           {/* 選擇工作表 */}
           <div className="grid grid-cols-2 gap-4">
@@ -350,11 +362,13 @@ export function FieldMappingDialog({
                   <SelectValue placeholder="選擇工作表" />
                 </SelectTrigger>
                 <SelectContent>
-                  {worksheets.map((worksheet) => (
-                    <SelectItem key={worksheet} value={worksheet}>
-                      {worksheet}
-                    </SelectItem>
-                  ))}
+                  {worksheets
+                    .filter((worksheet) => worksheet && worksheet.trim() !== '')
+                    .map((worksheet) => (
+                      <SelectItem key={worksheet} value={worksheet}>
+                        {worksheet}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
               {isEditMode && (
@@ -378,11 +392,13 @@ export function FieldMappingDialog({
                       載入表格中...
                     </div>
                   ) : (
-                    tables.map((table) => (
-                      <SelectItem key={table} value={table}>
-                        {table}
-                      </SelectItem>
-                    ))
+                    tables
+                      .filter((table) => table && table.trim() !== '')
+                      .map((table) => (
+                        <SelectItem key={table} value={table}>
+                          {table}
+                        </SelectItem>
+                      ))
                   )}
                 </SelectContent>
               </Select>
@@ -437,11 +453,13 @@ export function FieldMappingDialog({
                               <SelectValue placeholder="Google Sheets 欄位" />
                             </SelectTrigger>
                             <SelectContent>
-                              {googleColumns.map((col) => (
-                                <SelectItem key={col} value={col}>
-                                  {col}
-                                </SelectItem>
-                              ))}
+                              {googleColumns
+                                .filter((col) => col && col.trim() !== '')
+                                .map((col) => (
+                                  <SelectItem key={col} value={col}>
+                                    {col}
+                                  </SelectItem>
+                                ))}
                             </SelectContent>
                           </Select>
                         </div>
@@ -459,11 +477,13 @@ export function FieldMappingDialog({
                               <SelectValue placeholder="Supabase 欄位" />
                             </SelectTrigger>
                             <SelectContent>
-                              {supabaseColumns.map((col) => (
-                                <SelectItem key={col} value={col}>
-                                  {col}
-                                </SelectItem>
-                              ))}
+                              {supabaseColumns
+                                .filter((col) => col && col.trim() !== '')
+                                .map((col) => (
+                                  <SelectItem key={col} value={col}>
+                                    {col}
+                                  </SelectItem>
+                                ))}
                             </SelectContent>
                           </Select>
                         </div>

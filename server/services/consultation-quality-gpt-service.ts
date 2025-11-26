@@ -444,15 +444,22 @@ export class ConsultationQualityGPTService {
       const openai = this.getOpenAI();
       const config = await this.loadConfig(); // Load config from database
 
-      const completion = await openai.chat.completions.create({
+      // GPT-5 doesn't support custom temperature parameter
+      const apiParams: any = {
         model: config.ai_model,
         messages: [
           { role: 'system', content: config.analysis_prompt },
           { role: 'user', content: `請分析以下諮詢逐字稿：\n\n${transcript}` },
         ],
-        temperature: config.temperature,
         max_completion_tokens: config.max_completion_tokens,  // GPT-5 uses max_completion_tokens
-      });
+      };
+
+      // Only add temperature for non-GPT-5 models
+      if (config.ai_model !== 'gpt-5') {
+        apiParams.temperature = config.temperature;
+      }
+
+      const completion = await openai.chat.completions.create(apiParams);
 
       const responseTimeMs = Date.now() - startTime;
       const tokensUsed = completion.usage?.total_tokens || 0;

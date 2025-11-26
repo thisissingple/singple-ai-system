@@ -236,9 +236,35 @@ export class SyncService {
       fieldMappings.forEach(mapping => {
         const googleIndex = headers.indexOf(mapping.googleColumn);
         if (googleIndex >= 0 && row[googleIndex] !== undefined) {
-          // 將空字串轉為 null，以符合 PostgreSQL 的 DATE/TIMESTAMP 類型
-          const value = row[googleIndex];
-          record[mapping.supabaseColumn] = value === '' ? null : value;
+          let value = row[googleIndex];
+
+          // 將空字串轉為 null
+          if (value === '') {
+            record[mapping.supabaseColumn] = null;
+            return;
+          }
+
+          // 清理中文數字（例如 "１" -> "1"）- 必須先做
+          if (typeof value === 'string' && /[０-９]/.test(value)) {
+            value = value.replace(/[０-９]/g, (ch) => {
+              return String.fromCharCode(ch.charCodeAt(0) - 0xFF10 + 0x30);
+            });
+          }
+
+          // 特殊處理數字欄位（amount_twd, quantity）
+          if (mapping.supabaseColumn === 'amount_twd' || mapping.supabaseColumn === 'quantity') {
+            if (typeof value === 'string') {
+              // 移除 $ 符號和逗號
+              value = value.replace(/[\$,]/g, '').trim();
+
+              // 如果清理後還包含非數字字元（除了負號和小數點），設為 null
+              if (value === '' || !/^-?\d+\.?\d*$/.test(value)) {
+                value = null;
+              }
+            }
+          }
+
+          record[mapping.supabaseColumn] = value;
         }
       });
 

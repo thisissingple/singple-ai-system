@@ -89,6 +89,7 @@ export interface TrialClassRecord {
   teacher_id?: string;
   teacher_name?: string;
   attendance_status?: string;
+  is_showed?: boolean;
   notes?: string;
   class_time?: string;
   course_type?: string;

@@ -21,6 +21,7 @@ export default function PublicTrialClassForm() {
     studentEmail: '',
     classDate: '',
     teacherName: '',
+    isShowed: '',
     notes: '',
     noConversionReason: '',
   });
@@ -77,6 +78,7 @@ export default function PublicTrialClassForm() {
         studentEmail: '',
         classDate: '',
         teacherName: '',
+        isShowed: '',
         notes: '',
         noConversionReason: '',
       });
@@ -206,6 +208,27 @@ export default function PublicTrialClassForm() {
                       {teacher}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* 學員是否上線 */}
+            <div className="space-y-2">
+              <Label htmlFor="isShowed">
+                學員是否上線 <span className="text-red-500">*</span>
+              </Label>
+              <Select
+                value={formData.isShowed}
+                onValueChange={(value) => setFormData({ ...formData, isShowed: value })}
+                disabled={loading}
+                required
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="請選擇學員出席狀態" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true">有上線</SelectItem>
+                  <SelectItem value="false">未上線</SelectItem>
                 </SelectContent>
               </Select>
             </div>

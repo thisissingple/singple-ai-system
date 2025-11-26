@@ -34,6 +34,7 @@ const UserManagement = lazy(() => import("@/pages/settings/user-management"));
 const EmployeesPage = lazy(() => import("@/pages/settings/employees"));
 const PermissionsPage = lazy(() => import("@/pages/settings/permissions"));
 const ConsultationAnalysisConfig = lazy(() => import("@/pages/settings/consultation-analysis-config"));
+const SalaryCalculator = lazy(() => import("@/pages/salary/salary-calculator"));
 const UserImpersonationPage = lazy(() => import("@/pages/settings/user-impersonation"));
 const TeachingQualityDetail = lazy(() => import("@/pages/teaching-quality/teaching-quality-detail"));
 const ChangePasswordPage = lazy(() => import("@/pages/auth/change-password"));
@@ -47,6 +48,10 @@ const GoHighLevelContacts = lazy(() => import("@/pages/leads/gohighlevel-contact
 const ConsultantsPage = lazy(() => import("@/pages/reports/consultants"));
 const ConsultationQualityDetail = lazy(() => import("@/pages/consultation-quality/consultation-quality-detail"));
 const StudentProfilePage = lazy(() => import("@/pages/students/student-profile-page"));
+const TeacherWorkspace = lazy(() => import("@/pages/teacher-workspace"));
+const TrialOverviewGamified = lazy(() => import("@/pages/reports/trial-overview-gamified"));
+const StudentProfileGamified = lazy(() => import("@/pages/students/student-profile-gamified"));
+const StudentProfileDemo = lazy(() => import("@/pages/students/student-profile-demo"));
 
 // Archive 頁面（低使用頻率，保留但移至 archive 目錄）
 const DataSourcesPage = lazy(() => import("@/pages/archive/settings/data-sources"));
@@ -96,6 +101,11 @@ function Router() {
         <ProtectedRoute><TrialOverviewPage /></ProtectedRoute>
       </Route>
 
+      {/* 遊戲化版本體驗課總覽 (Demo) */}
+      <Route path="/reports/trial-overview-gamified">
+        <ProtectedRoute><TrialOverviewGamified /></ProtectedRoute>
+      </Route>
+
       {/* 舊路由重導向到新的整合頁面 */}
       <Route path="/reports/trial-report">
         <ProtectedRoute>
@@ -121,6 +131,21 @@ function Router() {
       {/* 學員管理路由 */}
       <Route path="/students/profile">
         <ProtectedRoute><StudentProfilePage /></ProtectedRoute>
+      </Route>
+
+      {/* 學員檔案 - 遊戲化版本 (Demo) */}
+      <Route path="/students/profile-gamified">
+        <ProtectedRoute><StudentProfileGamified /></ProtectedRoute>
+      </Route>
+
+      {/* 學員檔案 - Demo 模擬數據版本 */}
+      <Route path="/students/profile-demo">
+        <ProtectedRoute><StudentProfileDemo /></ProtectedRoute>
+      </Route>
+
+      {/* 教師工作區 */}
+      <Route path="/teacher/workspace">
+        <ProtectedRoute><TeacherWorkspace /></ProtectedRoute>
       </Route>
 
       {/* 工具路由（新，包含側邊選單） */}
@@ -205,6 +230,9 @@ function Router() {
       </Route>
       <Route path="/settings/consultation-analysis-config">
         <ProtectedRoute><ConsultationAnalysisConfig /></ProtectedRoute>
+      </Route>
+      <Route path="/salary/calculator">
+        <ProtectedRoute><SalaryCalculator /></ProtectedRoute>
       </Route>
       <Route path="/settings/user-impersonation">
         <ProtectedRoute><UserImpersonationPage /></ProtectedRoute>

@@ -1,68 +1,92 @@
 /**
  * 收支紀錄服務
- * 提供收支記錄的 CRUD 操作、查詢、統計等功能
+ * 對應 Google Sheets 收支表結構
+ * Migration: 064_recreate_income_expense_table.sql
  */
 
-import { Pool } from 'pg';
-import { createPool, queryDatabase, insertAndReturn } from './pg-client';
+import { queryDatabase } from './pg-client';
 
 // ============================================
-// 類型定義
+// 類型定義（對應新的資料表結構）
 // ============================================
 
 export interface IncomeExpenseRecord {
   id: string;
-  transaction_date: string;
-  transaction_type: 'income' | 'expense' | 'refund';
-  category: string;
-  item_name: string;
-  amount: number;
-  currency: 'TWD' | 'USD' | 'RMB';
-  exchange_rate_used?: number;
-  amount_in_twd?: number;
-  student_id?: string;
-  student_name?: string;         // Migration 030 新增
-  student_email?: string;        // Migration 030 新增
-  teacher_id?: string;
-  teacher_name?: string;         // JOIN 查詢獲得
-  setter_id?: string;
-  setter_name?: string;    // JOIN 查詢獲得
-  consultant_id?: string;
-  consultant_name?: string;      // JOIN 查詢獲得
-  course_code?: string;
-  course_type?: string;
-  payment_method?: string;
-  deal_type?: 'self_deal' | 'assisted_deal';
-  cost_profit_record_id?: string;
-  trial_purchase_id?: string;
-  notes?: string;
-  source: 'manual' | 'ai' | 'system_sync' | 'imported';
+
+  // 基本交易資訊
+  transaction_date: string;                 // Date
+  payment_method?: string;                  // 付款方式
+  income_item?: string;                     // 收入項目
+  quantity?: number;                        // 數量
+  transaction_category?: string;            // 收支類別
+  course_category?: string;                 // 課程類別
+
+  // 金額資訊
+  amount_twd: number;                       // 金額（台幣）
+  amount_converted?: number;                // 金額（換算台幣）
+  currency?: string;                        // 幣別
+
+  // 客戶資訊
+  customer_name?: string;                   // 商家姓名/顧客姓名
+  customer_email?: string;                  // 顧客Email
+  customer_type?: string;                   // 姓名類別
+
+  // 人員資訊（使用專案統一命名）
+  teacher_id?: string;                      // 授課教練
+  closer_id?: string;                       // 諮詢師
+  setter_id?: string;                       // 電訪人員
+  form_filler_id?: string;                  // 填表人員
+
+  // 業務資訊
+  deal_method?: string;                     // 成交方式
+  consultation_source?: string;             // 諮詢來源
+
+  // 輔助資訊
+  notes?: string;                           // 備註
+  source: 'manual' | 'google_sheets' | 'system';
+
+  // 狀態與審核
   is_confirmed: boolean;
   confirmed_by?: string;
   confirmed_at?: string;
+
+  // 軟刪除
+  is_deleted: boolean;
+  deleted_at?: string;
+  deleted_by?: string;
+
+  // 時間戳
   created_at: string;
   updated_at: string;
   created_by?: string;
-  created_by_name?: string;      // JOIN 查詢獲得
+
+  // JOIN 查詢獲得的顯示名稱
+  teacher_name?: string;
+  closer_name?: string;
+  setter_name?: string;
+  form_filler_name?: string;
+  created_by_name?: string;
 }
 
 export interface CreateIncomeExpenseInput {
-  transaction_date: string;
-  transaction_type: 'income' | 'expense' | 'refund';
-  category: string;
-  item_name: string;
-  amount: number;
-  currency?: 'TWD' | 'USD' | 'RMB';
-  student_id?: string;
-  student_name?: string;   // Migration 030 新增
-  student_email?: string;  // Migration 030 新增
-  teacher_id?: string;
-  setter_id?: string;
-  consultant_id?: string;
-  course_code?: string;
-  course_type?: string;
+  transaction_date: string;                 // 必填
+  amount_twd: number;                       // 必填
   payment_method?: string;
-  deal_type?: 'self_deal' | 'assisted_deal';
+  income_item?: string;
+  quantity?: number;
+  transaction_category?: string;
+  course_category?: string;
+  amount_converted?: number;
+  currency?: string;
+  customer_name?: string;
+  customer_email?: string;
+  customer_type?: string;
+  teacher_id?: string;
+  closer_id?: string;
+  setter_id?: string;
+  form_filler_id?: string;
+  deal_method?: string;
+  consultation_source?: string;
   notes?: string;
   created_by?: string;
 }
@@ -72,13 +96,13 @@ export interface UpdateIncomeExpenseInput extends Partial<CreateIncomeExpenseInp
 }
 
 export interface QueryParams {
-  month?: string;          // YYYY-MM
-  transaction_type?: string;
-  category?: string;
+  month?: string;                          // YYYY-MM
+  transaction_category?: string;
+  course_category?: string;
   teacher_id?: string;
-  customer_id?: string;
-  consultant_id?: string;
+  closer_id?: string;
   setter_id?: string;
+  customer_email?: string;
   search?: string;
   is_confirmed?: boolean;
   start_date?: string;
@@ -94,7 +118,7 @@ export interface MonthlySummary {
   net_profit: number;
   record_count: number;
   by_category: { category: string; amount: number; count: number }[];
-  by_currency: { currency: string; amount: number; count: number }[];
+  by_course_category: { category: string; amount: number; count: number }[];
 }
 
 // ============================================
@@ -102,59 +126,18 @@ export interface MonthlySummary {
 // ============================================
 
 class IncomeExpenseService {
-  private pool: Pool;
-
-  constructor() {
-    this.pool = createPool();
-  }
-
-  /**
-   * 獲取當前匯率（從外部 API 或固定值）
-   */
-  private async getExchangeRate(currency: string): Promise<number> {
-    if (currency === 'TWD') return 1;
-
-    // TODO: 從 exchangerate-api.com 獲取即時匯率
-    // 暫時使用固定值
-    const rates: Record<string, number> = {
-      USD: 30.58,
-      RMB: 4.29,
-    };
-
-    return rates[currency] || 1;
-  }
-
-  /**
-   * 計算 TWD 金額
-   */
-  private async calculateAmountInTWD(
-    amount: number,
-    currency: string
-  ): Promise<{ amount_in_twd: number; exchange_rate_used: number }> {
-    const rate = await this.getExchangeRate(currency);
-    return {
-      amount_in_twd: amount * rate,
-      exchange_rate_used: rate,
-    };
-  }
-
   /**
    * 建立收支記錄
    */
   async createRecord(input: CreateIncomeExpenseInput): Promise<IncomeExpenseRecord> {
-    const currency = input.currency || 'TWD';
-    const { amount_in_twd, exchange_rate_used } = await this.calculateAmountInTWD(
-      input.amount,
-      currency
-    );
-
     const query = `
       INSERT INTO income_expense_records (
-        transaction_date, transaction_type, category, item_name,
-        amount, currency, exchange_rate_used, amount_in_twd,
-        student_id, student_name, student_email,
-        teacher_id, setter_id, consultant_id,
-        course_code, course_type, payment_method, deal_type,
+        transaction_date, payment_method, income_item, quantity,
+        transaction_category, course_category,
+        amount_twd, amount_converted, currency,
+        customer_name, customer_email, customer_type,
+        teacher_id, closer_id, setter_id, form_filler_id,
+        deal_method, consultation_source,
         notes, source, created_by
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
@@ -164,29 +147,29 @@ class IncomeExpenseService {
 
     const values = [
       input.transaction_date,
-      input.transaction_type,
-      input.category,
-      input.item_name,
-      input.amount,
-      currency,
-      exchange_rate_used,
-      amount_in_twd,
-      input.student_id || null,
-      input.student_name || null,    // Migration 030 新增
-      input.student_email || null,   // Migration 030 新增
-      input.teacher_id || null,
-      input.setter_id || null,
-      input.consultant_id || null,
-      input.course_code || null,
-      input.course_type || null,
       input.payment_method || null,
-      input.deal_type || null,
+      input.income_item || null,
+      input.quantity || 1,
+      input.transaction_category || null,
+      input.course_category || null,
+      input.amount_twd,
+      input.amount_converted || null,
+      input.currency || 'TWD',
+      input.customer_name || null,
+      input.customer_email || null,
+      input.customer_type || null,
+      input.teacher_id || null,
+      input.closer_id || null,
+      input.setter_id || null,
+      input.form_filler_id || null,
+      input.deal_method || null,
+      input.consultation_source || null,
       input.notes || null,
       'manual',
       input.created_by || null,
     ];
 
-    const result = await queryDatabase(query, values);
+    const result = await queryDatabase(query, values, 'session');
     return result.rows[0];
   }
 
@@ -194,50 +177,29 @@ class IncomeExpenseService {
    * 更新收支記錄
    */
   async updateRecord(id: string, input: UpdateIncomeExpenseInput): Promise<IncomeExpenseRecord> {
-    // 構建動態更新語句
     const updates: string[] = [];
     const values: any[] = [];
     let paramIndex = 1;
 
-    // 如果更新了金額或幣別，重新計算 TWD 金額
-    if (input.amount !== undefined || input.currency !== undefined) {
-      const currentRecord = await this.getRecordById(id);
-      const amount = input.amount ?? currentRecord.amount;
-      const currency = input.currency ?? currentRecord.currency;
-
-      const { amount_in_twd, exchange_rate_used } = await this.calculateAmountInTWD(
-        amount,
-        currency
-      );
-
-      if (input.amount !== undefined) {
-        updates.push(`amount = $${paramIndex++}`);
-        values.push(input.amount);
-      }
-      if (input.currency !== undefined) {
-        updates.push(`currency = $${paramIndex++}`);
-        values.push(input.currency);
-      }
-      updates.push(`exchange_rate_used = $${paramIndex++}`, `amount_in_twd = $${paramIndex++}`);
-      values.push(exchange_rate_used, amount_in_twd);
-    }
-
-    // 其他欄位
     const fields: Array<keyof UpdateIncomeExpenseInput> = [
       'transaction_date',
-      'transaction_type',
-      'category',
-      'item_name',
-      'student_id',
-      'student_name',    // Migration 030 新增
-      'student_email',   // Migration 030 新增
-      'teacher_id',
-      'setter_id',
-      'consultant_id',
-      'course_code',
-      'course_type',
       'payment_method',
-      'deal_type',
+      'income_item',
+      'quantity',
+      'transaction_category',
+      'course_category',
+      'amount_twd',
+      'amount_converted',
+      'currency',
+      'customer_name',
+      'customer_email',
+      'customer_type',
+      'teacher_id',
+      'closer_id',
+      'setter_id',
+      'form_filler_id',
+      'deal_method',
+      'consultation_source',
       'notes',
       'is_confirmed',
     ];
@@ -265,38 +227,55 @@ class IncomeExpenseService {
       RETURNING *
     `;
 
-    const result = await queryDatabase(query, values);
+    const result = await queryDatabase(query, values, 'session');
+    if (result.rows.length === 0) {
+      throw new Error(`Record not found: ${id}`);
+    }
     return result.rows[0];
   }
 
   /**
-   * 刪除收支記錄
+   * 軟刪除收支記錄
    */
-  async deleteRecord(id: string): Promise<void> {
-    const query = 'DELETE FROM income_expense_records WHERE id = $1';
-    await queryDatabase(query, [id]);
+  async deleteRecord(id: string, deletedBy?: string): Promise<void> {
+    const query = `
+      UPDATE income_expense_records
+      SET is_deleted = true, deleted_at = NOW(), deleted_by = $2
+      WHERE id = $1
+    `;
+    await queryDatabase(query, [id, deletedBy || null], 'session');
   }
 
   /**
-   * 根據 ID 獲取單筆記錄
+   * 永久刪除收支記錄
+   */
+  async hardDeleteRecord(id: string): Promise<void> {
+    const query = 'DELETE FROM income_expense_records WHERE id = $1';
+    await queryDatabase(query, [id], 'session');
+  }
+
+  /**
+   * 根據 ID 獲取單筆記錄（含人員名稱）
    */
   async getRecordById(id: string): Promise<IncomeExpenseRecord> {
     const query = `
       SELECT
         ier.*,
         u1.first_name || ' ' || COALESCE(u1.last_name, '') as teacher_name,
-        u2.first_name || ' ' || COALESCE(u2.last_name, '') as setter_name,
-        u3.first_name || ' ' || COALESCE(u3.last_name, '') as consultant_name,
-        u4.first_name || ' ' || COALESCE(u4.last_name, '') as created_by_name
+        u2.first_name || ' ' || COALESCE(u2.last_name, '') as closer_name,
+        u3.first_name || ' ' || COALESCE(u3.last_name, '') as setter_name,
+        u4.first_name || ' ' || COALESCE(u4.last_name, '') as form_filler_name,
+        u5.first_name || ' ' || COALESCE(u5.last_name, '') as created_by_name
       FROM income_expense_records ier
       LEFT JOIN users u1 ON ier.teacher_id = u1.id
-      LEFT JOIN users u2 ON ier.setter_id = u2.id
-      LEFT JOIN users u3 ON ier.consultant_id = u3.id
-      LEFT JOIN users u4 ON ier.created_by = u4.id
-      WHERE ier.id = $1
+      LEFT JOIN users u2 ON ier.closer_id = u2.id
+      LEFT JOIN users u3 ON ier.setter_id = u3.id
+      LEFT JOIN users u4 ON ier.form_filler_id = u4.id
+      LEFT JOIN users u5 ON ier.created_by = u5.id
+      WHERE ier.id = $1 AND ier.is_deleted = false
     `;
 
-    const result = await queryDatabase(query, [id]);
+    const result = await queryDatabase(query, [id], 'transaction');
 
     if (result.rows.length === 0) {
       throw new Error(`Record not found: ${id}`);
@@ -314,7 +293,7 @@ class IncomeExpenseService {
     page: number;
     limit: number;
   }> {
-    const conditions: string[] = ['1=1'];
+    const conditions: string[] = ['ier.is_deleted = false'];
     const values: any[] = [];
     let paramIndex = 1;
 
@@ -334,16 +313,15 @@ class IncomeExpenseService {
       values.push(params.end_date);
     }
 
-    // 類型篩選
-    if (params.transaction_type) {
-      conditions.push(`ier.transaction_type = $${paramIndex++}`);
-      values.push(params.transaction_type);
+    // 類別篩選
+    if (params.transaction_category) {
+      conditions.push(`ier.transaction_category = $${paramIndex++}`);
+      values.push(params.transaction_category);
     }
 
-    // 分類篩選
-    if (params.category) {
-      conditions.push(`ier.category = $${paramIndex++}`);
-      values.push(params.category);
+    if (params.course_category) {
+      conditions.push(`ier.course_category = $${paramIndex++}`);
+      values.push(params.course_category);
     }
 
     // 人員篩選
@@ -351,17 +329,17 @@ class IncomeExpenseService {
       conditions.push(`ier.teacher_id = $${paramIndex++}`);
       values.push(params.teacher_id);
     }
-    if (params.customer_id) {
-      conditions.push(`ier.customer_id = $${paramIndex++}`);
-      values.push(params.customer_id);
-    }
-    if (params.consultant_id) {
-      conditions.push(`ier.consultant_id = $${paramIndex++}`);
-      values.push(params.consultant_id);
+    if (params.closer_id) {
+      conditions.push(`ier.closer_id = $${paramIndex++}`);
+      values.push(params.closer_id);
     }
     if (params.setter_id) {
       conditions.push(`ier.setter_id = $${paramIndex++}`);
       values.push(params.setter_id);
+    }
+    if (params.customer_email) {
+      conditions.push(`ier.customer_email = $${paramIndex++}`);
+      values.push(params.customer_email);
     }
 
     // 確認狀態篩選
@@ -373,11 +351,10 @@ class IncomeExpenseService {
     // 關鍵字搜尋
     if (params.search) {
       conditions.push(`(
-        ier.item_name ILIKE $${paramIndex} OR
+        ier.income_item ILIKE $${paramIndex} OR
         ier.customer_name ILIKE $${paramIndex} OR
         ier.customer_email ILIKE $${paramIndex} OR
-        ier.notes ILIKE $${paramIndex} OR
-        ier.course_code ILIKE $${paramIndex}
+        ier.notes ILIKE $${paramIndex}
       )`);
       values.push(`%${params.search}%`);
       paramIndex++;
@@ -394,7 +371,7 @@ class IncomeExpenseService {
       FROM income_expense_records ier
       WHERE ${conditions.join(' AND ')}
     `;
-    const countResult = await queryDatabase(countQuery, values);
+    const countResult = await queryDatabase(countQuery, values, 'transaction');
     const total = parseInt(countResult.rows[0].total);
 
     // 查詢記錄
@@ -402,21 +379,23 @@ class IncomeExpenseService {
       SELECT
         ier.*,
         u1.first_name || ' ' || COALESCE(u1.last_name, '') as teacher_name,
-        u2.first_name || ' ' || COALESCE(u2.last_name, '') as setter_name,
-        u3.first_name || ' ' || COALESCE(u3.last_name, '') as consultant_name,
-        u4.first_name || ' ' || COALESCE(u4.last_name, '') as created_by_name
+        u2.first_name || ' ' || COALESCE(u2.last_name, '') as closer_name,
+        u3.first_name || ' ' || COALESCE(u3.last_name, '') as setter_name,
+        u4.first_name || ' ' || COALESCE(u4.last_name, '') as form_filler_name,
+        u5.first_name || ' ' || COALESCE(u5.last_name, '') as created_by_name
       FROM income_expense_records ier
       LEFT JOIN users u1 ON ier.teacher_id = u1.id
-      LEFT JOIN users u2 ON ier.setter_id = u2.id
-      LEFT JOIN users u3 ON ier.consultant_id = u3.id
-      LEFT JOIN users u4 ON ier.created_by = u4.id
+      LEFT JOIN users u2 ON ier.closer_id = u2.id
+      LEFT JOIN users u3 ON ier.setter_id = u3.id
+      LEFT JOIN users u4 ON ier.form_filler_id = u4.id
+      LEFT JOIN users u5 ON ier.created_by = u5.id
       WHERE ${conditions.join(' AND ')}
       ORDER BY ier.transaction_date DESC, ier.created_at DESC
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
 
     values.push(limit, offset);
-    const result = await queryDatabase(query, values);
+    const result = await queryDatabase(query, values, 'transaction');
 
     return {
       records: result.rows,
@@ -435,46 +414,48 @@ class IncomeExpenseService {
         SELECT *
         FROM income_expense_records
         WHERE DATE_TRUNC('month', transaction_date) = $1::date
+          AND is_deleted = false
       ),
       category_summary AS (
         SELECT
-          category,
-          SUM(amount_in_twd) as amount,
+          transaction_category as category,
+          SUM(amount_twd) as amount,
           COUNT(*) as count
         FROM monthly_data
-        WHERE category IS NOT NULL
-        GROUP BY category
+        WHERE transaction_category IS NOT NULL
+        GROUP BY transaction_category
       ),
-      currency_summary AS (
+      course_summary AS (
         SELECT
-          currency,
-          SUM(amount) as amount,
+          course_category as category,
+          SUM(amount_twd) as amount,
           COUNT(*) as count
         FROM monthly_data
-        GROUP BY currency
+        WHERE course_category IS NOT NULL
+        GROUP BY course_category
       )
       SELECT
-        -- 總計
-        (SELECT COALESCE(SUM(CASE WHEN transaction_type = 'income' THEN amount_in_twd ELSE 0 END), 0) FROM monthly_data) as total_income,
-        (SELECT COALESCE(SUM(CASE WHEN transaction_type = 'expense' THEN amount_in_twd ELSE 0 END), 0) FROM monthly_data) as total_expense,
+        -- 總計（假設「收入」、「支出」等字眼在 transaction_category 中）
+        (SELECT COALESCE(SUM(CASE WHEN transaction_category LIKE '%收入%' THEN amount_twd ELSE 0 END), 0) FROM monthly_data) as total_income,
+        (SELECT COALESCE(SUM(CASE WHEN transaction_category LIKE '%支出%' THEN amount_twd ELSE 0 END), 0) FROM monthly_data) as total_expense,
         (SELECT COUNT(*) FROM monthly_data) as record_count,
 
-        -- 按分類統計
+        -- 按收支類別統計
         (SELECT COALESCE(json_agg(jsonb_build_object(
           'category', category,
           'amount', amount,
           'count', count
         )), '[]'::json) FROM category_summary) as by_category,
 
-        -- 按幣別統計
+        -- 按課程類別統計
         (SELECT COALESCE(json_agg(jsonb_build_object(
-          'currency', currency,
+          'category', category,
           'amount', amount,
           'count', count
-        )), '[]'::json) FROM currency_summary) as by_currency
+        )), '[]'::json) FROM course_summary) as by_course_category
     `;
 
-    const result = await queryDatabase(query, [`${month}-01`]);
+    const result = await queryDatabase(query, [`${month}-01`], 'transaction');
 
     if (result.rows.length === 0) {
       return {
@@ -484,7 +465,7 @@ class IncomeExpenseService {
         net_profit: 0,
         record_count: 0,
         by_category: [],
-        by_currency: [],
+        by_course_category: [],
       };
     }
 
@@ -499,14 +480,14 @@ class IncomeExpenseService {
       net_profit: total_income - total_expense,
       record_count: parseInt(row.record_count),
       by_category: row.by_category || [],
-      by_currency: row.by_currency || [],
+      by_course_category: row.by_course_category || [],
     };
   }
 
   /**
-   * 批次匯入記錄
+   * 批次匯入記錄（用於 Google Sheets 同步）
    */
-  async bulkImport(records: CreateIncomeExpenseInput[]): Promise<{
+  async bulkImport(records: CreateIncomeExpenseInput[], source: 'google_sheets' | 'manual' = 'google_sheets'): Promise<{
     success: number;
     failed: number;
     errors: Array<{ index: number; error: string }>;
@@ -517,7 +498,45 @@ class IncomeExpenseService {
 
     for (let i = 0; i < records.length; i++) {
       try {
-        await this.createRecord(records[i]);
+        const query = `
+          INSERT INTO income_expense_records (
+            transaction_date, payment_method, income_item, quantity,
+            transaction_category, course_category,
+            amount_twd, amount_converted, currency,
+            customer_name, customer_email, customer_type,
+            teacher_id, closer_id, setter_id, form_filler_id,
+            deal_method, consultation_source,
+            notes, source, created_by
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+          )
+        `;
+
+        const values = [
+          records[i].transaction_date,
+          records[i].payment_method || null,
+          records[i].income_item || null,
+          records[i].quantity || 1,
+          records[i].transaction_category || null,
+          records[i].course_category || null,
+          records[i].amount_twd,
+          records[i].amount_converted || null,
+          records[i].currency || 'TWD',
+          records[i].customer_name || null,
+          records[i].customer_email || null,
+          records[i].customer_type || null,
+          records[i].teacher_id || null,
+          records[i].closer_id || null,
+          records[i].setter_id || null,
+          records[i].form_filler_id || null,
+          records[i].deal_method || null,
+          records[i].consultation_source || null,
+          records[i].notes || null,
+          source,
+          records[i].created_by || null,
+        ];
+
+        await queryDatabase(query, values, 'session');
         success++;
       } catch (error: any) {
         failed++;
@@ -529,17 +548,6 @@ class IncomeExpenseService {
     }
 
     return { success, failed, errors };
-  }
-
-  /**
-   * 同步到成本獲利表（月度彙總）
-   */
-  async syncToCostProfit(month: string): Promise<void> {
-    // TODO: 實作同步邏輯
-    // 1. 獲取該月的所有收支記錄
-    // 2. 按分類彙總
-    // 3. 寫入或更新 cost_profit 表
-    console.log(`Syncing month ${month} to cost_profit table...`);
   }
 }
 
