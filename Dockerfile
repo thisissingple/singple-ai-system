@@ -12,7 +12,8 @@ RUN npm ci
 # Copy source code (respects .dockerignore)
 COPY . .
 
-# Build the application
+# Build the application (set PATH to include node_modules/.bin)
+ENV PATH="/app/node_modules/.bin:$PATH"
 RUN npm run build
 
 # Clean up after build
