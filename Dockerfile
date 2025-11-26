@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install ALL dependencies (including devDependencies for build tools like vite)
-RUN npm ci
+RUN npm install --include=dev
 
 # Copy source code (respects .dockerignore)
 COPY . .
