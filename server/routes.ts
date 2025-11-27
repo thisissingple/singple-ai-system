@@ -8,6 +8,7 @@ import { autoAnalysisService } from "./services/deprecated/auto-analysis";
 import { totalReportService } from "./services/reporting/total-report-service";
 import { introspectService } from "./services/reporting/introspect-service";
 import { generateConsultantReport, getConsultationList, getTrendData, getLeadSourceAverageDetails, type ConsultantReportParams, type PeriodType, type DealStatus, type TrendGrouping } from "./services/consultant-report-service";
+import { generateConsultantAIReport, type AIReportInput } from "./services/consultant-ai-report-service";
 import { devSeedService } from "./services/deprecated/dev-seed-service";
 import { reportMetricConfigService } from "./services/reporting/report-metric-config-service";
 import { formulaEngine } from "./services/reporting/formula-engine";
@@ -4007,6 +4008,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: false,
         error: 'Internal server error',
         message: '查詢來源平均值詳細資料時發生錯誤',
+      });
+    }
+  });
+
+  // Consultant AI Report - 生成 AI 分析報告
+  app.post('/api/reports/consultants/ai-report', isAuthenticated, requireModulePermission('consultant_report'), async (req, res) => {
+    try {
+      const params: ConsultantReportParams = {
+        period: (req.body.period as PeriodType) || 'month',
+        startDate: req.body.startDate as string,
+        endDate: req.body.endDate as string,
+        consultantName: req.body.consultantName as string,
+        leadSource: req.body.leadSource,
+        planType: req.body.planType,
+        dealStatus: (req.body.dealStatus as DealStatus) || 'all',
+        compareWithPrevious: req.body.compareWithPrevious === true,
+        trendGrouping: (req.body.trendGrouping as TrendGrouping) || 'day',
+      };
+
+      console.log('[AI Report] Generating report with params:', params);
+
+      // Get the full report data first
+      const report = await generateConsultantReport(params);
+
+      // Prepare AI report input
+      const aiReportInput: AIReportInput = {
+        kpiData: report.kpiData,
+        ranking: report.ranking,
+        setterRanking: report.setterRanking,
+        leadSourceTable: report.leadSourceTable,
+        charts: report.charts,
+        period: params.period,
+        dateRange: report.metadata.dateRange,
+      };
+
+      // Generate AI report
+      const aiReport = await generateConsultantAIReport(aiReportInput);
+
+      console.log('[AI Report] Report generated successfully');
+
+      res.json({
+        success: true,
+        data: aiReport,
+      });
+    } catch (error: any) {
+      console.error('[AI Report] Error generating report:', error);
+
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        message: error.message || 'AI 報告生成時發生錯誤',
       });
     }
   });
@@ -9768,6 +9820,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, message: '更新成功' });
     } catch (error: any) {
       console.error('Failed to update employee setting:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // AI Usage Dashboard API
+  // ============================================================================
+
+  // GET - AI 使用量統計
+  app.get('/api/ai-usage/summary', isAuthenticated, async (req, res) => {
+    try {
+      const { start_date, end_date } = req.query;
+
+      // 預設本月
+      const today = new Date();
+      const defaultStart = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+      const defaultEnd = today.toISOString().split('T')[0];
+
+      const startDate = (start_date as string) || defaultStart;
+      const endDate = (end_date as string) || defaultEnd;
+
+      const aiUsageService = await import('./services/ai-usage-service');
+      const summary = await aiUsageService.getAIUsageSummary(startDate, endDate);
+
+      res.json({
+        success: true,
+        data: summary,
+      });
+    } catch (error: any) {
+      console.error('查詢 AI 使用量失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GET - 最近 N 天的每日 AI 使用量
+  app.get('/api/ai-usage/daily', isAuthenticated, async (req, res) => {
+    try {
+      const days = parseInt(req.query.days as string) || 30;
+
+      const aiUsageService = await import('./services/ai-usage-service');
+      const daily = await aiUsageService.getDailyUsage(days);
+
+      res.json({
+        success: true,
+        data: daily,
+      });
+    } catch (error: any) {
+      console.error('查詢每日 AI 使用量失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GET - 月度 AI 使用量
+  app.get('/api/ai-usage/monthly', isAuthenticated, async (req, res) => {
+    try {
+      const today = new Date();
+      const year = parseInt(req.query.year as string) || today.getFullYear();
+      const month = parseInt(req.query.month as string) || today.getMonth() + 1;
+
+      const aiUsageService = await import('./services/ai-usage-service');
+      const monthly = await aiUsageService.getMonthlyUsage(year, month);
+
+      res.json({
+        success: true,
+        data: monthly,
+      });
+    } catch (error: any) {
+      console.error('查詢月度 AI 使用量失敗:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GET - AI 使用詳細記錄（每筆呼叫）
+  app.get('/api/ai-usage/records', isAuthenticated, async (req, res) => {
+    try {
+      const { start_date, end_date, page, page_size, source } = req.query;
+
+      // 預設本月
+      const today = new Date();
+      const defaultStart = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+      const defaultEnd = today.toISOString().split('T')[0];
+
+      const startDate = (start_date as string) || defaultStart;
+      const endDate = (end_date as string) || defaultEnd;
+      const pageNum = parseInt(page as string) || 1;
+      const pageSizeNum = parseInt(page_size as string) || 50;
+      const sourceFilter = source as string | undefined;
+
+      const aiUsageService = await import('./services/ai-usage-service');
+      const records = await aiUsageService.getAIUsageRecords(
+        startDate,
+        endDate,
+        pageNum,
+        pageSizeNum,
+        sourceFilter
+      );
+
+      res.json({
+        success: true,
+        data: records,
+      });
+    } catch (error: any) {
+      console.error('查詢 AI 使用記錄失敗:', error);
       res.status(500).json({ error: error.message });
     }
   });

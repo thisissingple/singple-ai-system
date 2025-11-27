@@ -30,6 +30,7 @@ import {
   RefreshCw,
   UserCircle,
   Wallet,
+  Cpu,
 } from 'lucide-react';
 import { SidebarSectionConfig } from '@/components/layout/sidebar';
 import type { Role } from './permissions';
@@ -196,6 +197,12 @@ export const sidebarConfig: SidebarSection[] = [
         label: '諮詢分析 AI 設定',
         href: '/settings/consultation-analysis-config',
         icon: Settings,
+        requiredRoles: ['admin'],
+      },
+      {
+        label: 'AI 使用量統計',
+        href: '/settings/ai-usage',
+        icon: Cpu,
         requiredRoles: ['admin'],
       },
     ],

@@ -1178,7 +1178,7 @@ export async function getConsultationList(
   const sortOrder = params.sortOrder || 'DESC';
 
   // 安全的排序欄位白名單
-  const allowedSortFields = ['consultation_date', 'deal_date', 'student_name', 'closer_name', 'setter_name', 'lead_source'];
+  const allowedSortFields = ['consultation_date', 'deal_date', 'student_name', 'closer_name', 'setter_name', 'lead_source', 'deal_type', 'actual_amount', 'plan', 'is_show'];
   const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'consultation_date';
   const safeSortOrder = sortOrder === 'ASC' ? 'ASC' : 'DESC';
 
@@ -1195,7 +1195,8 @@ export async function getConsultationList(
       actual_amount,
       is_show,
       plan,
-      consultation_result
+      consultation_result,
+      deal_type
     FROM eods_for_closers
     WHERE ${whereClause}
     ORDER BY ${safeSortBy} ${safeSortOrder}
@@ -1216,6 +1217,7 @@ export async function getConsultationList(
     isShow: row.is_show,
     plan: row.plan,
     consultationResult: row.consultation_result,
+    dealType: row.deal_type,
   }));
 }
 

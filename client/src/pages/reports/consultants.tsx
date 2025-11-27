@@ -3,7 +3,7 @@
  * 提供諮詢師業績分析、成交數據、AI 洞見等功能
  */
 
-import { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { useFilteredSidebar } from '@/hooks/use-sidebar';
@@ -15,7 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   TrendingUp,
   TrendingDown,
@@ -27,6 +27,7 @@ import {
   Lightbulb,
   ArrowUp,
   ArrowDown,
+  ArrowUpDown,
   Minus,
   MessageCircle,
   Send,
@@ -35,6 +36,10 @@ import {
   ChevronRight,
   Calendar as CalendarIcon,
   Info,
+  Sparkles,
+  RefreshCw,
+  FileText,
+  Loader2,
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { format } from 'date-fns';
@@ -216,6 +221,22 @@ function ConsultantReportContent() {
   const [studentDetailOpen, setStudentDetailOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
 
+  // AI 報告狀態
+  interface AIReportSection {
+    title: string;
+    content: string;
+  }
+  interface AIReport {
+    summary: string;
+    sections: AIReportSection[];
+    generatedAt: string;
+    period: string;
+    dateRange: { start: string; end: string };
+  }
+  const [aiReport, setAiReport] = useState<AIReport | null>(null);
+  const [aiReportExpanded, setAiReportExpanded] = useState(true);
+  const [hasGeneratedInitialReport, setHasGeneratedInitialReport] = useState(false);
+
   // 查詢報表數據（移除 trendGrouping 避免整頁重新載入）
   const { data: reportData, isLoading, error } = useQuery<{ success: boolean; data: ConsultantReport }>({
     queryKey: ['consultant-report', period, dealStatus, startDate, endDate, compareWithPrevious, compareWithLastYear],
@@ -260,11 +281,13 @@ function ConsultantReportContent() {
 
   // 查詢諮詢名單（戰報模式下始終查詢，或當 Dialog 開啟時查詢）
   const { data: consultationListData, isLoading: listLoading } = useQuery<{ success: boolean; data: any[] }>({
-    queryKey: ['consultation-list', period, dealStatus, startDate, endDate, selectedConsultantName, selectedSetterName],
+    queryKey: ['consultation-list', period, dealStatus, startDate, endDate, selectedConsultantName, selectedSetterName, sortBy, sortOrder],
     queryFn: async () => {
       const params = new URLSearchParams({
         period,
         dealStatus,
+        sortBy,
+        sortOrder,
       });
 
       if (period === 'custom' && startDate && endDate) {
@@ -328,15 +351,122 @@ function ConsultantReportContent() {
     enabled: !!selectedStudent?.studentEmail && studentDetailOpen,
   });
 
-  const consultationList = consultationListData?.data || [];
+  // AI 報告生成 mutation
+  const generateAIReportMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch('/api/reports/consultants/ai-report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          period,
+          startDate,
+          endDate,
+          dealStatus,
+          compareWithPrevious,
+        }),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to generate AI report');
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success && data.data) {
+        setAiReport(data.data);
+      }
+    },
+  });
+
+  // 首次載入時自動生成 AI 報告（當資料已載入且尚未生成過）
+  useEffect(() => {
+    if (
+      report &&
+      !isLoading &&
+      !hasGeneratedInitialReport &&
+      period === 'month' &&
+      !generateAIReportMutation.isPending
+    ) {
+      setHasGeneratedInitialReport(true);
+      generateAIReportMutation.mutate();
+    }
+  }, [report, isLoading, hasGeneratedInitialReport, period]);
+
+  // 手動生成報告
+  const handleGenerateAIReport = () => {
+    generateAIReportMutation.mutate();
+  };
+
+  const consultationListRaw = consultationListData?.data || [];
+
+  // 合併同一人的記錄（以 studentEmail 為 key）
+  const mergedConsultationMap = useMemo(() => {
+    const map = new Map<string, { latest: any; allRecords: any[]; dealTypes: Set<string> }>();
+
+    consultationListRaw.forEach((item: any) => {
+      const key = item.studentEmail || item.studentName || `unknown-${Math.random()}`;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          latest: item,
+          allRecords: [item],
+          dealTypes: new Set(item.dealType ? [item.dealType] : []),
+        });
+      } else {
+        const existing = map.get(key)!;
+        existing.allRecords.push(item);
+        if (item.dealType) {
+          existing.dealTypes.add(item.dealType);
+        }
+        // 更新為最新的記錄（根據諮詢日期）
+        const existingDate = new Date(existing.latest.consultationDate || 0);
+        const newDate = new Date(item.consultationDate || 0);
+        if (newDate > existingDate) {
+          existing.latest = item;
+        }
+      }
+    });
+
+    return map;
+  }, [consultationListRaw]);
+
+  // 轉換為陣列，包含合併資訊
+  const consultationList = useMemo(() => {
+    return Array.from(mergedConsultationMap.values()).map(({ latest, allRecords, dealTypes }) => {
+      // 計算所有記錄的實收金額總和
+      const totalActualAmount = allRecords.reduce((sum, record) => {
+        // 處理多種可能的格式：null, undefined, 數字, 字串（如 "NT$1,000" 或 "1000"）
+        let amount = 0;
+        if (record.actualAmount != null) {
+          if (typeof record.actualAmount === 'number') {
+            amount = record.actualAmount;
+          } else if (typeof record.actualAmount === 'string') {
+            // 移除所有非數字字元（保留小數點和負號）
+            const cleaned = record.actualAmount.replace(/[^0-9.-]/g, '');
+            amount = parseFloat(cleaned) || 0;
+          }
+        }
+        return sum + amount;
+      }, 0);
+
+      return {
+        ...latest,
+        _recordCount: allRecords.length,
+        _allRecords: allRecords,
+        _allDealTypes: Array.from(dealTypes),
+        _totalActualAmount: totalActualAmount, // 合併後的總金額
+      };
+    });
+  }, [mergedConsultationMap]);
 
   // 調試：檢查資料
-  if (consultationList.length > 0) {
+  if (consultationListRaw.length > 0) {
     console.log('=== 諮詢名單資料範例 ===');
-    console.log('Total records:', consultationList.length);
+    console.log('Total raw records:', consultationListRaw.length);
+    console.log('Merged records:', consultationList.length);
     console.log('First record:', consultationList[0]);
-    console.log('isShow field:', consultationList[0]?.isShow);
-    console.log('isShow type:', typeof consultationList[0]?.isShow);
   }
 
   // 處理點擊諮詢師排行榜數值
@@ -445,6 +575,39 @@ function ConsultantReportContent() {
   const formatPercent = (num: number | undefined | null) => {
     if (num === undefined || num === null || isNaN(num)) return '-';
     return `${num.toFixed(1)}%`;
+  };
+
+  // 格式化 AI 報告內容 - 數字和重點行動加粗
+  const formatAIContent = (text: string | string[] | unknown): React.ReactNode => {
+    // 處理非字串類型
+    if (!text) return null;
+    if (Array.isArray(text)) {
+      // 如果是陣列，遞迴處理每個元素
+      return text.map((item, idx) => (
+        <div key={idx}>{formatAIContent(item)}</div>
+      ));
+    }
+    if (typeof text !== 'string') {
+      // 如果是其他類型，嘗試轉換為字串
+      return String(text);
+    }
+
+    // 用正則表達式找出數字（包含 NT$、%、人、筆等）和重點行動詞
+    const parts = text.split(/(\d+(?:,\d{3})*(?:\.\d+)?%?|NT\$\s*\d+(?:,\d{3})*|\d+\s*(?:人|筆|%)|(?:增加|減少|提升|降低|優化|加強|分析|檢視|建議|持續|針對)[^，。、\n]*)/g);
+
+    return parts.map((part, index) => {
+      // 檢查是否為數字或金額
+      if (/^\d+(?:,\d{3})*(?:\.\d+)?%?$/.test(part) ||
+          /^NT\$\s*\d+(?:,\d{3})*$/.test(part) ||
+          /^\d+\s*(?:人|筆|%)$/.test(part)) {
+        return <strong key={index} className="text-gray-900">{part}</strong>;
+      }
+      // 檢查是否為行動建議
+      if (/^(?:增加|減少|提升|降低|優化|加強|分析|檢視|建議|持續|針對)/.test(part)) {
+        return <strong key={index} className="text-gray-800">{part}</strong>;
+      }
+      return part;
+    });
   };
 
   // 格式化日期（移除時間部分）
@@ -908,6 +1071,94 @@ function ConsultantReportContent() {
         </Card>
       </div>
 
+      {/* AI 分析報告區塊 */}
+      <Card className="mt-6">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-base font-semibold">AI 分析報告</CardTitle>
+              {aiReport && (
+                <span className="text-xs text-muted-foreground">
+                  {new Date(aiReport.generatedAt).toLocaleString('zh-TW')}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGenerateAIReport}
+                disabled={generateAIReportMutation.isPending}
+              >
+                {generateAIReportMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-1" />
+                    重新生成
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAiReportExpanded(!aiReportExpanded)}
+              >
+                {aiReportExpanded ? '收合' : '展開'}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        {aiReportExpanded && (
+          <CardContent>
+            {generateAIReportMutation.isPending && !aiReport ? (
+              <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm">正在生成報告...</span>
+              </div>
+            ) : generateAIReportMutation.isError ? (
+              <div className="flex items-center justify-center py-6 gap-2">
+                <span className="text-sm text-red-600">生成失敗</span>
+                <Button variant="outline" size="sm" onClick={handleGenerateAIReport}>
+                  重試
+                </Button>
+              </div>
+            ) : aiReport ? (
+              <div className="space-y-4">
+                {/* 總覽 - 簡化版 */}
+                <div className="text-gray-700 leading-relaxed">
+                  {formatAIContent(aiReport.summary)}
+                </div>
+
+                {/* 各區塊 - 更簡潔的樣式 */}
+                <div className="space-y-4 pt-2 border-t">
+                  {aiReport.sections.map((section, idx) => (
+                    <div key={idx}>
+                      <h4 className="font-semibold text-gray-900 mb-1.5">{section.title}</h4>
+                      <div className="text-sm text-gray-600 leading-relaxed">
+                        {formatAIContent(section.content)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 時間戳記 */}
+                <div className="text-xs text-muted-foreground text-right pt-2 border-t">
+                  {aiReport.dateRange.start} 至 {aiReport.dateRange.end}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center py-6 gap-2 text-muted-foreground">
+                <span className="text-sm">點擊「重新生成」來獲取分析報告</span>
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
       {/* 完整諮詢名單 */}
       {(() => {
         // 計算分頁
@@ -922,6 +1173,34 @@ function ConsultantReportContent() {
           setItemsPerPage(Number(value));
           setCurrentPage(1);
         };
+
+        // 排序處理函數
+        const handleSort = (column: string) => {
+          if (sortBy === column) {
+            setSortOrder(sortOrder === 'ASC' ? 'DESC' : 'ASC');
+          } else {
+            setSortBy(column);
+            setSortOrder('DESC');
+          }
+          setCurrentPage(1); // 排序後回到第一頁
+        };
+
+        // 可排序的表頭組件
+        const SortableHead = ({ column, children, className = '' }: { column: string; children: React.ReactNode; className?: string }) => (
+          <TableHead
+            className={`cursor-pointer hover:bg-muted/50 select-none whitespace-nowrap ${className}`}
+            onClick={() => handleSort(column)}
+          >
+            <div className="flex items-center gap-1">
+              {children}
+              {sortBy === column ? (
+                sortOrder === 'ASC' ? <ArrowUp className="h-3 w-3 flex-shrink-0" /> : <ArrowDown className="h-3 w-3 flex-shrink-0" />
+              ) : (
+                <ArrowUpDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+              )}
+            </div>
+          </TableHead>
+        );
 
         return (
           <Card>
@@ -951,44 +1230,80 @@ function ConsultantReportContent() {
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
-                <Table>
+                <Table className="min-w-[1400px]">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>學生姓名</TableHead>
-                      <TableHead>諮詢日期</TableHead>
-                      <TableHead>成交日期</TableHead>
-                      <TableHead>諮詢師</TableHead>
-                      <TableHead>成交方案</TableHead>
-                      <TableHead>名單來源</TableHead>
-                      <TableHead>是否上線</TableHead>
-                      <TableHead>狀態</TableHead>
-                      <TableHead className="text-right">實收金額</TableHead>
+                      <SortableHead column="student_name">學生姓名</SortableHead>
+                      <SortableHead column="consultation_date">諮詢日期</SortableHead>
+                      <SortableHead column="deal_date">成交日期</SortableHead>
+                      <SortableHead column="closer_name">諮詢師</SortableHead>
+                      <SortableHead column="deal_type">諮詢類型</SortableHead>
+                      <SortableHead column="plan">成交方案</SortableHead>
+                      <SortableHead column="is_show">是否上線</SortableHead>
+                      <TableHead className="whitespace-nowrap">狀態</TableHead>
+                      <SortableHead column="actual_amount" className="text-right">實收金額</SortableHead>
+                      <SortableHead column="lead_source">名單來源</SortableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {currentPageData.length > 0 ? (
                       currentPageData.map((item: any, index: number) => (
-                        <TableRow key={index} className="hover:bg-muted/30">
+                        <TableRow key={index} className={`hover:bg-muted/30 ${item._recordCount > 1 ? 'bg-amber-50' : ''}`}>
                           <TableCell className="font-medium">
-                            <button
-                              onClick={() => {
-                                setSelectedStudent(item);
-                                setStudentDetailOpen(true);
-                              }}
-                              className="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-                            >
-                              {item.studentName || '-'}
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  setSelectedStudent(item);
+                                  setStudentDetailOpen(true);
+                                }}
+                                className={`hover:underline cursor-pointer ${item._recordCount > 1 ? 'text-amber-600 hover:text-amber-800 font-semibold' : 'text-blue-600 hover:text-blue-800'}`}
+                              >
+                                {item.studentName || '-'}
+                              </button>
+                              {item._recordCount > 1 && (
+                                <span className="px-1.5 py-0.5 bg-amber-500 text-white text-xs rounded-full font-medium">
+                                  {item._recordCount}
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
-                          <TableCell className="text-sm">
+                          <TableCell className="text-sm whitespace-nowrap">
                             {item.consultationDate ? new Date(item.consultationDate).toLocaleDateString('zh-TW') : '-'}
                           </TableCell>
-                          <TableCell className="text-sm">
+                          <TableCell className="text-sm whitespace-nowrap">
                             {item.dealDate ? new Date(item.dealDate).toLocaleDateString('zh-TW') : '-'}
                           </TableCell>
-                          <TableCell>{item.consultantName || '-'}</TableCell>
+                          <TableCell className="whitespace-nowrap">{item.consultantName || '-'}</TableCell>
+                          <TableCell className="text-sm">
+                            <div className="flex flex-wrap gap-1">
+                              {item._allDealTypes && item._allDealTypes.length > 0 ? (
+                                item._allDealTypes.map((type: string, idx: number) => (
+                                  <span key={idx} className={`px-2 py-1 rounded text-xs whitespace-nowrap ${
+                                    type === '諮詢' ? 'bg-purple-100 text-purple-700' :
+                                    type === '體驗課' ? 'bg-blue-100 text-blue-700' :
+                                    type === '續課' ? 'bg-green-100 text-green-700' :
+                                    type === '補分期' ? 'bg-yellow-100 text-yellow-700' :
+                                    type === '加購' ? 'bg-indigo-100 text-indigo-700' :
+                                    'bg-gray-100 text-gray-700'
+                                  }`}>
+                                    {type}
+                                  </span>
+                                ))
+                              ) : item.dealType ? (
+                                <span className={`px-2 py-1 rounded text-xs whitespace-nowrap ${
+                                  item.dealType === '諮詢' ? 'bg-purple-100 text-purple-700' :
+                                  item.dealType === '體驗課' ? 'bg-blue-100 text-blue-700' :
+                                  item.dealType === '續課' ? 'bg-green-100 text-green-700' :
+                                  item.dealType === '補分期' ? 'bg-yellow-100 text-yellow-700' :
+                                  item.dealType === '加購' ? 'bg-indigo-100 text-indigo-700' :
+                                  'bg-gray-100 text-gray-700'
+                                }`}>
+                                  {item.dealType}
+                                </span>
+                              ) : '-'}
+                            </div>
+                          </TableCell>
                           <TableCell className="text-sm">{item.plan || '-'}</TableCell>
-                          <TableCell className="text-sm">{item.leadSource || '-'}</TableCell>
                           <TableCell>
                             <span className={`px-2 py-1 rounded text-xs ${
                               item.isShow === '已上線'
@@ -1000,7 +1315,7 @@ function ConsultantReportContent() {
                               {item.isShow || '-'}
                             </span>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="whitespace-nowrap">
                             <span className={`px-2 py-1 rounded text-xs ${
                               item.consultationResult === '已成交'
                                 ? 'bg-green-100 text-green-700'
@@ -1011,14 +1326,19 @@ function ConsultantReportContent() {
                               {item.consultationResult || '跟進中'}
                             </span>
                           </TableCell>
-                          <TableCell className="text-right">
-                            {item.actualAmount ? formatCurrency(parseFloat(item.actualAmount.replace(/[^0-9.-]/g, ''))) : '-'}
+                          <TableCell className="text-right whitespace-nowrap">
+                            {item._totalActualAmount > 0 ? (
+                              <span className={item._recordCount > 1 ? 'font-semibold text-amber-700' : ''}>
+                                {formatCurrency(item._totalActualAmount)}
+                              </span>
+                            ) : '-'}
                           </TableCell>
+                          <TableCell className="text-sm">{item.leadSource || '-'}</TableCell>
                         </TableRow>
                       ))
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                        <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                           暫無諮詢記錄
                         </TableCell>
                       </TableRow>
@@ -2000,9 +2320,16 @@ function ConsultantReportContent() {
 
       {/* 學生詳細資料 Dialog */}
       <Dialog open={studentDetailOpen} onOpenChange={setStudentDetailOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>學生詳細資料</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              學生詳細資料
+              {selectedStudent?._recordCount > 1 && (
+                <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-medium">
+                  {selectedStudent._recordCount} 筆記錄
+                </span>
+              )}
+            </DialogTitle>
             <DialogDescription>
               {selectedStudent?.studentName} 的完整諮詢記錄
             </DialogDescription>
@@ -2029,75 +2356,202 @@ function ConsultantReportContent() {
                 </div>
               </div>
 
-              <div className="border-t pt-4">
-                <h3 className="font-semibold mb-3">諮詢資訊</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">諮詢日期</label>
-                    <p className="text-base mt-1">
-                      {selectedStudent.consultationDate
-                        ? new Date(selectedStudent.consultationDate).toLocaleDateString('zh-TW')
-                        : '-'}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">諮詢師</label>
-                    <p className="text-base mt-1">{selectedStudent.consultantName || '-'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">電訪人員</label>
-                    <p className="text-base mt-1">{selectedStudent.setterName || '-'}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">名單來源</label>
-                    <p className="text-base mt-1">{selectedStudent.leadSource || '-'}</p>
+              {/* 多筆記錄列表 */}
+              {selectedStudent._allRecords && selectedStudent._allRecords.length > 1 ? (
+                <div className="border-t pt-4">
+                  <h3 className="font-semibold mb-3 flex items-center gap-2">
+                    所有諮詢記錄
+                    <span className="text-sm font-normal text-muted-foreground">
+                      （共 {selectedStudent._allRecords.length} 筆）
+                    </span>
+                  </h3>
+                  <div className="space-y-3">
+                    {selectedStudent._allRecords
+                      .sort((a: any, b: any) => new Date(b.consultationDate || 0).getTime() - new Date(a.consultationDate || 0).getTime())
+                      .map((record: any, idx: number) => (
+                        <div key={idx} className={`p-4 rounded-lg border ${idx === 0 ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-gray-50'}`}>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-medium text-sm">
+                              {record.consultationDate
+                                ? new Date(record.consultationDate).toLocaleDateString('zh-TW')
+                                : '無日期'}
+                              {idx === 0 && <span className="ml-2 px-2 py-0.5 bg-amber-200 text-amber-800 rounded text-xs">最新</span>}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded text-xs ${
+                              record.dealDate
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-blue-100 text-blue-700'
+                            }`}>
+                              {record.dealDate ? '已成交' : '跟進中'}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                            <div>
+                              <span className="text-muted-foreground">諮詢類型：</span>
+                              <span className="font-medium">{record.dealType || '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">諮詢師：</span>
+                              <span className="font-medium">{record.consultantName || '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">電訪人員：</span>
+                              <span className="font-medium">{record.setterName || '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">名單來源：</span>
+                              <span className="font-medium">{record.leadSource || '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">是否上線：</span>
+                              <span className={`px-1.5 py-0.5 rounded text-xs ${
+                                record.isShow === '已上線'
+                                  ? 'bg-green-100 text-green-700'
+                                  : record.isShow === '未上線'
+                                  ? 'bg-orange-100 text-orange-700'
+                                  : 'bg-gray-100 text-gray-700'
+                              }`}>
+                                {record.isShow || '-'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">方案：</span>
+                              <span className="font-medium">{record.plan || '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">成交日期：</span>
+                              <span className="font-medium">
+                                {record.dealDate
+                                  ? new Date(record.dealDate).toLocaleDateString('zh-TW')
+                                  : '-'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">實收金額：</span>
+                              <span className="font-medium text-green-600">
+                                {record.actualAmount
+                                  ? formatCurrency(parseFloat(record.actualAmount.replace(/[^0-9.-]/g, '')))
+                                  : '-'}
+                              </span>
+                            </div>
+                          </div>
+                          {record.note && (
+                            <div className="mt-2 text-sm">
+                              <span className="text-muted-foreground">備註：</span>
+                              <span className="whitespace-pre-wrap">{record.note}</span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
                   </div>
                 </div>
-              </div>
+              ) : (
+                <>
+                  {/* 單筆記錄顯示原本的格式 */}
+                  <div className="border-t pt-4">
+                    <h3 className="font-semibold mb-3">諮詢資訊</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">諮詢日期</label>
+                        <p className="text-base mt-1">
+                          {selectedStudent.consultationDate
+                            ? new Date(selectedStudent.consultationDate).toLocaleDateString('zh-TW')
+                            : '-'}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">諮詢類型</label>
+                        <p className="text-base mt-1">{selectedStudent.dealType || '-'}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">諮詢師</label>
+                        <p className="text-base mt-1">{selectedStudent.consultantName || '-'}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">電訪人員</label>
+                        <p className="text-base mt-1">{selectedStudent.setterName || '-'}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">名單來源</label>
+                        <p className="text-base mt-1">{selectedStudent.leadSource || '-'}</p>
+                      </div>
+                    </div>
+                  </div>
 
-              <div className="border-t pt-4">
-                <h3 className="font-semibold mb-3">狀態資訊</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">是否上線</label>
-                    <p className="text-base mt-1">
-                      <span className={`px-2 py-1 rounded text-xs ${
-                        selectedStudent.isShow === '已上線'
-                          ? 'bg-green-100 text-green-700'
-                          : selectedStudent.isShow === '未上線'
-                          ? 'bg-orange-100 text-orange-700'
-                          : 'bg-gray-100 text-gray-700'
-                      }`}>
-                        {selectedStudent.isShow || '-'}
-                      </span>
-                    </p>
+                  <div className="border-t pt-4">
+                    <h3 className="font-semibold mb-3">狀態資訊</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">是否上線</label>
+                        <p className="text-base mt-1">
+                          <span className={`px-2 py-1 rounded text-xs ${
+                            selectedStudent.isShow === '已上線'
+                              ? 'bg-green-100 text-green-700'
+                              : selectedStudent.isShow === '未上線'
+                              ? 'bg-orange-100 text-orange-700'
+                              : 'bg-gray-100 text-gray-700'
+                          }`}>
+                            {selectedStudent.isShow || '-'}
+                          </span>
+                        </p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">狀態</label>
+                        <p className="text-base mt-1">
+                          <span className={`px-2 py-1 rounded text-xs ${
+                            selectedStudent.dealDate
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {selectedStudent.dealDate ? '已成交' : '跟進中'}
+                          </span>
+                        </p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">成交日期</label>
+                        <p className="text-base mt-1">
+                          {selectedStudent.dealDate
+                            ? new Date(selectedStudent.dealDate).toLocaleDateString('zh-TW')
+                            : '-'}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">方案</label>
+                        <p className="text-base mt-1">{selectedStudent.plan || '-'}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">狀態</label>
-                    <p className="text-base mt-1">
-                      <span className={`px-2 py-1 rounded text-xs ${
-                        selectedStudent.dealDate
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-blue-100 text-blue-700'
-                      }`}>
-                        {selectedStudent.dealDate ? '已成交' : '跟進中'}
-                      </span>
-                    </p>
+
+                  <div className="border-t pt-4">
+                    <h3 className="font-semibold mb-3">金額資訊</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">方案價格</label>
+                        <p className="text-base mt-1 font-semibold">
+                          {selectedStudent.packagePrice
+                            ? formatCurrency(parseFloat(selectedStudent.packagePrice.replace(/[^0-9.-]/g, '')))
+                            : '-'}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-muted-foreground">實收金額</label>
+                        <p className="text-base mt-1 font-semibold text-green-600">
+                          {selectedStudent.actualAmount
+                            ? formatCurrency(parseFloat(selectedStudent.actualAmount.replace(/[^0-9.-]/g, '')))
+                            : '-'}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">成交日期</label>
-                    <p className="text-base mt-1">
-                      {selectedStudent.dealDate
-                        ? new Date(selectedStudent.dealDate).toLocaleDateString('zh-TW')
-                        : '-'}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">方案</label>
-                    <p className="text-base mt-1">{selectedStudent.plan || '-'}</p>
-                  </div>
-                </div>
-              </div>
+
+                  {selectedStudent.note && (
+                    <div className="border-t pt-4">
+                      <label className="text-sm font-medium text-muted-foreground">備註</label>
+                      <p className="text-base mt-1 whitespace-pre-wrap">{selectedStudent.note}</p>
+                    </div>
+                  )}
+                </>
+              )}
 
               {/* AI 分析資訊 */}
               {studentAIAnalysis.data?.data?.[0] && (
@@ -2127,35 +2581,6 @@ function ConsultantReportContent() {
                       </Button>
                     </div>
                   </div>
-                </div>
-              )}
-
-              <div className="border-t pt-4">
-                <h3 className="font-semibold mb-3">金額資訊</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">方案價格</label>
-                    <p className="text-base mt-1 font-semibold">
-                      {selectedStudent.packagePrice
-                        ? formatCurrency(parseFloat(selectedStudent.packagePrice.replace(/[^0-9.-]/g, '')))
-                        : '-'}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-muted-foreground">實收金額</label>
-                    <p className="text-base mt-1 font-semibold text-green-600">
-                      {selectedStudent.actualAmount
-                        ? formatCurrency(parseFloat(selectedStudent.actualAmount.replace(/[^0-9.-]/g, '')))
-                        : '-'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {selectedStudent.note && (
-                <div className="border-t pt-4">
-                  <label className="text-sm font-medium text-muted-foreground">備註</label>
-                  <p className="text-base mt-1 whitespace-pre-wrap">{selectedStudent.note}</p>
                 </div>
               )}
             </div>
