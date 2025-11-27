@@ -11,16 +11,91 @@ import { getOrCreateStudentKB, addDataSourceRef } from './services/student-knowl
 import { parseNumberField } from './services/reporting/field-mapping-v2';
 
 /**
- * 根據方案名稱推斷總堂數
+ * course_plans 快取 - 從資料庫載入方案堂數對照表
+ * 格式: { "初學專案": 4, "高音pro": 2, ... }
  */
-function inferTotalLessons(packageName: string): number {
+let coursePlansCache: Map<string, number> | null = null;
+let coursePlansCacheTime: number = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 分鐘快取
+
+/**
+ * 載入或取得 course_plans 快取
+ */
+async function getCoursePlansCache(): Promise<Map<string, number>> {
+  const now = Date.now();
+
+  // 如果快取存在且未過期，直接返回
+  if (coursePlansCache && (now - coursePlansCacheTime) < CACHE_TTL) {
+    return coursePlansCache;
+  }
+
+  // 從資料庫載入
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from('course_plans')
+      .select('plan_name, total_classes')
+      .eq('is_active', true);
+
+    if (error) {
+      console.error('❌ 載入 course_plans 失敗:', error);
+      // 如果有舊快取，繼續使用
+      if (coursePlansCache) return coursePlansCache;
+      // 否則返回空 Map
+      return new Map();
+    }
+
+    // 建立新快取
+    coursePlansCache = new Map();
+    data?.forEach(plan => {
+      if (plan.plan_name && plan.total_classes) {
+        coursePlansCache!.set(plan.plan_name, plan.total_classes);
+      }
+    });
+    coursePlansCacheTime = now;
+
+    console.log(`✅ course_plans 快取已載入 (${coursePlansCache.size} 個方案)`);
+    return coursePlansCache;
+  } catch (err) {
+    console.error('❌ 載入 course_plans 異常:', err);
+    return coursePlansCache || new Map();
+  }
+}
+
+/**
+ * 根據方案名稱取得總堂數
+ * 優先從 course_plans 表查詢，找不到時使用推斷邏輯
+ *
+ * @param packageName 方案名稱
+ * @param plansCache 已載入的 course_plans 快取
+ */
+function getTotalLessons(packageName: string, plansCache: Map<string, number>): number {
   if (!packageName) return 4; // 預設值
 
-  if (packageName.includes('pro')) return 2;
-  if (packageName.includes('終極')) return 1;
-  if (packageName.includes('12堂')) return 12;
+  // 1. 先從 course_plans 快取中查找（完全匹配）
+  if (plansCache.has(packageName)) {
+    return plansCache.get(packageName)!;
+  }
 
-  // 預設為初學專案 4 堂
+  // 2. 模糊匹配：檢查 packageName 是否包含任何已知方案名稱
+  for (const [planName, totalClasses] of plansCache) {
+    if (packageName.includes(planName) || planName.includes(packageName)) {
+      return totalClasses;
+    }
+  }
+
+  // 3. 從方案名稱中提取數字堂數（例如：「不指定一對一 - 1堂」）
+  const match = packageName.match(/(\d+)\s*堂/);
+  if (match) {
+    return parseInt(match[1], 10);
+  }
+
+  // 4. 特殊方案名稱關鍵字
+  if (packageName.toLowerCase().includes('pro')) return 2;
+  if (packageName.includes('終極')) return 1;
+
+  // 5. 預設為初學專案 4 堂
+  console.warn(`⚠️ 未知方案「${packageName}」，使用預設值 4 堂`);
   return 4;
 }
 
@@ -30,6 +105,10 @@ function inferTotalLessons(packageName: string): number {
  * 1. 相同方案合併（例如兩個初學專案 = 8 堂）
  * 2. 按購買日期排序
  * 3. 按時間順序分配打卡記錄
+ *
+ * @param purchaseData 購買記錄
+ * @param attendanceData 上課記錄
+ * @param plansCache course_plans 快取（方案名稱 → 總堂數）
  */
 interface PurchasePackage {
   name: string;
@@ -38,7 +117,11 @@ interface PurchasePackage {
   usedLessons: number; // 已使用堂數
 }
 
-function processPurchases(purchaseData: any[], attendanceData: any[]): {
+function processPurchases(
+  purchaseData: any[],
+  attendanceData: any[],
+  plansCache: Map<string, number>
+): {
   packages: PurchasePackage[];
   displayText: string;
   totalRemaining: number;
@@ -48,7 +131,7 @@ function processPurchases(purchaseData: any[], attendanceData: any[]): {
     .filter(p => p.package_name) // 🆕 過濾掉 package_name 為 null 的記錄
     .map(p => ({
       name: p.package_name,
-      totalLessons: inferTotalLessons(p.package_name),
+      totalLessons: getTotalLessons(p.package_name, plansCache), // 🆕 使用 course_plans 快取
       purchaseDate: p.purchase_date ? new Date(p.purchase_date) : new Date(0),
     }))
     .sort((a, b) => a.purchaseDate.getTime() - b.purchaseDate.getTime());
@@ -112,6 +195,9 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
       const searchQuery = req.query.search as string; // 新增：搜尋關鍵字
       const startDate = req.query.startDate as string; // 🆕 日期過濾
       const endDate = req.query.endDate as string;     // 🆕 日期過濾
+
+      // 🆕 載入 course_plans 快取
+      const plansCache = await getCoursePlansCache();
 
       // Build query using Supabase Client
       let attendanceQuery = supabase
@@ -284,7 +370,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
             return aDate <= rowDate;
           });
 
-          const purchaseInfo = processPurchases(studentPurchases, attendanceBeforeOrOn);
+          const purchaseInfo = processPurchases(studentPurchases, attendanceBeforeOrOn, plansCache);
 
           // 🆕 只有在有有效方案時才設定顯示值
           if (purchaseInfo.displayText) {
