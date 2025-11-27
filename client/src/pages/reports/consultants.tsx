@@ -3,7 +3,7 @@
  * 提供諮詢師業績分析、成交數據、AI 洞見等功能
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useLocation } from 'wouter';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { useFilteredSidebar } from '@/hooks/use-sidebar';
@@ -40,6 +40,9 @@ import {
   RefreshCw,
   FileText,
   Loader2,
+  Copy,
+  Check,
+  MessageSquare,
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { format } from 'date-fns';
@@ -232,10 +235,12 @@ function ConsultantReportContent() {
     generatedAt: string;
     period: string;
     dateRange: { start: string; end: string };
+    fromCache?: boolean;  // 是否來自快取
   }
   const [aiReport, setAiReport] = useState<AIReport | null>(null);
   const [aiReportExpanded, setAiReportExpanded] = useState(true);
-  const [hasGeneratedInitialReport, setHasGeneratedInitialReport] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const [isSendingToSlack, setIsSendingToSlack] = useState(false);
 
   // 查詢報表數據（移除 trendGrouping 避免整頁重新載入）
   const { data: reportData, isLoading, error } = useQuery<{ success: boolean; data: ConsultantReport }>({
@@ -351,9 +356,9 @@ function ConsultantReportContent() {
     enabled: !!selectedStudent?.studentEmail && studentDetailOpen,
   });
 
-  // AI 報告生成 mutation
+  // AI 報告生成 mutation（支持 forceRefresh 參數）
   const generateAIReportMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (forceRefresh: boolean = false) => {
       const response = await fetch('/api/reports/consultants/ai-report', {
         method: 'POST',
         headers: {
@@ -365,6 +370,7 @@ function ConsultantReportContent() {
           endDate,
           dealStatus,
           compareWithPrevious,
+          forceRefresh,  // 強制重新生成（跳過快取）
         }),
       });
       if (!response.ok) {
@@ -380,23 +386,104 @@ function ConsultantReportContent() {
     },
   });
 
-  // 首次載入時自動生成 AI 報告（當資料已載入且尚未生成過）
-  useEffect(() => {
-    if (
-      report &&
-      !isLoading &&
-      !hasGeneratedInitialReport &&
-      period === 'month' &&
-      !generateAIReportMutation.isPending
-    ) {
-      setHasGeneratedInitialReport(true);
-      generateAIReportMutation.mutate();
-    }
-  }, [report, isLoading, hasGeneratedInitialReport, period]);
+  // 追蹤上一次載入的期間，用於偵測期間變化
+  const lastLoadedPeriodRef = useRef<string | null>(null);
 
-  // 手動生成報告
+  // 當期間變化時，自動載入對應期間的快取報告
+  useEffect(() => {
+    // 確保報表資料已載入且不在 pending 狀態
+    if (!report || isLoading || generateAIReportMutation.isPending) {
+      return;
+    }
+
+    // 建立當前期間的唯一識別（包含自訂日期範圍）
+    const currentPeriodKey = period === 'custom'
+      ? `${period}-${startDate}-${endDate}`
+      : period;
+
+    // 如果期間沒變，不重複載入
+    if (lastLoadedPeriodRef.current === currentPeriodKey) {
+      return;
+    }
+
+    // 更新追蹤的期間並載入 AI 報告
+    lastLoadedPeriodRef.current = currentPeriodKey;
+    setAiReport(null);  // 先清空舊報告
+    generateAIReportMutation.mutate(false);  // 載入快取（不強制刷新）
+  }, [report, isLoading, period, startDate, endDate]);
+
+  // 手動重新生成報告（強制刷新，跳過快取）
   const handleGenerateAIReport = () => {
-    generateAIReportMutation.mutate();
+    generateAIReportMutation.mutate(true);  // 手動點擊時強制重新生成
+  };
+
+  // 將 AI 報告轉換為純文字格式
+  const formatAIReportAsText = () => {
+    if (!aiReport) return '';
+
+    const periodLabel = {
+      today: '今日',
+      yesterday: '昨日',
+      week: '過去七天',
+      month: '本月',
+      quarter: '本季',
+      year: '本年',
+      all: '全部',
+      custom: '自訂期間',
+    }[aiReport.period] || aiReport.period;
+
+    let text = `📊 諮詢師業績報告 - ${periodLabel}\n`;
+    text += `📅 ${aiReport.dateRange.start} ~ ${aiReport.dateRange.end}\n`;
+    text += `⏰ 生成時間：${new Date(aiReport.generatedAt).toLocaleString('zh-TW')}\n`;
+    text += `\n`;
+    text += `📝 總覽\n${aiReport.summary}\n`;
+
+    aiReport.sections.forEach(section => {
+      text += `\n📌 ${section.title}\n${section.content}\n`;
+    });
+
+    return text;
+  };
+
+  // 複製 AI 報告到剪貼簿
+  const handleCopyAIReport = async () => {
+    const text = formatAIReportAsText();
+    try {
+      await navigator.clipboard.writeText(text);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  // 傳送 AI 報告到 Slack
+  const handleSendToSlack = async () => {
+    if (!aiReport) return;
+
+    setIsSendingToSlack(true);
+    try {
+      const response = await fetch('/api/slack/send-ai-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          report: aiReport,
+          period: aiReport.period,
+          dateRange: aiReport.dateRange,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to send to Slack');
+      }
+
+      alert('已成功傳送至 Slack！');
+    } catch (err) {
+      console.error('Failed to send to Slack:', err);
+      alert('傳送失敗，請確認 Slack 設定是否正確');
+    } finally {
+      setIsSendingToSlack(false);
+    }
   };
 
   const consultationListRaw = consultationListData?.data || [];
@@ -917,10 +1004,10 @@ function ConsultantReportContent() {
               </Popover>
           </div>
 
-          {/* 顯示已選擇的自訂日期 */}
-          {period === 'custom' && startDate && endDate && (
+          {/* 顯示當前期間的日期範圍 */}
+          {report?.metadata?.dateRange && (
             <div className="px-3 py-2 border rounded-md bg-muted text-sm">
-              {startDate} ~ {endDate}
+              {report.metadata.dateRange.start} ~ {report.metadata.dateRange.end}
             </div>
           )}
 
@@ -1078,12 +1165,62 @@ function ConsultantReportContent() {
             <div className="flex items-center gap-2">
               <CardTitle className="text-base font-semibold">AI 分析報告</CardTitle>
               {aiReport && (
-                <span className="text-xs text-muted-foreground">
-                  {new Date(aiReport.generatedAt).toLocaleString('zh-TW')}
-                </span>
+                <>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(aiReport.generatedAt).toLocaleString('zh-TW')}
+                  </span>
+                  {aiReport.fromCache && (
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                      快取
+                    </span>
+                  )}
+                </>
               )}
             </div>
             <div className="flex items-center gap-2">
+              {/* 複製按鈕 */}
+              {aiReport && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopyAIReport}
+                  className="gap-1"
+                >
+                  {isCopied ? (
+                    <>
+                      <Check className="h-4 w-4 text-green-600" />
+                      已複製
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4" />
+                      複製
+                    </>
+                  )}
+                </Button>
+              )}
+              {/* 傳送至 Slack 按鈕 */}
+              {aiReport && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSendToSlack}
+                  disabled={isSendingToSlack}
+                  className="gap-1"
+                >
+                  {isSendingToSlack ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      傳送中...
+                    </>
+                  ) : (
+                    <>
+                      <MessageSquare className="h-4 w-4" />
+                      Slack
+                    </>
+                  )}
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"

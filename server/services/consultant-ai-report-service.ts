@@ -1,9 +1,13 @@
 /**
  * Consultant AI Report Service
  * Generates AI-powered analysis reports for consultant performance
+ *
+ * 快取機制：同一天同期間只生成一次報告，避免重複呼叫 AI API
  */
 
 import OpenAI from 'openai';
+import pkg from 'pg';
+const { Pool } = pkg;
 import type { KPIData, ConsultantRanking, SetterRanking, LeadSourceTableRow, ChartData } from './consultant-report-service';
 
 // ============================================================================
@@ -32,6 +36,7 @@ export interface AIReport {
   generatedAt: string;
   period: string;
   dateRange: { start: string; end: string };
+  fromCache?: boolean;  // 是否來自快取
 }
 
 // ============================================================================
@@ -250,4 +255,142 @@ ${kpiData.closingRateChange !== undefined ? `- 成交率變化: ${kpiData.closin
 function formatNumber(num: number): string {
   if (num === undefined || num === null || isNaN(num)) return '0';
   return num.toLocaleString('zh-TW');
+}
+
+// ============================================================================
+// Database Cache Functions
+// ============================================================================
+
+/**
+ * 創建資料庫連線池
+ */
+function createDbPool() {
+  const pool = new Pool({
+    connectionString: process.env.SUPABASE_DB_URL,
+    ssl: { rejectUnauthorized: false },
+    max: 5,
+    idleTimeoutMillis: 30000,
+  });
+
+  pool.on('error', (err) => {
+    console.error('[AI Report Cache] Pool error (ignored):', err.message);
+  });
+
+  return pool;
+}
+
+/**
+ * 檢查是否有同期間的快取報告（永久保存，不限當天）
+ */
+export async function getCachedReport(
+  period: string,
+  startDate: string,
+  endDate: string
+): Promise<AIReport | null> {
+  const pool = createDbPool();
+
+  try {
+    const result = await pool.query(
+      `SELECT summary, sections, generated_at, period, start_date, end_date
+       FROM consultant_ai_reports
+       WHERE period = $1
+         AND start_date = $2
+         AND end_date = $3
+       ORDER BY generated_at DESC
+       LIMIT 1`,
+      [period, startDate, endDate]
+    );
+
+    if (result.rows.length > 0) {
+      const row = result.rows[0];
+      console.log(`[AI Report Cache] ✅ Cache hit for ${period} (${startDate} ~ ${endDate})`);
+      return {
+        summary: row.summary,
+        sections: row.sections,
+        generatedAt: row.generated_at,
+        period: row.period,
+        dateRange: {
+          start: row.start_date,
+          end: row.end_date,
+        },
+        fromCache: true,
+      };
+    }
+
+    console.log(`[AI Report Cache] ❌ Cache miss for ${period} (${startDate} ~ ${endDate})`);
+    return null;
+  } catch (error: any) {
+    console.error('[AI Report Cache] Error checking cache:', error.message);
+    return null;
+  } finally {
+    await pool.end();
+  }
+}
+
+/**
+ * 將報告儲存到快取（同期間會覆蓋舊報告）
+ */
+export async function saveReportToCache(report: AIReport): Promise<void> {
+  const pool = createDbPool();
+
+  try {
+    // 先刪除同期間的舊報告，再插入新報告
+    await pool.query(
+      `DELETE FROM consultant_ai_reports
+       WHERE period = $1 AND start_date = $2 AND end_date = $3`,
+      [report.period, report.dateRange.start, report.dateRange.end]
+    );
+
+    await pool.query(
+      `INSERT INTO consultant_ai_reports (period, start_date, end_date, summary, sections, generated_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        report.period,
+        report.dateRange.start,
+        report.dateRange.end,
+        report.summary,
+        JSON.stringify(report.sections),
+        report.generatedAt,
+      ]
+    );
+    console.log(`[AI Report Cache] 💾 Saved report to cache: ${report.period} (${report.dateRange.start} ~ ${report.dateRange.end})`);
+  } catch (error: any) {
+    console.error('[AI Report Cache] Error saving to cache:', error.message);
+    // Don't throw - cache save failure shouldn't break the main flow
+  } finally {
+    await pool.end();
+  }
+}
+
+/**
+ * 生成或從快取獲取 AI 報告
+ * @param input - AI 報告輸入資料
+ * @param forceRefresh - 是否強制重新生成（跳過快取）
+ */
+export async function getOrGenerateConsultantAIReport(
+  input: AIReportInput,
+  forceRefresh: boolean = false
+): Promise<AIReport> {
+  const { period, dateRange } = input;
+
+  // 如果不是強制刷新，先檢查快取
+  if (!forceRefresh) {
+    const cachedReport = await getCachedReport(period, dateRange.start, dateRange.end);
+    if (cachedReport) {
+      return cachedReport;
+    }
+  } else {
+    console.log(`[AI Report] 🔄 Force refresh requested, skipping cache`);
+  }
+
+  // 生成新報告
+  const report = await generateConsultantAIReport(input);
+
+  // 儲存到快取
+  await saveReportToCache(report);
+
+  return {
+    ...report,
+    fromCache: false,
+  };
 }

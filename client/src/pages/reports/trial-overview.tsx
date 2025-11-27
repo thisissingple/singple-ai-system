@@ -38,8 +38,12 @@ import {
   BarChart3,
   Users,
   CheckCircle2,
-  XCircle
+  XCircle,
+  Calendar,
+  Camera
 } from 'lucide-react';
+import { startOfMonth, endOfMonth, subMonths } from 'date-fns';
+import html2canvas from 'html2canvas';
 import type { PeriodType, TotalReportData } from '@/types/trial-report';
 
 // 教學品質分析記錄的類型定義
@@ -91,6 +95,7 @@ export default function TrialOverview() {
   const [isMetricSettingsOpen, setMetricSettingsOpen] = useState(false);
   const [studentFilter, setStudentFilter] = useState<'all' | 'converted'>('all');
   const studentInsightsRef = useRef<HTMLDivElement>(null);
+  const analysisTableRef = useRef<HTMLDivElement>(null); // 🆕 體驗課分析表格 ref（用於截圖複製）
   const [redefineKPIDialog, setRedefineKPIDialog] = useState<{
     open: boolean;
     kpiName: string;
@@ -112,6 +117,11 @@ export default function TrialOverview() {
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(true);
   const [analyzingIds, setAnalyzingIds] = useState<string[]>([]);
   const [dataQualityWarnings, setDataQualityWarnings] = useState<any[]>([]); // 🆕 資料品質警告
+
+  // 🆕 日期過濾器 state（預設顯示本月）
+  const [analysisDateFilter, setAnalysisDateFilter] = useState<'thisMonth' | 'lastMonth' | 'last3Months' | 'all' | 'custom'>('thisMonth');
+  const [analysisStartDate, setAnalysisStartDate] = useState<string>(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [analysisEndDate, setAnalysisEndDate] = useState<string>(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
 
   // 🆕 Progress tracking for each analyzing record
   type ProgressInfo = {
@@ -208,11 +218,92 @@ export default function TrialOverview() {
 
   // ==================== Tab 2: 學員分析 API ====================
 
+  // 🆕 處理日期過濾器變更
+  const handleAnalysisDateFilterChange = (filter: 'thisMonth' | 'lastMonth' | 'last3Months' | 'all' | 'custom') => {
+    setAnalysisDateFilter(filter);
+    const now = new Date();
+
+    switch (filter) {
+      case 'thisMonth':
+        setAnalysisStartDate(format(startOfMonth(now), 'yyyy-MM-dd'));
+        setAnalysisEndDate(format(endOfMonth(now), 'yyyy-MM-dd'));
+        break;
+      case 'lastMonth':
+        const lastMonth = subMonths(now, 1);
+        setAnalysisStartDate(format(startOfMonth(lastMonth), 'yyyy-MM-dd'));
+        setAnalysisEndDate(format(endOfMonth(lastMonth), 'yyyy-MM-dd'));
+        break;
+      case 'last3Months':
+        const threeMonthsAgo = subMonths(now, 2);
+        setAnalysisStartDate(format(startOfMonth(threeMonthsAgo), 'yyyy-MM-dd'));
+        setAnalysisEndDate(format(endOfMonth(now), 'yyyy-MM-dd'));
+        break;
+      case 'all':
+        setAnalysisStartDate('');
+        setAnalysisEndDate('');
+        break;
+      case 'custom':
+        // 自訂模式：保留現有日期，讓使用者自行修改
+        break;
+    }
+  };
+
+  // 🆕 處理自訂日期變更
+  const handleCustomDateChange = (type: 'start' | 'end', value: string) => {
+    if (type === 'start') {
+      setAnalysisStartDate(value);
+    } else {
+      setAnalysisEndDate(value);
+    }
+    // 當使用者手動修改日期時，自動切換到自訂模式
+    if (analysisDateFilter !== 'custom') {
+      setAnalysisDateFilter('custom');
+    }
+  };
+
+  // 🆕 截圖體驗課分析表格並複製到剪貼簿
+  const captureAnalysisTable = async () => {
+    if (!analysisTableRef.current) {
+      toast({
+        title: '無法截圖',
+        description: '找不到表格區塊',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      const canvas = await html2canvas(analysisTableRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+      });
+
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const item = new ClipboardItem({ 'image/png': blob });
+          navigator.clipboard.write([item]).then(() => {
+            toast({
+              title: '截圖成功',
+              description: '體驗課分析表格已複製到剪貼簿，可直接貼上',
+            });
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Screenshot error:', error);
+      toast({
+        title: '截圖失敗',
+        description: '請稍後再試',
+        variant: 'destructive',
+      });
+    }
+  };
+
   useEffect(() => {
     if (activeMainTab === 'analysis') {
       fetchAnalysisData();
     }
-  }, [activeMainTab, selectedTeacher, searchQuery]);
+  }, [activeMainTab, selectedTeacher, searchQuery, analysisStartDate, analysisEndDate]);
 
   // 監聽全域狀態：當有分析更新時，重新載入資料
   useEffect(() => {
@@ -234,6 +325,13 @@ export default function TrialOverview() {
       }
       if (searchQuery && searchQuery.trim() !== '') {
         params.append('search', searchQuery.trim());
+      }
+      // 🆕 加入日期過濾參數
+      if (analysisStartDate) {
+        params.append('startDate', analysisStartDate);
+      }
+      if (analysisEndDate) {
+        params.append('endDate', analysisEndDate);
       }
 
       const response = await fetch(`/api/teaching-quality/student-records?${params}`);
@@ -749,24 +847,79 @@ export default function TrialOverview() {
                   </Button>
                 </div>
               </CardHeader>
-              <CardContent>
-                <div className="flex gap-4 items-center">
-                  <div className="flex-1">
-                    <Select value={selectedTeacher} onValueChange={setSelectedTeacher}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="選擇老師" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">全部老師 ({teachers.reduce((sum, t) => sum + t.count, 0)} 筆)</SelectItem>
-                        {teachers.map((teacher) => (
-                          <SelectItem key={teacher.name} value={teacher.name}>
-                            {teacher.name} ({teacher.count} 筆)
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              <CardContent className="space-y-4">
+                {/* 第一行：快速日期選擇 + 自訂日期 */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex gap-1 border rounded-lg p-1 bg-background">
+                    <button
+                      onClick={() => handleAnalysisDateFilterChange('thisMonth')}
+                      className={`px-3 py-1.5 text-sm rounded transition-colors ${
+                        analysisDateFilter === 'thisMonth' ? 'bg-orange-400 text-white' : 'hover:bg-muted'
+                      }`}
+                    >
+                      本月
+                    </button>
+                    <button
+                      onClick={() => handleAnalysisDateFilterChange('lastMonth')}
+                      className={`px-3 py-1.5 text-sm rounded transition-colors ${
+                        analysisDateFilter === 'lastMonth' ? 'bg-orange-400 text-white' : 'hover:bg-muted'
+                      }`}
+                    >
+                      上月
+                    </button>
+                    <button
+                      onClick={() => handleAnalysisDateFilterChange('last3Months')}
+                      className={`px-3 py-1.5 text-sm rounded transition-colors ${
+                        analysisDateFilter === 'last3Months' ? 'bg-orange-400 text-white' : 'hover:bg-muted'
+                      }`}
+                    >
+                      近三月
+                    </button>
+                    <button
+                      onClick={() => handleAnalysisDateFilterChange('all')}
+                      className={`px-3 py-1.5 text-sm rounded transition-colors ${
+                        analysisDateFilter === 'all' ? 'bg-orange-400 text-white' : 'hover:bg-muted'
+                      }`}
+                    >
+                      全部
+                    </button>
                   </div>
-                  <div className="flex-1 relative">
+
+                  {/* 自訂日期選擇器 */}
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="date"
+                      value={analysisStartDate}
+                      onChange={(e) => handleCustomDateChange('start', e.target.value)}
+                      className={`w-[140px] h-9 ${analysisDateFilter === 'custom' ? 'border-orange-400' : ''}`}
+                    />
+                    <span className="text-muted-foreground">~</span>
+                    <Input
+                      type="date"
+                      value={analysisEndDate}
+                      onChange={(e) => handleCustomDateChange('end', e.target.value)}
+                      className={`w-[140px] h-9 ${analysisDateFilter === 'custom' ? 'border-orange-400' : ''}`}
+                    />
+                  </div>
+                </div>
+
+                {/* 第二行：老師篩選 + 搜尋 + 統計 */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <Select value={selectedTeacher} onValueChange={setSelectedTeacher}>
+                    <SelectTrigger className="w-[160px]">
+                      <SelectValue placeholder="選擇老師" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部老師</SelectItem>
+                      {teachers.map((teacher) => (
+                        <SelectItem key={teacher.name} value={teacher.name}>
+                          {teacher.name} ({teacher.count})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <div className="relative flex-1 min-w-[200px] max-w-[300px]">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                       type="text"
@@ -776,22 +929,21 @@ export default function TrialOverview() {
                       className="pl-10"
                     />
                   </div>
-                  <div className="text-sm text-muted-foreground">
-                    共 {analysisRecords.length} 筆記錄
+
+                  {/* 統計 Badge */}
+                  <div className="flex items-center gap-2 ml-auto">
+                    <Badge variant="secondary" className="font-normal">
+                      共 {analysisRecords.length} 筆
+                    </Badge>
                     {analysisRecords.filter(r => r.id).length > 0 && (
-                      <span className="ml-2">
-                        • 已分析 {analysisRecords.filter(r => r.id).length} 筆
-                      </span>
+                      <Badge variant="outline" className="font-normal text-green-600 border-green-300">
+                        已分析 {analysisRecords.filter(r => r.id).length}
+                      </Badge>
                     )}
                     {analysisRecords.filter(r => !r.id && r.has_transcript).length > 0 && (
-                      <span className="ml-2 text-orange-600">
-                        • 待分析 {analysisRecords.filter(r => !r.id && r.has_transcript).length} 筆
-                      </span>
-                    )}
-                    {analysisRecords.filter(r => !r.id && !r.has_transcript).length > 0 && (
-                      <span className="ml-2 text-gray-400">
-                        • 無逐字稿 {analysisRecords.filter(r => !r.id && !r.has_transcript).length} 筆
-                      </span>
+                      <Badge variant="outline" className="font-normal text-orange-600 border-orange-300">
+                        待分析 {analysisRecords.filter(r => !r.id && r.has_transcript).length}
+                      </Badge>
                     )}
                   </div>
                 </div>
@@ -800,7 +952,21 @@ export default function TrialOverview() {
 
             {/* 體驗課分析記錄表格 */}
             <Card>
-              <CardContent className="pt-6">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg">學員記錄清單</CardTitle>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={captureAnalysisTable}
+                    disabled={isLoadingAnalysis || analysisRecords.length === 0}
+                  >
+                    <Camera className="mr-2 h-4 w-4" />
+                    複製截圖
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
                 {isLoadingAnalysis ? (
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -814,7 +980,7 @@ export default function TrialOverview() {
                     </p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
+                  <div ref={analysisTableRef} className="overflow-x-auto bg-white">
                     <Table>
                       <TableHeader>
                         <TableRow>

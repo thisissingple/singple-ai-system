@@ -6,6 +6,11 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
+// 🛡️ 防止 pooler 斷線導致 Node.js 崩潰
+pool.on('error', (err) => {
+  console.error('⚠️  Cost-profit pool error (will reconnect):', err.message);
+});
+
 export interface CostProfitRecord {
   id: string;
   category_name: string;

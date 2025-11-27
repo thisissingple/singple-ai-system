@@ -139,7 +139,7 @@ export class SyncService {
         mappingId,
         syncResult.errorCount > 0 ? 'failed' : 'success',
         syncResult.successCount,
-        logMessage
+        logMessage ?? undefined
       );
 
       const completionMessage = syncResult.errorCount > 0
@@ -242,6 +242,16 @@ export class SyncService {
           if (value === '') {
             record[mapping.supabaseColumn] = null;
             return;
+          }
+
+          // 🆕 自動清理字串前後的空白、tab、換行符號（預防資料品質問題）
+          if (typeof value === 'string') {
+            value = value.trim();
+            // trim 後如果變成空字串，轉為 null
+            if (value === '') {
+              record[mapping.supabaseColumn] = null;
+              return;
+            }
           }
 
           // 清理中文數字（例如 "１" -> "1"）- 必須先做

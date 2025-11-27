@@ -40,6 +40,11 @@ export async function initSessionStore(): Promise<void> {
       connectionTimeoutMillis: 5000, // 5 秒測試超時
     });
 
+    // 🛡️ 防止 pooler 斷線導致 Node.js 崩潰
+    testPool.on('error', (err) => {
+      console.error('⚠️  Test pool error (ignored):', err.message);
+    });
+
     // 測試連線
     const client = await testPool.connect();
     await client.query('SELECT 1');

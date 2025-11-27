@@ -110,6 +110,8 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
       const supabase = getSupabaseClient();
       const teacherFilter = req.query.teacher as string;
       const searchQuery = req.query.search as string; // 新增：搜尋關鍵字
+      const startDate = req.query.startDate as string; // 🆕 日期過濾
+      const endDate = req.query.endDate as string;     // 🆕 日期過濾
 
       // Build query using Supabase Client
       let attendanceQuery = supabase
@@ -127,6 +129,14 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         `)
         .order('class_date', { ascending: false })
         .limit(200);
+
+      // 🆕 日期範圍過濾
+      if (startDate) {
+        attendanceQuery = attendanceQuery.gte('class_date', startDate);
+      }
+      if (endDate) {
+        attendanceQuery = attendanceQuery.lte('class_date', endDate);
+      }
 
       // 新增：搜尋功能（學員名稱或 email）
       if (searchQuery && searchQuery.trim() !== '') {

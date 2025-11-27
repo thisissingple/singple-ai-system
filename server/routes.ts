@@ -8,7 +8,7 @@ import { autoAnalysisService } from "./services/deprecated/auto-analysis";
 import { totalReportService } from "./services/reporting/total-report-service";
 import { introspectService } from "./services/reporting/introspect-service";
 import { generateConsultantReport, getConsultationList, getTrendData, getLeadSourceAverageDetails, type ConsultantReportParams, type PeriodType, type DealStatus, type TrendGrouping } from "./services/consultant-report-service";
-import { generateConsultantAIReport, type AIReportInput } from "./services/consultant-ai-report-service";
+import { getOrGenerateConsultantAIReport, type AIReportInput } from "./services/consultant-ai-report-service";
 import { devSeedService } from "./services/deprecated/dev-seed-service";
 import { reportMetricConfigService } from "./services/reporting/report-metric-config-service";
 import { formulaEngine } from "./services/reporting/formula-engine";
@@ -4013,6 +4013,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Consultant AI Report - 生成 AI 分析報告
+  // 快取機制：同一天同期間只生成一次，除非使用 forceRefresh
   app.post('/api/reports/consultants/ai-report', isAuthenticated, requireModulePermission('consultant_report'), async (req, res) => {
     try {
       const params: ConsultantReportParams = {
@@ -4027,7 +4028,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         trendGrouping: (req.body.trendGrouping as TrendGrouping) || 'day',
       };
 
-      console.log('[AI Report] Generating report with params:', params);
+      // 是否強制重新生成（跳過快取）
+      const forceRefresh = req.body.forceRefresh === true;
+
+      console.log('[AI Report] Request with params:', { ...params, forceRefresh });
 
       // Get the full report data first
       const report = await generateConsultantReport(params);
@@ -4043,10 +4047,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dateRange: report.metadata.dateRange,
       };
 
-      // Generate AI report
-      const aiReport = await generateConsultantAIReport(aiReportInput);
+      // Get or generate AI report (with caching)
+      const aiReport = await getOrGenerateConsultantAIReport(aiReportInput, forceRefresh);
 
-      console.log('[AI Report] Report generated successfully');
+      console.log(`[AI Report] Report ${aiReport.fromCache ? 'retrieved from cache' : 'generated'} successfully`);
 
       res.json({
         success: true,
@@ -4059,6 +4063,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: false,
         error: 'Internal server error',
         message: error.message || 'AI 報告生成時發生錯誤',
+      });
+    }
+  });
+
+  // Slack Integration - Send AI Report to Slack
+  app.post('/api/slack/send-ai-report', isAuthenticated, async (req, res) => {
+    try {
+      const { report, period, dateRange } = req.body;
+
+      if (!report) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing report data',
+        });
+      }
+
+      const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL;
+      if (!slackWebhookUrl) {
+        console.error('[Slack] SLACK_WEBHOOK_URL not configured');
+        return res.status(500).json({
+          success: false,
+          error: 'Slack webhook not configured',
+          message: '請在環境變數中設定 SLACK_WEBHOOK_URL',
+        });
+      }
+
+      // 轉換期間顯示名稱
+      const periodLabel: Record<string, string> = {
+        today: '今日',
+        yesterday: '昨日',
+        week: '過去七天',
+        month: '本月',
+        quarter: '本季',
+        year: '本年',
+        all: '全部',
+        custom: '自訂期間',
+      };
+
+      // 建立 Slack 訊息格式
+      const blocks = [
+        {
+          type: 'header',
+          text: {
+            type: 'plain_text',
+            text: `📊 諮詢師業績報告 - ${periodLabel[period] || period}`,
+            emoji: true,
+          },
+        },
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: `📅 ${dateRange.start} ~ ${dateRange.end} | ⏰ ${new Date(report.generatedAt).toLocaleString('zh-TW')}`,
+            },
+          ],
+        },
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*📝 總覽*\n${report.summary}`,
+          },
+        },
+        { type: 'divider' },
+      ];
+
+      // 添加各區塊
+      report.sections.forEach((section: { title: string; content: string }) => {
+        blocks.push({
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*📌 ${section.title}*\n${section.content.substring(0, 2900)}`, // Slack 限制每個 block 3000 字元
+          },
+        });
+      });
+
+      // 發送到 Slack
+      const response = await fetch(slackWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocks }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Slack] Failed to send message:', errorText);
+        throw new Error(`Slack API error: ${response.status}`);
+      }
+
+      console.log('[Slack] AI report sent successfully');
+
+      res.json({
+        success: true,
+        message: '已成功傳送至 Slack',
+      });
+    } catch (error: any) {
+      console.error('[Slack] Error sending report:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to send to Slack',
+        message: error.message,
       });
     }
   });
