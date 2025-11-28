@@ -1,11 +1,75 @@
 # 📊 專案進度追蹤文檔
 
-> **最後更新**: 2025-11-27
+> **最後更新**: 2025-11-28
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ 課程方案整合完成
+> **專案狀態**: ✅ 同步機制永久修復
 > **當前階段**: 管理後台功能擴充
-> **今日進度**: 剩餘堂數計算修正 - 整合 course_plans 資料表
+> **今日進度**: eods_for_closers 重複資料問題永久修復
 > **整體進度**: 100% ████████████████████
+
+---
+
+## 📅 2025-11-28 更新日誌
+
+### 🔧 eods_for_closers 重複資料問題永久修復
+
+#### 問題描述
+- Google Sheets 同步後 `eods_for_closers` 表出現資料重複（從約 1005 筆變成 2000+ 筆）
+- 這是第三次以上發生的重複問題
+- 之前 2025-11-18 的修復仍有遺漏
+
+#### 根本原因
+`insertAndReturn()` 函數仍使用預設的 `'transaction'` mode，而非 `'session'` mode
+
+#### 永久解決方案（四層防護）
+
+| 層級 | 機制 | 說明 |
+|------|------|------|
+| 1 | `session` mode | 修正 `insertAndReturn()` 使用正確的連線模式 |
+| 2 | 源資料去重 | `deduplicateForUpsert()` 避免同 batch 內重複 |
+| 3 | UPSERT | `ON CONFLICT DO UPDATE` 覆蓋而非重複插入 |
+| 4 | 唯一約束 | 資料庫層級防護，絕對防止重複 |
+
+#### 修改的檔案
+
+| 檔案 | 變更內容 |
+|------|----------|
+| [`server/services/pg-client.ts:112`](server/services/pg-client.ts#L112) | 修正 `insertAndReturn()` 使用 `'session'` mode |
+| [`server/services/sheets/sync-service.ts`](server/services/sheets/sync-service.ts) | 新增 UPSERT 策略（`loadToSupabaseWithUpsert`、`batchUpsert`、`deduplicateForUpsert`） |
+| [`supabase/migrations/076_add_unique_constraint_to_eods.sql`](supabase/migrations/076_add_unique_constraint_to_eods.sql) | 新增唯一約束 |
+| [`scripts/run-migration-076.ts`](scripts/run-migration-076.ts) | Migration 執行腳本 |
+| [`docs/SYNC_DUPLICATION_FIX.md`](docs/SYNC_DUPLICATION_FIX.md) | 更新修復文件 |
+
+#### 唯一約束設計
+```sql
+CREATE UNIQUE INDEX idx_eods_unique_consultation
+ON eods_for_closers (student_email, consultation_date, closer_name)
+WHERE student_email IS NOT NULL
+  AND consultation_date IS NOT NULL
+  AND closer_name IS NOT NULL;
+```
+
+**選擇此唯一鍵的原因**：
+- 與 `consultation_quality_analysis` 表的 JOIN 索引一致（migration 069）
+- `eod_id` 已被標記為 DEPRECATED（每次同步都會產生新 UUID）
+- 確保 AI 分析記錄仍能正確關聯
+
+#### Migration 執行結果
+- 刪除 1103 筆重複記錄
+- 保留 1005 筆唯一記錄
+- 唯一索引建立成功
+
+#### 驗證結果
+```
+=== eods_for_closers 資料驗證 ===
+總記錄數: 1005
+重複記錄: 0 (無重複)
+唯一索引: 已存在 ✅
+```
+
+#### 相關文件
+- [`docs/SYNC_DUPLICATION_FIX.md`](docs/SYNC_DUPLICATION_FIX.md) - 完整修復記錄
+- [`backup_2025-11-28/`](backup_2025-11-28/) - 修改前的備份
 
 ---
 
