@@ -9501,7 +9501,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 建立映射
   app.post('/api/sheets/mappings', async (req, res) => {
     try {
-      const { source_id, worksheet_name, target_table, field_mappings, is_enabled, sync_schedule } = req.body;
+      const { source_id, worksheet_name, target_table, field_mappings, is_enabled, sync_schedule, upsert_config } = req.body;
 
       if (!source_id || !worksheet_name || !target_table || !field_mappings) {
         return res.status(400).json({
@@ -9510,13 +9510,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // 🔑 處理 UPSERT 配置
+      const upsertConfigValue = upsert_config && upsert_config.uniqueKeys && upsert_config.uniqueKeys.length > 0
+        ? JSON.stringify(upsert_config)
+        : null;
+
       const mapping = await iar('sheet_mappings', {
         source_id,
         worksheet_name,
         target_table,
         field_mappings: JSON.stringify(field_mappings),
         is_enabled: is_enabled !== undefined ? is_enabled : true,
-        sync_schedule: JSON.stringify(sync_schedule || ['02:00'])
+        sync_schedule: JSON.stringify(sync_schedule || ['02:00']),
+        upsert_config: upsertConfigValue,
       });
 
       res.json({ success: true, data: mapping });
@@ -9575,7 +9581,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put('/api/sheets/mappings/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const { field_mappings, is_enabled, sync_schedule } = req.body;
+      const { field_mappings, is_enabled, sync_schedule, upsert_config } = req.body;
 
       const updates: string[] = [];
       const values: any[] = [];
@@ -9596,6 +9602,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (sync_schedule !== undefined) {
         updates.push(`sync_schedule = $${paramIndex}`);
         values.push(JSON.stringify(sync_schedule));
+        paramIndex++;
+      }
+
+      // 🔑 支援更新 UPSERT 配置
+      if (upsert_config !== undefined) {
+        updates.push(`upsert_config = $${paramIndex}`);
+        // 如果傳入 null 或空物件，設為 NULL（使用 DELETE + INSERT）
+        const configValue = upsert_config && upsert_config.uniqueKeys && upsert_config.uniqueKeys.length > 0
+          ? JSON.stringify(upsert_config)
+          : null;
+        values.push(configValue);
         paramIndex++;
       }
 

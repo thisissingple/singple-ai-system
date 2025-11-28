@@ -20,38 +20,23 @@ interface MappingConfig {
   target_table: string;
   field_mappings: FieldMapping[];
   sheet_id: string;  // From source
+  upsert_config: UpsertConfig | null;  // 🔑 從資料庫讀取的 UPSERT 配置
 }
 
 /**
  * 🔑 UPSERT 配置：定義每個表的唯一鍵
  *
- * 每個 Google Sheets 同步表都應該定義唯一鍵，用於：
- * 1. 資料去重（同 batch 內不重複）
- * 2. UPSERT 衝突處理（ON CONFLICT）
- * 3. 資料庫唯一約束（防止意外重複）
+ * 配置來源：sheet_mappings.upsert_config 欄位（JSONB）
+ * 透過 UI 設定，無需修改程式碼！
  *
- * 新增表格時，請在此處新增配置！
+ * 配置結構：
+ * - uniqueKeys: 唯一鍵欄位陣列
+ * - allowNullKeys: 是否允許 NULL 參與唯一性（預設 false）
  */
 interface UpsertConfig {
   uniqueKeys: string[];           // 唯一鍵欄位
   allowNullKeys: boolean;         // 是否允許唯一鍵為 NULL（使用 partial index）
 }
-
-const UPSERT_CONFIGS: Record<string, UpsertConfig> = {
-  // 諮詢記錄表
-  eods_for_closers: {
-    uniqueKeys: ['student_email', 'consultation_date', 'closer_name'],
-    allowNullKeys: false,  // 使用 partial unique index
-  },
-  // 體驗課購買記錄表
-  trial_class_purchases: {
-    uniqueKeys: ['student_email', 'package_name', 'purchase_date'],
-    allowNullKeys: false,  // 使用 partial unique index
-  },
-  // ⚠️ income_expense_records 不使用 UPSERT
-  // 原因：該表沒有明確的業務唯一鍵，大量欄位為 NULL
-  // 策略：使用 DELETE + INSERT 全量同步
-};
 
 export interface SyncProgress {
   mappingId: string;
@@ -140,16 +125,23 @@ export class SyncService {
       // 5. 根據表格類型選擇同步策略
       let syncResult: { successCount: number; errorCount: number; errors: string[] };
 
-      // 🎯 檢查是否有 UPSERT 配置
-      const upsertConfig = UPSERT_CONFIGS[mapping.target_table];
+      // 🎯 從資料庫讀取 UPSERT 配置（透過 UI 設定，全自動）
+      const upsertConfig = mapping.upsert_config;
 
-      if (upsertConfig) {
+      if (upsertConfig && upsertConfig.uniqueKeys && upsertConfig.uniqueKeys.length > 0) {
         // ✅ 有 UPSERT 配置的表格：使用 UPSERT 策略（避免重複資料問題）
         console.log(`📌 Using UPSERT strategy for ${mapping.target_table}`);
         console.log(`   Unique keys: ${upsertConfig.uniqueKeys.join(', ')}`);
+        console.log(`   Allow NULL keys: ${upsertConfig.allowNullKeys ?? false}`);
+
+        // 確保 allowNullKeys 有預設值
+        const config: UpsertConfig = {
+          uniqueKeys: upsertConfig.uniqueKeys,
+          allowNullKeys: upsertConfig.allowNullKeys ?? false,
+        };
 
         // 先對源資料去重（同一個 batch 內不能有重複 key，否則 PostgreSQL UPSERT 會報錯）
-        const deduplicatedData = this.deduplicateByConfig(transformedData, upsertConfig);
+        const deduplicatedData = this.deduplicateByConfig(transformedData, config);
         console.log(`📊 Deduplicated: ${transformedData.length} → ${deduplicatedData.length} records`);
 
         this.sendProgress({
@@ -161,11 +153,11 @@ export class SyncService {
           percentage: 40,
         });
 
-        syncResult = await this.loadToSupabaseWithUpsert(mapping.target_table, deduplicatedData, mappingId, upsertConfig);
+        syncResult = await this.loadToSupabaseWithUpsert(mapping.target_table, deduplicatedData, mappingId, config);
       } else {
-        // ⚠️ 沒有 UPSERT 配置的表格：使用 DELETE + INSERT（舊方法，有重複風險）
-        console.log(`⚠️ No UPSERT config for ${mapping.target_table}, using DELETE + INSERT`);
-        console.log(`   Consider adding UPSERT config for better data integrity`);
+        // ⚠️ 沒有 UPSERT 配置的表格：使用 DELETE + INSERT
+        console.log(`ℹ️ No UPSERT config for ${mapping.target_table}, using DELETE + INSERT`);
+        console.log(`   (可在同步設定中配置唯一鍵以啟用 UPSERT)`);
 
         this.sendProgress({
           mappingId,
@@ -281,7 +273,8 @@ export class SyncService {
       worksheet_name: row.worksheet_name,
       target_table: row.target_table,
       field_mappings: row.field_mappings,
-      sheet_id: row.sheet_id
+      sheet_id: row.sheet_id,
+      upsert_config: row.upsert_config || null,  // 🔑 從資料庫讀取 UPSERT 配置
     };
   }
 

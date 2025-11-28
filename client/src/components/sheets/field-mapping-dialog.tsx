@@ -55,6 +55,9 @@ export function FieldMappingDialog({
   const [syncSchedule, setSyncSchedule] = useState<string[]>(['02:00']);
   const [loading, setLoading] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
+  // 🔑 UPSERT 配置
+  const [upsertEnabled, setUpsertEnabled] = useState(false);
+  const [uniqueKeys, setUniqueKeys] = useState<string[]>([]);
   const { toast } = useToast();
 
   // 載入工作表列表
@@ -169,6 +172,14 @@ export function FieldMappingDialog({
         setMappings(mapping.field_mappings || []);
         setIsEnabled(mapping.is_enabled);
         setSyncSchedule(mapping.sync_schedule || ['02:00']);
+        // 🔑 載入 UPSERT 配置
+        if (mapping.upsert_config && mapping.upsert_config.uniqueKeys) {
+          setUpsertEnabled(true);
+          setUniqueKeys(mapping.upsert_config.uniqueKeys);
+        } else {
+          setUpsertEnabled(false);
+          setUniqueKeys([]);
+        }
       }
     } catch (error) {
       console.error('載入映射資料失敗:', error);
@@ -189,6 +200,8 @@ export function FieldMappingDialog({
     setMappings([]);
     setIsEnabled(true);
     setSyncSchedule(['02:00']);
+    setUpsertEnabled(false);
+    setUniqueKeys([]);
   };
 
   const handleAddMapping = () => {
@@ -253,6 +266,11 @@ export function FieldMappingDialog({
     try {
       let response;
 
+      // 🔑 建立 UPSERT 配置（如果啟用且有選擇唯一鍵）
+      const upsertConfig = upsertEnabled && uniqueKeys.length > 0
+        ? { uniqueKeys, allowNullKeys: false }
+        : null;
+
       if (isEditMode && mappingId) {
         // 編輯模式: PUT 更新
         response = await fetch(`/api/sheets/mappings/${mappingId}`, {
@@ -262,6 +280,7 @@ export function FieldMappingDialog({
             field_mappings: mappings,
             is_enabled: isEnabled,
             sync_schedule: syncSchedule,
+            upsert_config: upsertConfig,
           }),
         });
       } else {
@@ -276,6 +295,7 @@ export function FieldMappingDialog({
             field_mappings: mappings,
             is_enabled: isEnabled,
             sync_schedule: syncSchedule,
+            upsert_config: upsertConfig,
           }),
         });
       }
@@ -547,6 +567,63 @@ export function FieldMappingDialog({
                     {syncSchedule.length === 0 && (
                       <p className="text-xs text-amber-600">
                         請至少選擇一個同步時間
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 🔑 UPSERT 配置（防止重複資料） */}
+              <div className="space-y-4 p-4 border rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>防止重複資料 (UPSERT)</Label>
+                    <p className="text-sm text-muted-foreground">
+                      設定唯一鍵，同步時自動更新已存在的記錄
+                    </p>
+                  </div>
+                  <Switch checked={upsertEnabled} onCheckedChange={setUpsertEnabled} />
+                </div>
+
+                {upsertEnabled && (
+                  <div className="space-y-3 pt-3 border-t">
+                    <Label>選擇唯一鍵欄位</Label>
+                    <p className="text-xs text-muted-foreground">
+                      選擇可以唯一識別每筆記錄的欄位組合（例如: email + 日期）
+                    </p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {supabaseColumns
+                        .filter((col) => col && col.trim() !== '' && col !== 'id' && col !== 'created_at' && col !== 'updated_at')
+                        .map((col) => (
+                          <button
+                            key={col}
+                            type="button"
+                            onClick={() => {
+                              if (uniqueKeys.includes(col)) {
+                                setUniqueKeys(uniqueKeys.filter((k) => k !== col));
+                              } else {
+                                setUniqueKeys([...uniqueKeys, col]);
+                              }
+                            }}
+                            className={`px-3 py-2 text-sm rounded-md border transition-colors text-left truncate ${
+                              uniqueKeys.includes(col)
+                                ? 'bg-primary text-primary-foreground border-primary'
+                                : 'bg-background hover:bg-muted border-input'
+                            }`}
+                            title={col}
+                          >
+                            {col}
+                          </button>
+                        ))}
+                    </div>
+                    {uniqueKeys.length > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        已選擇唯一鍵: {uniqueKeys.join(', ')}
+                      </p>
+                    )}
+                    {uniqueKeys.length === 0 && (
+                      <p className="text-xs text-amber-600">
+                        請至少選擇一個唯一鍵欄位
                       </p>
                     )}
                   </div>
