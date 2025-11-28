@@ -22,9 +22,40 @@ interface MappingConfig {
   sheet_id: string;  // From source
 }
 
+/**
+ * 🔑 UPSERT 配置：定義每個表的唯一鍵
+ *
+ * 每個 Google Sheets 同步表都應該定義唯一鍵，用於：
+ * 1. 資料去重（同 batch 內不重複）
+ * 2. UPSERT 衝突處理（ON CONFLICT）
+ * 3. 資料庫唯一約束（防止意外重複）
+ *
+ * 新增表格時，請在此處新增配置！
+ */
+interface UpsertConfig {
+  uniqueKeys: string[];           // 唯一鍵欄位
+  allowNullKeys: boolean;         // 是否允許唯一鍵為 NULL（使用 partial index）
+}
+
+const UPSERT_CONFIGS: Record<string, UpsertConfig> = {
+  // 諮詢記錄表
+  eods_for_closers: {
+    uniqueKeys: ['student_email', 'consultation_date', 'closer_name'],
+    allowNullKeys: false,  // 使用 partial unique index
+  },
+  // 體驗課購買記錄表
+  trial_class_purchases: {
+    uniqueKeys: ['student_email', 'package_name', 'purchase_date'],
+    allowNullKeys: false,  // 使用 partial unique index
+  },
+  // ⚠️ income_expense_records 不使用 UPSERT
+  // 原因：該表沒有明確的業務唯一鍵，大量欄位為 NULL
+  // 策略：使用 DELETE + INSERT 全量同步
+};
+
 export interface SyncProgress {
   mappingId: string;
-  stage: 'reading' | 'transforming' | 'clearing' | 'inserting' | 'completed' | 'failed';
+  stage: 'reading' | 'transforming' | 'clearing' | 'inserting' | 'upserting' | 'completed' | 'failed';
   current: number;
   total: number;
   message: string;
@@ -109,12 +140,16 @@ export class SyncService {
       // 5. 根據表格類型選擇同步策略
       let syncResult: { successCount: number; errorCount: number; errors: string[] };
 
-      if (mapping.target_table === 'eods_for_closers') {
-        // 🎯 eods_for_closers 使用 UPSERT（避免重複資料問題）
-        console.log('📌 Using UPSERT strategy for eods_for_closers');
+      // 🎯 檢查是否有 UPSERT 配置
+      const upsertConfig = UPSERT_CONFIGS[mapping.target_table];
+
+      if (upsertConfig) {
+        // ✅ 有 UPSERT 配置的表格：使用 UPSERT 策略（避免重複資料問題）
+        console.log(`📌 Using UPSERT strategy for ${mapping.target_table}`);
+        console.log(`   Unique keys: ${upsertConfig.uniqueKeys.join(', ')}`);
 
         // 先對源資料去重（同一個 batch 內不能有重複 key，否則 PostgreSQL UPSERT 會報錯）
-        const deduplicatedData = this.deduplicateForUpsert(transformedData);
+        const deduplicatedData = this.deduplicateByConfig(transformedData, upsertConfig);
         console.log(`📊 Deduplicated: ${transformedData.length} → ${deduplicatedData.length} records`);
 
         this.sendProgress({
@@ -126,9 +161,12 @@ export class SyncService {
           percentage: 40,
         });
 
-        syncResult = await this.loadToSupabaseWithUpsert(mapping.target_table, deduplicatedData, mappingId);
+        syncResult = await this.loadToSupabaseWithUpsert(mapping.target_table, deduplicatedData, mappingId, upsertConfig);
       } else {
-        // 其他表格使用 DELETE + INSERT
+        // ⚠️ 沒有 UPSERT 配置的表格：使用 DELETE + INSERT（舊方法，有重複風險）
+        console.log(`⚠️ No UPSERT config for ${mapping.target_table}, using DELETE + INSERT`);
+        console.log(`   Consider adding UPSERT config for better data integrity`);
+
         this.sendProgress({
           mappingId,
           stage: 'clearing',
@@ -306,39 +344,44 @@ export class SyncService {
   }
 
   /**
-   * 對 eods_for_closers 資料去重（唯一鍵: student_email + consultation_date + closer_name）
-   * 保留最後一筆（後面覆蓋前面）
+   * 🔑 通用資料去重方法（根據 UPSERT 配置）
    *
-   * 重要：partial unique index 只適用於三個 key 都不為 NULL 的記錄
-   * 因此我們必須分開處理：
-   * - 有完整 key 的記錄：使用 UPSERT
-   * - key 不完整的記錄：保留但不去重（可能會有重複）
+   * 去重策略：
+   * - allowNullKeys = false (partial index): 只保留所有 key 都有值的記錄
+   * - allowNullKeys = true: 保留所有記錄，用完整 key 組合去重
+   *
+   * @param data 原始資料
+   * @param config UPSERT 配置
+   * @returns 去重後的資料
    */
-  private deduplicateForUpsert(data: any[]): any[] {
+  private deduplicateByConfig(data: any[], config: UpsertConfig): any[] {
     const uniqueMap = new Map<string, any>();
     const incompleteKeyRecords: any[] = [];
 
     for (const record of data) {
-      const email = record.student_email;
-      const date = record.consultation_date;
-      const closer = record.closer_name;
+      // 建立唯一鍵值
+      const keyValues = config.uniqueKeys.map(key => record[key]);
+      const hasAllKeys = keyValues.every(v => v !== null && v !== undefined && v !== '');
 
-      // 檢查 key 是否完整（三個欄位都有值）
-      if (email && date && closer) {
-        const key = `${email}|${date}|${closer}`;
-        // 後面的記錄會覆蓋前面的
+      if (config.allowNullKeys) {
+        // 允許 NULL：用完整 key 組合去重（包含 NULL 值）
+        const key = keyValues.map(v => v ?? 'NULL').join('|');
         uniqueMap.set(key, record);
       } else {
-        // key 不完整的記錄，無法使用 unique constraint
-        // 這些記錄會被跳過（因為它們無法 UPSERT）
-        incompleteKeyRecords.push(record);
+        // 不允許 NULL (partial index)：只保留完整 key 的記錄
+        if (hasAllKeys) {
+          const key = keyValues.join('|');
+          uniqueMap.set(key, record);
+        } else {
+          incompleteKeyRecords.push(record);
+        }
       }
     }
 
-    // 只回傳有完整 key 的記錄
-    // 不完整 key 的記錄會被跳過（因為 partial unique index 不包含它們）
+    // 記錄跳過的記錄
     if (incompleteKeyRecords.length > 0) {
-      console.log(`⚠️ Skipped ${incompleteKeyRecords.length} records with incomplete key (missing email/date/closer)`);
+      console.log(`⚠️ Skipped ${incompleteKeyRecords.length} records with incomplete key`);
+      console.log(`   Required keys: ${config.uniqueKeys.join(', ')}`);
     }
 
     return Array.from(uniqueMap.values());
@@ -481,10 +524,19 @@ export class SyncService {
   }
 
   /**
-   * 使用 UPSERT 策略寫入資料（專用於 eods_for_closers）
-   * 唯一鍵: (student_email, consultation_date, closer_name)
+   * 🔑 使用 UPSERT 策略寫入資料（通用方法）
+   *
+   * @param table 目標表名
+   * @param data 資料陣列
+   * @param mappingId 映射 ID（用於進度回報）
+   * @param config UPSERT 配置
    */
-  private async loadToSupabaseWithUpsert(table: string, data: any[], mappingId?: string): Promise<{
+  private async loadToSupabaseWithUpsert(
+    table: string,
+    data: any[],
+    mappingId: string | undefined,
+    config: UpsertConfig
+  ): Promise<{
     successCount: number;
     errorCount: number;
     errors: string[];
@@ -507,7 +559,7 @@ export class SyncService {
       const totalBatches = Math.ceil(data.length / BATCH_SIZE);
 
       try {
-        await this.batchUpsert(table, batch);
+        await this.batchUpsert(table, batch, config);
         successCount += batch.length;
 
         // 發送進度更新
@@ -545,10 +597,13 @@ export class SyncService {
   }
 
   /**
-   * 批次 UPSERT 記錄（專用於 eods_for_closers）
-   * 唯一鍵: (student_email, consultation_date, closer_name)
+   * 🔑 批次 UPSERT 記錄（通用方法）
+   *
+   * @param table 目標表名
+   * @param records 記錄陣列
+   * @param config UPSERT 配置
    */
-  private async batchUpsert(table: string, records: any[]): Promise<void> {
+  private async batchUpsert(table: string, records: any[], config: UpsertConfig): Promise<void> {
     if (records.length === 0) return;
 
     const columns = Object.keys(records[0]);
@@ -568,17 +623,27 @@ export class SyncService {
     });
 
     // 建立 UPDATE SET 子句（排除唯一鍵欄位）
-    const uniqueKeys = ['student_email', 'consultation_date', 'closer_name'];
-    const updateColumns = columns.filter(col => !uniqueKeys.includes(col));
-    const updateSet = updateColumns.map(col => `${col} = EXCLUDED.${col}`).join(', ');
+    const updateColumns = columns.filter(col => !config.uniqueKeys.includes(col));
+    const updateSet = updateColumns.length > 0
+      ? updateColumns.map(col => `${col} = EXCLUDED.${col}`).join(', ')
+      : columns[0] + ' = EXCLUDED.' + columns[0];  // 至少要有一個 UPDATE 欄位
+
+    // 🔑 根據配置建立 ON CONFLICT 子句
+    const conflictKeys = config.uniqueKeys.join(', ');
+    let conflictClause = `ON CONFLICT (${conflictKeys})`;
+
+    // 如果不允許 NULL，需要加上 WHERE 條件（partial index）
+    if (!config.allowNullKeys) {
+      const whereConditions = config.uniqueKeys
+        .map(key => `${key} IS NOT NULL`)
+        .join(' AND ');
+      conflictClause += `\n      WHERE ${whereConditions}`;
+    }
 
     const sql = `
       INSERT INTO ${table} (${columns.join(', ')})
       VALUES ${placeholders.join(', ')}
-      ON CONFLICT (student_email, consultation_date, closer_name)
-      WHERE student_email IS NOT NULL
-        AND consultation_date IS NOT NULL
-        AND closer_name IS NOT NULL
+      ${conflictClause}
       DO UPDATE SET ${updateSet}
     `;
 

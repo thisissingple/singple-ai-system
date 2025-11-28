@@ -267,6 +267,107 @@ UPSERT 機制運作正常，資料庫無重複資料
 
 ---
 
+## 2025-11-28 更新 (Part 2)：通用 UPSERT 系統
+
+### 問題
+
+用戶要求將 UPSERT 機制套用到所有 Google Sheets 同步表，而非僅限於 `eods_for_closers`。
+
+### 調查結果
+
+目前有 3 個 Google Sheets 同步表：
+
+| 表格 | 適合 UPSERT | 唯一鍵 |
+|------|------------|--------|
+| `eods_for_closers` | ✅ | `(student_email, consultation_date, closer_name)` |
+| `trial_class_purchases` | ✅ | `(student_email, package_name, purchase_date)` |
+| `income_expense_records` | ❌ | 無明確業務唯一鍵 |
+
+**`income_expense_records` 不適合 UPSERT 的原因：**
+- 大量欄位為 NULL（5172/13580 筆沒有 email）
+- 沒有明確的業務唯一鍵組合
+- PostgreSQL 中 NULL 不參與唯一性檢查
+- 繼續使用 DELETE + INSERT 全量同步
+
+### 解決方案：通用 UPSERT 配置系統
+
+**檔案**: [`server/services/sheets/sync-service.ts`](../server/services/sheets/sync-service.ts)
+
+新增 `UPSERT_CONFIGS` 配置，讓每個表可以定義自己的唯一鍵：
+
+```typescript
+const UPSERT_CONFIGS: Record<string, UpsertConfig> = {
+  eods_for_closers: {
+    uniqueKeys: ['student_email', 'consultation_date', 'closer_name'],
+    allowNullKeys: false,
+  },
+  trial_class_purchases: {
+    uniqueKeys: ['student_email', 'package_name', 'purchase_date'],
+    allowNullKeys: false,
+  },
+  // income_expense_records 不使用 UPSERT（沒有明確業務唯一鍵）
+};
+```
+
+**新增方法：**
+- `deduplicateByConfig()` - 根據配置進行資料去重
+- `batchUpsert()` - 根據配置動態生成 UPSERT SQL
+
+### Migration 077
+
+**檔案**: [`supabase/migrations/077_add_unique_constraints_to_sync_tables.sql`](../supabase/migrations/077_add_unique_constraints_to_sync_tables.sql)
+
+為 `trial_class_purchases` 新增唯一約束：
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS idx_trial_purchases_unique_record
+ON trial_class_purchases (student_email, package_name, purchase_date)
+WHERE student_email IS NOT NULL
+  AND package_name IS NOT NULL
+  AND purchase_date IS NOT NULL;
+```
+
+**執行結果：**
+- 刪除 34 筆重複記錄
+- 保留 146 筆唯一記錄
+
+### 如何新增新的 Google Sheets 同步表
+
+1. **確定唯一鍵**：找出能唯一識別每筆記錄的欄位組合
+2. **建立唯一約束**：建立 Migration 在資料庫層建立唯一索引
+3. **新增 UPSERT 配置**：在 `UPSERT_CONFIGS` 中新增配置
+
+```typescript
+// 範例：新增 new_table
+const UPSERT_CONFIGS = {
+  // ... 既有配置
+  new_table: {
+    uniqueKeys: ['field1', 'field2', 'field3'],
+    allowNullKeys: false,  // 或 true（如果允許 NULL 參與唯一性）
+  },
+};
+```
+
+### 驗證結果
+
+```
+=== 同步後資料驗證 ===
+
+eods_for_closers:
+  總筆數: 1005
+  重複組: 0 ✅
+
+income_expense_records:
+  總筆數: 6790
+  (使用 DELETE + INSERT，無唯一約束)
+
+trial_class_purchases:
+  總筆數: 146
+  重複組: 0 ✅
+```
+
+---
+
 **修正人員**: Claude Code
 **審核狀態**: 已驗證
 **驗證方式**: 實際執行 Google Sheets 同步並確認資料無重複
