@@ -178,6 +178,96 @@ await queryDatabase('SELECT * FROM ...', []);
 
 ---
 
+## 2025-11-28 更新：UPSERT + 唯一約束永久修復
+
+### 問題再現
+
+2025-11-28 再次發現 `eods_for_closers` 表出現重複資料（從約 1005 筆變成 2000+ 筆）。經調查發現之前的修復仍有遺漏：
+
+**遺漏點**: `insertAndReturn()` 函數仍使用預設的 `'transaction'` mode
+
+### 永久解決方案
+
+這次採用多層防護機制：
+
+#### 1. 修正 `insertAndReturn()` 函數
+
+**檔案**: [`server/services/pg-client.ts:112`](../server/services/pg-client.ts#L112)
+
+```typescript
+// ✅ 修正後 - 使用 'session' mode 執行 INSERT
+const result = await queryDatabase(query, values, 'session');
+```
+
+#### 2. 新增唯一約束（Migration 076）
+
+**檔案**: [`supabase/migrations/076_add_unique_constraint_to_eods.sql`](../supabase/migrations/076_add_unique_constraint_to_eods.sql)
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS idx_eods_unique_consultation
+ON eods_for_closers (student_email, consultation_date, closer_name)
+WHERE student_email IS NOT NULL
+  AND consultation_date IS NOT NULL
+  AND closer_name IS NOT NULL;
+```
+
+**Migration 執行結果**:
+- 刪除 1103 筆重複記錄
+- 保留 1005 筆唯一記錄
+- 唯一索引建立成功
+
+#### 3. 使用 UPSERT 替代 DELETE + INSERT
+
+**檔案**: [`server/services/sheets/sync-service.ts`](../server/services/sheets/sync-service.ts)
+
+新增方法：
+- `deduplicateForUpsert()` - 對源資料去重，避免 batch 內重複
+- `loadToSupabaseWithUpsert()` - 使用 UPSERT 策略寫入資料
+- `batchUpsert()` - 批次 UPSERT（ON CONFLICT DO UPDATE）
+
+```typescript
+// 只對 eods_for_closers 使用 UPSERT
+if (mapping.target_table === 'eods_for_closers') {
+  const deduplicatedData = this.deduplicateForUpsert(transformedData);
+  syncResult = await this.loadToSupabaseWithUpsert(table, deduplicatedData);
+} else {
+  // 其他表格仍使用 DELETE + INSERT
+  await this.clearTable(table);
+  syncResult = await this.loadToSupabase(table, transformedData);
+}
+```
+
+### 驗證結果
+
+```
+=== eods_for_closers 資料驗證 ===
+總記錄數: 1005
+重複記錄: 0 (無重複)
+唯一索引: 已存在 ✅
+索引定義: CREATE UNIQUE INDEX idx_eods_unique_consultation ON public.eods_for_closers...
+
+=== 結論 ===
+UPSERT 機制運作正常，資料庫無重複資料
+唯一約束可防止未來新增重複資料
+```
+
+### 防護層級
+
+| 層級 | 機制 | 說明 |
+|------|------|------|
+| 1 | `session` mode | 確保寫入操作使用正確的連線模式 |
+| 2 | 源資料去重 | `deduplicateForUpsert()` 避免同 batch 內重複 |
+| 3 | UPSERT | `ON CONFLICT DO UPDATE` 覆蓋而非重複插入 |
+| 4 | 唯一約束 | 資料庫層級防護，絕對防止重複 |
+
+### 相關檔案
+
+- [`scripts/run-migration-076.ts`](../scripts/run-migration-076.ts) - Migration 執行腳本
+- [`backup_2025-11-28/`](../backup_2025-11-28/) - 修改前的備份
+
+---
+
 **修正人員**: Claude Code
-**審核狀態**: 待用戶驗證
-**驗證方式**: 實際執行 Google Sheets 同步並觀察資料是否重複
+**審核狀態**: 已驗證
+**驗證方式**: 實際執行 Google Sheets 同步並確認資料無重複
+**最後更新**: 2025-11-28

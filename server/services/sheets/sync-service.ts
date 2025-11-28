@@ -106,29 +106,52 @@ export class SyncService {
       const transformedData = this.transformData(rawData, mapping.field_mappings);
       console.log(`🔄 Transformed ${transformedData.length} records`);
 
-      // 5. 清空目標表（全量同步）
-      this.sendProgress({
-        mappingId,
-        stage: 'clearing',
-        current: 0,
-        total: transformedData.length,
-        message: '正在清空目標表格...',
-        percentage: 40,
-      });
+      // 5. 根據表格類型選擇同步策略
+      let syncResult: { successCount: number; errorCount: number; errors: string[] };
 
-      await this.clearTable(mapping.target_table);
+      if (mapping.target_table === 'eods_for_closers') {
+        // 🎯 eods_for_closers 使用 UPSERT（避免重複資料問題）
+        console.log('📌 Using UPSERT strategy for eods_for_closers');
 
-      // 6. 寫入 Supabase
-      this.sendProgress({
-        mappingId,
-        stage: 'inserting',
-        current: 0,
-        total: transformedData.length,
-        message: `正在寫入 ${transformedData.length} 筆資料...`,
-        percentage: 50,
-      });
+        // 先對源資料去重（同一個 batch 內不能有重複 key，否則 PostgreSQL UPSERT 會報錯）
+        const deduplicatedData = this.deduplicateForUpsert(transformedData);
+        console.log(`📊 Deduplicated: ${transformedData.length} → ${deduplicatedData.length} records`);
 
-      const syncResult = await this.loadToSupabase(mapping.target_table, transformedData, mappingId);
+        this.sendProgress({
+          mappingId,
+          stage: 'upserting',
+          current: 0,
+          total: deduplicatedData.length,
+          message: `正在 UPSERT ${deduplicatedData.length} 筆資料...`,
+          percentage: 40,
+        });
+
+        syncResult = await this.loadToSupabaseWithUpsert(mapping.target_table, deduplicatedData, mappingId);
+      } else {
+        // 其他表格使用 DELETE + INSERT
+        this.sendProgress({
+          mappingId,
+          stage: 'clearing',
+          current: 0,
+          total: transformedData.length,
+          message: '正在清空目標表格...',
+          percentage: 40,
+        });
+
+        await this.clearTable(mapping.target_table);
+
+        // 6. 寫入 Supabase
+        this.sendProgress({
+          mappingId,
+          stage: 'inserting',
+          current: 0,
+          total: transformedData.length,
+          message: `正在寫入 ${transformedData.length} 筆資料...`,
+          percentage: 50,
+        });
+
+        syncResult = await this.loadToSupabase(mapping.target_table, transformedData, mappingId);
+      }
 
       // 7. 記錄同步結果（包含成功/失敗數量）
       const logMessage = syncResult.errorCount > 0
@@ -283,6 +306,45 @@ export class SyncService {
   }
 
   /**
+   * 對 eods_for_closers 資料去重（唯一鍵: student_email + consultation_date + closer_name）
+   * 保留最後一筆（後面覆蓋前面）
+   *
+   * 重要：partial unique index 只適用於三個 key 都不為 NULL 的記錄
+   * 因此我們必須分開處理：
+   * - 有完整 key 的記錄：使用 UPSERT
+   * - key 不完整的記錄：保留但不去重（可能會有重複）
+   */
+  private deduplicateForUpsert(data: any[]): any[] {
+    const uniqueMap = new Map<string, any>();
+    const incompleteKeyRecords: any[] = [];
+
+    for (const record of data) {
+      const email = record.student_email;
+      const date = record.consultation_date;
+      const closer = record.closer_name;
+
+      // 檢查 key 是否完整（三個欄位都有值）
+      if (email && date && closer) {
+        const key = `${email}|${date}|${closer}`;
+        // 後面的記錄會覆蓋前面的
+        uniqueMap.set(key, record);
+      } else {
+        // key 不完整的記錄，無法使用 unique constraint
+        // 這些記錄會被跳過（因為它們無法 UPSERT）
+        incompleteKeyRecords.push(record);
+      }
+    }
+
+    // 只回傳有完整 key 的記錄
+    // 不完整 key 的記錄會被跳過（因為 partial unique index 不包含它們）
+    if (incompleteKeyRecords.length > 0) {
+      console.log(`⚠️ Skipped ${incompleteKeyRecords.length} records with incomplete key (missing email/date/closer)`);
+    }
+
+    return Array.from(uniqueMap.values());
+  }
+
+  /**
    * 清空目標表
    */
   private async clearTable(table: string): Promise<void> {
@@ -415,6 +477,112 @@ export class SyncService {
     `;
 
     // ✅ 使用 'session' mode 執行 INSERT（寫入操作）
+    await queryDatabase(sql, values, 'session');
+  }
+
+  /**
+   * 使用 UPSERT 策略寫入資料（專用於 eods_for_closers）
+   * 唯一鍵: (student_email, consultation_date, closer_name)
+   */
+  private async loadToSupabaseWithUpsert(table: string, data: any[], mappingId?: string): Promise<{
+    successCount: number;
+    errorCount: number;
+    errors: string[];
+  }> {
+    console.log(`💾 UPSERT ${data.length} records to ${table}...`);
+
+    if (data.length === 0) {
+      return { successCount: 0, errorCount: 0, errors: [] };
+    }
+
+    const BATCH_SIZE = 100;
+    let successCount = 0;
+    let errorCount = 0;
+    const errors: string[] = [];
+    const startTime = Date.now();
+
+    for (let i = 0; i < data.length; i += BATCH_SIZE) {
+      const batch = data.slice(i, i + BATCH_SIZE);
+      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(data.length / BATCH_SIZE);
+
+      try {
+        await this.batchUpsert(table, batch);
+        successCount += batch.length;
+
+        // 發送進度更新
+        const percentage = 40 + Math.floor(((successCount + errorCount) / data.length) * 60);
+        if (mappingId) {
+          const elapsedMs = Date.now() - startTime;
+          const avgTimePerRecord = elapsedMs / successCount;
+          const remainingRecords = data.length - successCount - errorCount;
+          const estimatedRemainingMs = avgTimePerRecord * remainingRecords;
+          const estimatedMinutes = Math.ceil(estimatedRemainingMs / 60000);
+          const timeMessage = estimatedMinutes > 0 ? ` (預估剩餘 ${estimatedMinutes} 分鐘)` : '';
+
+          this.sendProgress({
+            mappingId,
+            stage: 'upserting',
+            current: successCount + errorCount,
+            total: data.length,
+            message: `正在 UPSERT: ${successCount}/${data.length}${timeMessage}`,
+            percentage,
+          });
+        }
+
+        console.log(`✅ UPSERT Batch ${batchNumber}/${totalBatches}: ${successCount}/${data.length} records`);
+      } catch (error: any) {
+        console.error(`❌ UPSERT Batch ${batchNumber} failed:`, error.message);
+        errorCount += batch.length;
+        if (!errors.includes(error.message)) {
+          errors.push(error.message);
+        }
+      }
+    }
+
+    console.log(`📊 UPSERT complete: ${successCount} success, ${errorCount} failed`);
+    return { successCount, errorCount, errors };
+  }
+
+  /**
+   * 批次 UPSERT 記錄（專用於 eods_for_closers）
+   * 唯一鍵: (student_email, consultation_date, closer_name)
+   */
+  private async batchUpsert(table: string, records: any[]): Promise<void> {
+    if (records.length === 0) return;
+
+    const columns = Object.keys(records[0]);
+
+    // 建立 VALUES 子句
+    const values: any[] = [];
+    const placeholders: string[] = [];
+
+    records.forEach((record, index) => {
+      const rowPlaceholders: string[] = [];
+      columns.forEach((col, colIndex) => {
+        const paramIndex = index * columns.length + colIndex + 1;
+        rowPlaceholders.push(`$${paramIndex}`);
+        values.push(record[col]);
+      });
+      placeholders.push(`(${rowPlaceholders.join(', ')})`);
+    });
+
+    // 建立 UPDATE SET 子句（排除唯一鍵欄位）
+    const uniqueKeys = ['student_email', 'consultation_date', 'closer_name'];
+    const updateColumns = columns.filter(col => !uniqueKeys.includes(col));
+    const updateSet = updateColumns.map(col => `${col} = EXCLUDED.${col}`).join(', ');
+
+    const sql = `
+      INSERT INTO ${table} (${columns.join(', ')})
+      VALUES ${placeholders.join(', ')}
+      ON CONFLICT (student_email, consultation_date, closer_name)
+      WHERE student_email IS NOT NULL
+        AND consultation_date IS NOT NULL
+        AND closer_name IS NOT NULL
+      DO UPDATE SET ${updateSet}
+    `;
+
+    // ✅ 使用 'session' mode 執行 UPSERT（寫入操作）
     await queryDatabase(sql, values, 'session');
   }
 

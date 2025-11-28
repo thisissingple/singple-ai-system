@@ -109,7 +109,8 @@ export async function insertAndReturn(
     RETURNING ${returnColumns.join(', ')}
   `;
 
-  const result = await queryDatabase(query, values);
+  // ✅ 使用 'session' mode 執行 INSERT（寫入操作）
+  const result = await queryDatabase(query, values, 'session');
   return result.rows[0];
 }
 
