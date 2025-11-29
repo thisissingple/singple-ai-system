@@ -82,6 +82,10 @@ export interface SalaryCalculationResult {
   commission_deduction_rate?: number;     // 抽成扣減百分比
   requires_interview?: boolean;           // 是否需要約談
 
+  // 老師專用
+  trial_class_fee?: number;           // 體驗課鐘點費
+  teacher_commission?: number;        // 老師業績抽成（自己成交 + 別人成交）
+
   // 小計
   subtotal_before_deductions: number;
 
@@ -98,6 +102,45 @@ export interface SalaryCalculationResult {
   details: {
     revenueByCategory: { [category: string]: number };
     recordCount: number;
+    records?: Array<{
+      date: string;
+      item: string;
+      amount: number;
+      student_name?: string;
+      payment_method?: string;
+      teacher_name?: string;
+      closer?: string;
+      setter?: string;
+      is_self_closed?: boolean;  // 是否自己成交
+      commission_amount?: number; // 該筆抽成金額
+    }>;
+    // 老師業績分類（自己成交 vs 別人成交）
+    self_closed_revenue?: number;      // 自己成交業績總額
+    self_closed_commission?: number;   // 自己成交抽成金額
+    other_closed_revenue?: number;     // 別人成交業績總額
+    other_closed_commission?: number;  // 別人成交抽成金額
+    commission_rate_used?: number;     // 使用的抽成比例（22% 或 23.3%）
+  };
+
+  // 體驗課明細（老師專用）
+  trial_class_details?: {
+    records: Array<{
+      class_date: string;
+      student_name: string;
+      student_email?: string;
+      course_type?: string;       // 課程類型
+      hourly_rate?: number;       // 該堂鐘點費
+    }>;
+    total_classes: number;        // 總堂數（有打卡就算）
+    trial_class_fee: number;      // 體驗課鐘點費總計
+    // 按課程類型統計
+    by_course_type?: {
+      [courseType: string]: {
+        count: number;
+        rate: number;
+        subtotal: number;
+      };
+    };
   };
 }
 
@@ -129,6 +172,44 @@ export class SalaryCalculatorService {
   }
 
   /**
+   * 從 employee_insurance 表讀取員工保險資料
+   * 透過 nickname 或 first_name 來匹配
+   */
+  async getEmployeeInsurance(employeeName: string): Promise<{
+    labor_insurance: number;
+    health_insurance: number;
+    retirement_fund: number;
+  } | null> {
+    const result = await queryDatabase(`
+      SELECT
+        ei.labor_insurance_amount as labor_insurance,
+        ei.health_insurance_amount as health_insurance,
+        ei.pension_employer_amount as retirement_fund
+      FROM employee_insurance ei
+      JOIN users u ON ei.user_id = u.id
+      LEFT JOIN employee_profiles ep ON ei.user_id = ep.user_id
+      WHERE ei.is_active = true
+        AND (
+          ep.nickname = $1
+          OR u.first_name = $1
+          OR CONCAT(u.first_name, ' ', u.last_name) = $1
+          OR TRIM(CONCAT(u.first_name, ' ', COALESCE(u.last_name, ''))) = $1
+        )
+      LIMIT 1
+    `, [employeeName]);
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return {
+      labor_insurance: parseFloat(result.rows[0].labor_insurance || '0'),
+      health_insurance: parseFloat(result.rows[0].health_insurance || '0'),
+      retirement_fund: parseFloat(result.rows[0].retirement_fund || '0'),
+    };
+  }
+
+  /**
    * 獲取員工上一次的績效記錄（用於計算連續滿分）
    */
   async getLastPerformanceRecord(employeeName: string): Promise<{
@@ -152,6 +233,130 @@ export class SalaryCalculatorService {
     return {
       performance_score: result.rows[0].performance_score || 10,
       consecutive_full_score_count: result.rows[0].consecutive_full_score_count || 0,
+    };
+  }
+
+  /**
+   * 根據課程類型決定體驗課鐘點費
+   * - 不指定一對一 / 初學專案：600
+   * - 高音終極方程式：500
+   * - 高音pro：300
+   */
+  private getTrialClassHourlyRate(courseType: string | null): number {
+    if (!courseType) return 300; // 預設
+
+    const lowerCourseType = courseType.toLowerCase();
+
+    // 不指定一對一 / 初學專案：600
+    if (lowerCourseType.includes('不指定') ||
+        lowerCourseType.includes('一對一') ||
+        lowerCourseType.includes('初學') ||
+        lowerCourseType.includes('專案')) {
+      return 600;
+    }
+
+    // 高音終極方程式：500
+    if (lowerCourseType.includes('高音終極') ||
+        lowerCourseType.includes('終極方程式')) {
+      return 500;
+    }
+
+    // 高音pro：300
+    if (lowerCourseType.includes('高音pro') ||
+        lowerCourseType.includes('高音 pro')) {
+      return 300;
+    }
+
+    return 300; // 預設
+  }
+
+  /**
+   * 查詢老師的體驗課明細（從 trial_class_attendance 表）
+   * 根據學生購買的課程類型計算不同鐘點費
+   */
+  async getTrialClassDetails(
+    employeeName: string,
+    periodStart: string,
+    periodEnd: string
+  ): Promise<{
+    records: Array<{
+      class_date: string;
+      student_name: string;
+      student_email?: string;
+      course_type?: string;
+      hourly_rate?: number;
+    }>;
+    total_classes: number;
+    trial_class_fee: number;
+    by_course_type?: {
+      [courseType: string]: {
+        count: number;
+        rate: number;
+        subtotal: number;
+      };
+    };
+  }> {
+    const firstNameOnly = employeeName.split(' ')[0];
+
+    // 查詢體驗課打卡記錄，並聯結購買記錄取得課程類型
+    const result = await queryDatabase(`
+      SELECT
+        tca.class_date,
+        tca.student_name,
+        tca.student_email,
+        tca.is_showed,
+        tcp.package_name as course_type
+      FROM trial_class_attendance tca
+      LEFT JOIN trial_class_purchases tcp
+        ON tca.student_email = tcp.student_email
+      WHERE (tca.teacher_name = $1 OR tca.teacher_name ILIKE $4)
+        AND tca.class_date >= $2
+        AND tca.class_date <= $3
+      ORDER BY tca.class_date DESC
+    `, [employeeName, periodStart, periodEnd, `%${firstNameOnly}%`]);
+
+    // 按課程類型統計
+    const byCourseType: {
+      [courseType: string]: {
+        count: number;
+        rate: number;
+        subtotal: number;
+      };
+    } = {};
+
+    const records = result.rows.map(row => {
+      const courseType = row.course_type || '未知';
+      const hourlyRate = this.getTrialClassHourlyRate(row.course_type);
+
+      // 有打卡記錄就算鐘點費（不用判斷出席）
+      if (!byCourseType[courseType]) {
+        byCourseType[courseType] = { count: 0, rate: hourlyRate, subtotal: 0 };
+      }
+      byCourseType[courseType].count++;
+      byCourseType[courseType].subtotal += hourlyRate;
+
+      return {
+        class_date: row.class_date,
+        student_name: row.student_name || '',
+        student_email: row.student_email,
+        course_type: courseType,
+        hourly_rate: hourlyRate,
+      };
+    });
+
+    const totalClasses = records.length;
+
+    // 計算總鐘點費（按課程類型加總）
+    let trialClassFee = 0;
+    Object.values(byCourseType).forEach(item => {
+      trialClassFee += item.subtotal;
+    });
+
+    return {
+      records,
+      total_classes: totalClasses,
+      trial_class_fee: trialClassFee,
+      by_course_type: byCourseType,
     };
   }
 
@@ -254,6 +459,13 @@ export class SalaryCalculatorService {
       throw new Error(`找不到員工 ${employeeName} 的薪資設定`);
     }
 
+    // 1.5 從 employee_insurance 表獲取勞健保資料（覆蓋 setting 中的值）
+    const insuranceData = await this.getEmployeeInsurance(employeeName);
+    const laborInsurance = insuranceData?.labor_insurance ?? parseFloat(String(setting.labor_insurance)) ?? 0;
+    const healthInsurance = insuranceData?.health_insurance ?? parseFloat(String(setting.health_insurance)) ?? 0;
+    const retirementFund = insuranceData?.retirement_fund ?? parseFloat(String(setting.retirement_fund)) ?? 0;
+    const serviceFee = parseFloat(String(setting.service_fee)) ?? 0;
+
     // 2. 計算業績 (根據角色類型)
     const revenueData = await this.calculateRevenue(
       employeeName,
@@ -319,21 +531,51 @@ export class SalaryCalculatorService {
     // 舊版績效獎金（手動輸入，如果新系統沒啟用則使用這個）
     const legacyPerformanceBonus = !performanceBonusResult ? (manualAdjustments?.performance_bonus || 0) : 0;
 
-    const subtotal =
-      baseAmount +
-      totalCommissionAdjusted +
-      parseFloat(String(pointContribution)) +
-      (manualAdjustments?.phone_performance_bonus || 0) +
-      totalPerformanceBonus +  // 新系統績效獎金
-      legacyPerformanceBonus - // 舊版手動績效獎金（二者只會有一個生效）
-      (manualAdjustments?.leave_deduction || 0);
+    // 9.5 如果是老師，查詢體驗課明細（根據課程類型計算不同鐘點費）
+    let trialClassDetails = undefined;
+    let trialClassFee = 0;
+    if (setting.role_type === 'teacher') {
+      trialClassDetails = await this.getTrialClassDetails(
+        employeeName,
+        periodStart,
+        periodEnd
+      );
+      trialClassFee = trialClassDetails.trial_class_fee;
+    }
 
-    // 10. 計算扣除項後的最終薪資
-    const totalDeductions =
-      parseFloat(String(setting.labor_insurance)) +
-      parseFloat(String(setting.health_insurance)) +
-      parseFloat(String(setting.retirement_fund)) +
-      parseFloat(String(setting.service_fee));
+    // 9.6 老師業績抽成（自己成交 + 別人成交，取代舊的統一抽成計算）
+    let teacherCommission = 0;
+    if (setting.role_type === 'teacher') {
+      teacherCommission = (revenueData.self_closed_commission || 0) + (revenueData.other_closed_commission || 0);
+    }
+
+    // 計算小計（老師使用新的業績抽成和體驗課鐘點費）
+    let subtotal = 0;
+    if (setting.role_type === 'teacher') {
+      // 老師：底薪 + 業績抽成（自己+別人成交）+ 體驗課鐘點費 + 績效獎金 - 請假扣款
+      subtotal =
+        baseAmount +
+        teacherCommission +  // 使用新的業績抽成（自己成交 + 別人成交）
+        trialClassFee +      // 體驗課鐘點費
+        parseFloat(String(pointContribution)) +
+        (manualAdjustments?.phone_performance_bonus || 0) +
+        totalPerformanceBonus +
+        legacyPerformanceBonus -
+        (manualAdjustments?.leave_deduction || 0);
+    } else {
+      // 其他角色：使用舊的抽成計算
+      subtotal =
+        baseAmount +
+        totalCommissionAdjusted +
+        parseFloat(String(pointContribution)) +
+        (manualAdjustments?.phone_performance_bonus || 0) +
+        totalPerformanceBonus +
+        legacyPerformanceBonus -
+        (manualAdjustments?.leave_deduction || 0);
+    }
+
+    // 10. 計算扣除項後的最終薪資（使用從 employee_insurance 表讀取的資料）
+    const totalDeductions = laborInsurance + healthInsurance + retirementFund + serviceFee;
 
     const totalSalary = subtotal - totalDeductions;
 
@@ -377,12 +619,17 @@ export class SalaryCalculatorService {
       commission_deduction_rate: performanceBonusResult?.commission_deduction_rate,
       requires_interview: performanceBonusResult?.requires_interview,
 
+      // 老師專用
+      trial_class_fee: setting.role_type === 'teacher' ? trialClassFee : undefined,
+      teacher_commission: setting.role_type === 'teacher' ? teacherCommission : undefined,
+
       subtotal_before_deductions: subtotal,
 
-      labor_insurance: setting.labor_insurance,
-      health_insurance: setting.health_insurance,
-      retirement_fund: setting.retirement_fund,
-      service_fee: setting.service_fee,
+      // 使用從 employee_insurance 表讀取的保險資料
+      labor_insurance: laborInsurance,
+      health_insurance: healthInsurance,
+      retirement_fund: retirementFund,
+      service_fee: serviceFee,
 
       total_salary: totalSalary,
 
@@ -390,12 +637,22 @@ export class SalaryCalculatorService {
         revenueByCategory: revenueData.byCategory,
         recordCount: revenueData.recordCount,
         records: revenueData.records,
+        // 老師業績分類
+        self_closed_revenue: revenueData.self_closed_revenue,
+        self_closed_commission: revenueData.self_closed_commission,
+        other_closed_revenue: revenueData.other_closed_revenue,
+        other_closed_commission: revenueData.other_closed_commission,
+        commission_rate_used: revenueData.commission_rate_used,
       },
+
+      // 體驗課明細（老師專用）
+      trial_class_details: trialClassDetails,
     };
   }
 
   /**
    * 計算員工業績 (根據角色類型從 income_expense_records 計算)
+   * 老師業績分為：自己成交 vs 別人成交，抽成比例不同
    */
   private async calculateRevenue(
     employeeName: string,
@@ -415,7 +672,15 @@ export class SalaryCalculatorService {
       teacher_name?: string;
       closer?: string;
       setter?: string;
+      is_self_closed?: boolean;
+      commission_amount?: number;
     }>;
+    // 老師業績分類
+    self_closed_revenue?: number;
+    self_closed_commission?: number;
+    other_closed_revenue?: number;
+    other_closed_commission?: number;
+    commission_rate_used?: number;
   }> {
     let query = '';
     let params: any[] = [];
@@ -426,7 +691,7 @@ export class SalaryCalculatorService {
 
       switch (roleType) {
         case 'teacher':
-          // 教練：查詢 teacher_name（支援完全匹配或名字匹配）
+          // 教練：查詢 teacher_name 或 income_item 包含名字（支援完全匹配或名字匹配）
           query = `
             SELECT
               transaction_date,
@@ -438,7 +703,11 @@ export class SalaryCalculatorService {
               closer,
               setter
             FROM income_expense_records
-            WHERE (teacher_name = $1 OR teacher_name ILIKE $4)
+            WHERE (
+              teacher_name = $1
+              OR teacher_name ILIKE $4
+              OR income_item ILIKE $4
+            )
               AND transaction_date >= $2
               AND transaction_date <= $3
               AND transaction_category = '收入'
@@ -509,7 +778,13 @@ export class SalaryCalculatorService {
         teacher_name?: string;
         closer?: string;
         setter?: string;
+        is_self_closed?: boolean;
+        commission_amount?: number;
       }> = [];
+
+      // 老師業績分類（自己成交 vs 別人成交）
+      let selfClosedRevenue = 0;
+      let otherClosedRevenue = 0;
 
       result.rows.forEach(row => {
         const amount = parseFloat(row.amount_twd || 0);
@@ -518,6 +793,27 @@ export class SalaryCalculatorService {
         // 彙總分類業績
         const category = row.income_item || '未分類';
         byCategory[category] = (byCategory[category] || 0) + amount;
+
+        // 判斷是否自己成交（老師專用）
+        // closer 欄位如果是老師本人的名字或代號，則為自己成交
+        let isSelfClosed = false;
+        if (roleType === 'teacher') {
+          const closer = (row.closer || '').toLowerCase().trim();
+          const teacherNameLower = employeeName.toLowerCase().trim();
+          const firstNameLower = firstNameOnly.toLowerCase().trim();
+
+          // 判斷 closer 是否為老師本人
+          isSelfClosed = closer === teacherNameLower ||
+                         closer === firstNameLower ||
+                         closer.includes(firstNameLower) ||
+                         firstNameLower.includes(closer);
+
+          if (isSelfClosed) {
+            selfClosedRevenue += amount;
+          } else {
+            otherClosedRevenue += amount;
+          }
+        }
 
         // 記錄每筆詳細資訊
         records.push({
@@ -529,14 +825,45 @@ export class SalaryCalculatorService {
           teacher_name: row.teacher_name,
           closer: row.closer,
           setter: row.setter,
+          is_self_closed: roleType === 'teacher' ? isSelfClosed : undefined,
         });
       });
+
+      // 計算老師抽成（只有老師角色才計算）
+      let selfClosedCommission = 0;
+      let otherClosedCommission = 0;
+      let commissionRateUsed = 0;
+
+      if (roleType === 'teacher') {
+        // 自己成交：22% 或 23.3%（月業績 > 70萬）
+        commissionRateUsed = selfClosedRevenue > 700000 ? 0.233 : 0.22;
+        selfClosedCommission = Math.round(selfClosedRevenue * commissionRateUsed);
+
+        // 別人成交：固定比例抽成（約 16.13%，即 150000 -> 24200）
+        const otherClosedRate = 24200 / 150000; // ≈ 0.1613
+        otherClosedCommission = Math.round(otherClosedRevenue * otherClosedRate);
+
+        // 更新每筆記錄的抽成金額
+        records.forEach(record => {
+          if (record.is_self_closed === true) {
+            record.commission_amount = Math.round(record.amount * commissionRateUsed);
+          } else if (record.is_self_closed === false) {
+            record.commission_amount = Math.round(record.amount * otherClosedRate);
+          }
+        });
+      }
 
       return {
         total_revenue: totalRevenue,
         byCategory,
         recordCount: records.length,
         records,
+        // 老師業績分類
+        self_closed_revenue: roleType === 'teacher' ? selfClosedRevenue : undefined,
+        self_closed_commission: roleType === 'teacher' ? selfClosedCommission : undefined,
+        other_closed_revenue: roleType === 'teacher' ? otherClosedRevenue : undefined,
+        other_closed_commission: roleType === 'teacher' ? otherClosedCommission : undefined,
+        commission_rate_used: roleType === 'teacher' ? commissionRateUsed : undefined,
       };
   }
 

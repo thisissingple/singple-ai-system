@@ -32,10 +32,12 @@ interface MappingConfig {
  * 配置結構：
  * - uniqueKeys: 唯一鍵欄位陣列
  * - allowNullKeys: 是否允許 NULL 參與唯一性（預設 false）
+ * - indexName: 可選，partial unique index 的名稱（使用 ON CONFLICT ON CONSTRAINT）
  */
 interface UpsertConfig {
   uniqueKeys: string[];           // 唯一鍵欄位
   allowNullKeys: boolean;         // 是否允許唯一鍵為 NULL（使用 partial index）
+  indexName?: string;             // 🔑 Partial index 名稱（必要時使用）
 }
 
 export interface SyncProgress {
@@ -337,6 +339,66 @@ export class SyncService {
   }
 
   /**
+   * 🔑 正規化唯一鍵值，確保相同的資料會有相同的 key
+   *
+   * 問題背景：
+   * Google Sheets 中的資料可能有不同格式，例如：
+   * - 日期: "2025-10-15" vs "2025/10/15" vs "2025年10月15日"
+   * - Email: "Test@Gmail.com" vs "test@gmail.com"
+   * 這些在 JavaScript 字串比較中是不同的，但在 PostgreSQL 中會被解析成相同值。
+   * 如果不正規化，會導致相同的記錄被當作不同的記錄，最終觸發 UPSERT 錯誤。
+   *
+   * 支援的欄位類型：
+   * - 日期欄位（欄位名稱包含 "date"）：正規化為 YYYY-MM-DD
+   * - Email 欄位（欄位名稱包含 "email"）：轉小寫、去除前後空白
+   * - 其他欄位：去除前後空白
+   */
+  private normalizeKeyValue(value: any, fieldName: string): string {
+    if (value === null || value === undefined || value === '') {
+      return 'NULL';
+    }
+
+    const strValue = String(value).trim();
+    const lowerFieldName = fieldName.toLowerCase();
+
+    // 1. Email 欄位：轉小寫（PostgreSQL CITEXT 或一般比較通常不分大小寫）
+    if (lowerFieldName.includes('email')) {
+      return strValue.toLowerCase();
+    }
+
+    // 2. 日期欄位：正規化為 YYYY-MM-DD 格式
+    if (lowerFieldName.includes('date')) {
+      const datePatterns: Array<{ pattern: RegExp; parts: string[] }> = [
+        // ISO format: 2025-10-15 or 2025-10-15T00:00:00
+        { pattern: /^(\d{4})-(\d{1,2})-(\d{1,2})/, parts: ['year', 'month', 'day'] },
+        // Slash format: 2025/10/15
+        { pattern: /^(\d{4})\/(\d{1,2})\/(\d{1,2})/, parts: ['year', 'month', 'day'] },
+        // Chinese format: 2025年10月15日
+        { pattern: /^(\d{4})年(\d{1,2})月(\d{1,2})日/, parts: ['year', 'month', 'day'] },
+        // US format: 10/15/2025
+        { pattern: /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/, parts: ['month', 'day', 'year'] },
+        // Dash format with day first: 15-10-2025 (歐洲格式)
+        { pattern: /^(\d{1,2})-(\d{1,2})-(\d{4})$/, parts: ['day', 'month', 'year'] },
+      ];
+
+      for (const { pattern, parts } of datePatterns) {
+        const match = strValue.match(pattern);
+        if (match) {
+          const values: { [key: string]: string } = {};
+          parts.forEach((part, i) => {
+            values[part] = match[i + 1];
+          });
+          // 正規化為 YYYY-MM-DD
+          return `${values.year}-${values.month.padStart(2, '0')}-${values.day.padStart(2, '0')}`;
+        }
+      }
+    }
+
+    // 3. 其他欄位：直接返回 trim 後的值
+    return strValue;
+  }
+
+  /**
    * 🔑 通用資料去重方法（根據 UPSERT 配置）
    *
    * 去重策略：
@@ -352,18 +414,21 @@ export class SyncService {
     const incompleteKeyRecords: any[] = [];
 
     for (const record of data) {
-      // 建立唯一鍵值
+      // 建立唯一鍵值（正規化處理）
       const keyValues = config.uniqueKeys.map(key => record[key]);
+      const normalizedKeyValues = config.uniqueKeys.map(key =>
+        this.normalizeKeyValue(record[key], key)
+      );
       const hasAllKeys = keyValues.every(v => v !== null && v !== undefined && v !== '');
 
       if (config.allowNullKeys) {
         // 允許 NULL：用完整 key 組合去重（包含 NULL 值）
-        const key = keyValues.map(v => v ?? 'NULL').join('|');
+        const key = normalizedKeyValues.join('|');
         uniqueMap.set(key, record);
       } else {
         // 不允許 NULL (partial index)：只保留完整 key 的記錄
         if (hasAllKeys) {
-          const key = keyValues.join('|');
+          const key = normalizedKeyValues.join('|');
           uniqueMap.set(key, record);
         } else {
           incompleteKeyRecords.push(record);
@@ -375,6 +440,43 @@ export class SyncService {
     if (incompleteKeyRecords.length > 0) {
       console.log(`⚠️ Skipped ${incompleteKeyRecords.length} records with incomplete key`);
       console.log(`   Required keys: ${config.uniqueKeys.join(', ')}`);
+    }
+
+    return Array.from(uniqueMap.values());
+  }
+
+  /**
+   * 🔑 Batch 層級去重（使用正規化 key）
+   *
+   * 用於避免同一 batch 內有重複 key 導致 PostgreSQL 報錯：
+   * "ON CONFLICT DO UPDATE command cannot affect row a second time"
+   *
+   * @param records Batch 內的記錄
+   * @param config UPSERT 配置
+   * @returns 去重後的記錄
+   */
+  private deduplicateBatch(records: any[], config: UpsertConfig): any[] {
+    const uniqueMap = new Map<string, any>();
+    let duplicateCount = 0;
+
+    for (const record of records) {
+      // 建立正規化的唯一鍵值
+      const normalizedKey = config.uniqueKeys.map(fieldName =>
+        this.normalizeKeyValue(record[fieldName], fieldName)
+      ).join('|');
+
+      if (uniqueMap.has(normalizedKey)) {
+        duplicateCount++;
+        // 記錄首個發現的重複
+        if (duplicateCount === 1) {
+          console.log(`   🔍 First duplicate key found (normalized): ${normalizedKey}`);
+        }
+      }
+      uniqueMap.set(normalizedKey, record);  // 後面的會覆蓋前面的
+    }
+
+    if (duplicateCount > 0) {
+      console.log(`   📊 Batch dedup: removed ${duplicateCount} duplicates from ${records.length} records`);
     }
 
     return Array.from(uniqueMap.values());
@@ -599,13 +701,21 @@ export class SyncService {
   private async batchUpsert(table: string, records: any[], config: UpsertConfig): Promise<void> {
     if (records.length === 0) return;
 
-    const columns = Object.keys(records[0]);
+    // 🔑 在 batch 層級再次去重，避免 "ON CONFLICT DO UPDATE command cannot affect row a second time" 錯誤
+    const uniqueRecords = this.deduplicateBatch(records, config);
+    if (uniqueRecords.length < records.length) {
+      console.log(`   ⚠️ Batch deduplicated: ${records.length} → ${uniqueRecords.length} records`);
+    }
+
+    if (uniqueRecords.length === 0) return;
+
+    const columns = Object.keys(uniqueRecords[0]);
 
     // 建立 VALUES 子句
     const values: any[] = [];
     const placeholders: string[] = [];
 
-    records.forEach((record, index) => {
+    uniqueRecords.forEach((record, index) => {
       const rowPlaceholders: string[] = [];
       columns.forEach((col, colIndex) => {
         const paramIndex = index * columns.length + colIndex + 1;
@@ -622,15 +732,19 @@ export class SyncService {
       : columns[0] + ' = EXCLUDED.' + columns[0];  // 至少要有一個 UPDATE 欄位
 
     // 🔑 根據配置建立 ON CONFLICT 子句
+    // PostgreSQL partial unique index 需要使用 ON CONFLICT (columns) WHERE 條件
     const conflictKeys = config.uniqueKeys.join(', ');
-    let conflictClause = `ON CONFLICT (${conflictKeys})`;
+    let conflictClause: string;
 
-    // 如果不允許 NULL，需要加上 WHERE 條件（partial index）
-    if (!config.allowNullKeys) {
+    if (config.allowNullKeys) {
+      // 普通唯一約束（不排除 NULL）
+      conflictClause = `ON CONFLICT (${conflictKeys})`;
+    } else {
+      // 🔑 Partial unique index：需要加上 WHERE 條件
       const whereConditions = config.uniqueKeys
         .map(key => `${key} IS NOT NULL`)
         .join(' AND ');
-      conflictClause += `\n      WHERE ${whereConditions}`;
+      conflictClause = `ON CONFLICT (${conflictKeys})\n      WHERE ${whereConditions}`;
     }
 
     const sql = `
