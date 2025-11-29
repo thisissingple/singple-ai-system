@@ -14,7 +14,10 @@ import { reportMetricConfigService } from "./services/reporting/report-metric-co
 import { formulaEngine } from "./services/reporting/formula-engine";
 import { getAvailableFormulaVariables } from "../configs/report-metric-defaults";
 import { getSupabaseClient, isSupabaseAvailable } from "./services/supabase-client";
-import { createPool, insertAndReturn, queryDatabase } from "./services/pg-client";
+import { getSharedPool, insertAndReturn, queryDatabase } from "./services/pg-client";
+
+// 使用共享連線池（不再每次調用 pool.end()）
+const createPool = () => getSharedPool();
 import {
   insertSpreadsheetSchema,
   insertWorksheetSchema,
@@ -7005,7 +7008,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({
         success: true,
@@ -7207,7 +7210,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         WHERE id = $3
       `, [executionNotes || null, req.user.id, logId]);
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({ success: true });
     } catch (error: any) {
@@ -7288,7 +7291,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         WHERE id = $4
       `, [nextAnalysisId, effectiveness.effectivenessScore, effectiveness.evidence, logId]);
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({
         success: true,
@@ -7340,7 +7343,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         WHERE id = $2
       `, [JSON.stringify(conversionSuggestion), id]);
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({
         success: true,
@@ -7392,7 +7395,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         LIMIT 10
       `, [teacherId]);
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({
         success: true,
@@ -7415,7 +7418,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await queryDatabase(pool, `DELETE FROM teaching_quality_analysis WHERE id = $1`, [id]);
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({ success: true });
     } catch (error: any) {
@@ -7635,12 +7638,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
             '[]'::json
           ) as business_identities,
 
-          -- 目前薪資
-          ec.base_salary,
-          ec.commission_type,
-          ec.commission_config,
+          -- 目前薪資（從 employee_salary_settings 讀取）
+          ess.base_salary,
+          ess.commission_rate,
+          ess.role_type as salary_role_type,
+          ess.employment_type as salary_employment_type,
+          ess.hourly_rate,
+          ess.point_commission_rate,
+          ess.performance_bonus,
+          ess.phone_bonus_rate,
+          ess.original_bonus,
+          ess.labor_insurance as salary_labor_insurance,
+          ess.health_insurance as salary_health_insurance,
+          ess.retirement_fund,
+          ess.service_fee,
 
-          -- 目前勞健保
+          -- 目前勞健保（保留原本的保險等級資訊）
           ei.labor_insurance_grade,
           ei.health_insurance_grade,
           ei.pension_employer_rate
@@ -7648,13 +7661,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         FROM users u
         LEFT JOIN employee_profiles ep ON ep.user_id = u.id
         LEFT JOIN business_identities bi ON bi.user_id = u.id AND bi.is_active = true
-        LEFT JOIN employee_compensation ec ON ec.user_id = u.id AND ec.is_active = true
+        LEFT JOIN employee_salary_settings ess ON ess.employee_name = CONCAT(u.first_name, ' ', u.last_name) AND ess.is_active = true
         LEFT JOIN employee_insurance ei ON ei.user_id = u.id AND ei.is_active = true
-        GROUP BY u.id, ep.id, ec.id, ei.id
+        GROUP BY u.id, ep.id, ess.id, ei.id
         ORDER BY u.created_at DESC
       `);
 
-      res.json({ success: true, employees: result.rows });
+      res.json({ success: true, data: result.rows });
     } catch (error: any) {
       console.error('取得員工列表失敗:', error);
       res.status(500).json({ success: false, error: error.message });
@@ -7685,21 +7698,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
             '[]'::json
           ) as business_identities,
 
-          -- 薪資歷史（所有記錄）
-          COALESCE(
-            json_agg(
-              DISTINCT jsonb_build_object(
-                'id', ec.id,
-                'base_salary', ec.base_salary,
-                'commission_type', ec.commission_type,
-                'commission_config', ec.commission_config,
-                'effective_from', ec.effective_from,
-                'effective_to', ec.effective_to,
-                'is_active', ec.is_active
-              )
-            ) FILTER (WHERE ec.id IS NOT NULL),
-            '[]'::json
-          ) as compensation_history,
+          -- 目前薪資設定（從 employee_salary_settings）
+          ess.id as salary_setting_id,
+          ess.base_salary,
+          ess.commission_rate,
+          ess.role_type as salary_role_type,
+          ess.employment_type as salary_employment_type,
+          ess.hourly_rate,
+          ess.point_commission_rate,
+          ess.performance_bonus,
+          ess.phone_bonus_rate,
+          ess.original_bonus,
+          ess.labor_insurance as salary_labor_insurance,
+          ess.health_insurance as salary_health_insurance,
+          ess.retirement_fund,
+          ess.service_fee,
+          ess.notes as salary_notes,
+          ess.updated_at as salary_updated_at,
 
           -- 勞健保歷史
           COALESCE(
@@ -7720,10 +7735,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         FROM users u
         LEFT JOIN employee_profiles ep ON ep.user_id = u.id
         LEFT JOIN business_identities bi ON bi.user_id = u.id
-        LEFT JOIN employee_compensation ec ON ec.user_id = u.id
+        LEFT JOIN employee_salary_settings ess ON ess.employee_name = CONCAT(u.first_name, ' ', u.last_name) AND ess.is_active = true
         LEFT JOIN employee_insurance ei ON ei.user_id = u.id
         WHERE u.id = $1
-        GROUP BY u.id, ep.id
+        GROUP BY u.id, ep.id, ess.id
       `, [id]);
 
       if (result.rows.length === 0) {
@@ -7987,6 +8002,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         adjustment_reason,
       } = req.body;
 
+      // 先取得員工姓名和聘用類型（用於 employee_salary_settings）
+      const userResult = await queryDatabase(`
+        SELECT
+          u.first_name,
+          u.last_name,
+          ep.employment_type,
+          bi.identity_type
+        FROM users u
+        LEFT JOIN employee_profiles ep ON ep.user_id = u.id
+        LEFT JOIN business_identities bi ON bi.user_id = u.id AND bi.is_active = true
+        WHERE u.id = $1
+        LIMIT 1
+      `, [userId]);
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ success: false, error: '找不到該員工' });
+      }
+
+      const user = userResult.rows[0];
+      const employeeName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || userId;
+
+      // 根據業務身份判斷角色類型
+      let roleType = 'teacher';
+      if (user.identity_type === 'consultant') {
+        roleType = 'closer';
+      } else if (user.identity_type === 'setter') {
+        roleType = 'setter';
+      }
+
+      // 計算抽成比例（從 commission_config 提取）
+      let commissionRate = 0;
+      if (commission_config && typeof commission_config === 'object') {
+        if (commission_config.rate) {
+          commissionRate = commission_config.rate * 100; // 轉換為百分比
+        }
+      }
+
       // 先將目前的薪資設定標記為歷史
       await queryDatabase(`
         UPDATE employee_compensation
@@ -8019,6 +8071,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
         effective_from || new Date().toISOString().split('T')[0],
         adjustment_reason || null,
       ]);
+
+      // === 同步寫入 employee_salary_settings（薪資計算器用） ===
+      await queryDatabase(`
+        INSERT INTO employee_salary_settings (
+          employee_name,
+          role_type,
+          employment_type,
+          base_salary,
+          commission_rate,
+          is_active,
+          notes,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, true, $6, NOW())
+        ON CONFLICT (employee_name)
+        DO UPDATE SET
+          role_type = EXCLUDED.role_type,
+          employment_type = EXCLUDED.employment_type,
+          base_salary = EXCLUDED.base_salary,
+          commission_rate = EXCLUDED.commission_rate,
+          is_active = true,
+          notes = EXCLUDED.notes,
+          updated_at = NOW()
+      `, [
+        employeeName,
+        roleType,
+        user.employment_type || 'full_time',
+        base_salary || 0,
+        commissionRate,
+        adjustment_reason || `從員工管理同步 ${new Date().toLocaleDateString('zh-TW')}`,
+      ]);
+
+      console.log(`[薪資設定] 已同步到 employee_salary_settings: ${employeeName}`);
 
       res.json({ success: true, compensation: result.rows[0] });
     } catch (error: any) {
@@ -8614,7 +8699,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       console.log('✅ GoHighLevel contact 已儲存:', contactId);
 
@@ -8698,7 +8783,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `;
       const dataResult = await queryDatabase(pool, dataQuery, [...params, limitNum, offset]);
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({
         success: true,
@@ -8729,7 +8814,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         [id]
       );
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: '找不到此聯絡人' });
@@ -8778,7 +8863,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
          ORDER BY count DESC`
       );
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({
         success: true,
@@ -9752,7 +9837,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         WHERE id = $1
       `, [userId]);
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'User not found' });
@@ -9851,7 +9936,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           last_name
       `);
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({
         success: true,
@@ -9899,18 +9984,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 計算薪資 (核心功能)
   app.post('/api/salary/calculate', async (req, res) => {
     try {
-      const { employee_name, period_start, period_end, manual_adjustments } = req.body;
+      const { employee_name, period_start, period_end, performance_score, manual_adjustments } = req.body;
 
       if (!employee_name || !period_start || !period_end) {
         return res.status(400).json({ error: '缺少必要參數' });
       }
+
+      // 將 performance_score 合併到 manual_adjustments
+      const adjustments = {
+        ...manual_adjustments,
+        performance_score: performance_score,
+      };
 
       const { salaryCalculatorService } = await import('./services/salary-calculator-service');
       const result = await salaryCalculatorService.calculateSalary(
         employee_name,
         period_start,
         period_end,
-        manual_adjustments
+        adjustments
       );
 
       res.json({ success: true, data: result });

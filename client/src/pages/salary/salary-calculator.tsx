@@ -32,6 +32,7 @@ interface EmployeeSetting {
   health_insurance: number;
   retirement_fund: number;
   service_fee: number;
+  has_performance_bonus?: boolean;  // 是否有績效獎金資格
 }
 
 interface SalaryResult {
@@ -55,6 +56,15 @@ interface SalaryResult {
   phone_performance_bonus?: number;
   performance_bonus?: number;
   leave_deduction?: number;
+  // 績效獎金系統（新）
+  has_performance_bonus?: boolean;
+  performance_score?: number;
+  base_performance_bonus?: number;
+  consecutive_full_score_count?: number;
+  consecutive_bonus?: number;
+  total_performance_bonus?: number;
+  commission_deduction_rate?: number;
+  requires_interview?: boolean;
   subtotal_before_deductions: number;
   labor_insurance: number;
   health_insurance: number;
@@ -119,6 +129,9 @@ export default function SalaryCalculator() {
   const [monthlyHours, setMonthlyHours] = useState<number>(0);
   const [hourlyRate, setHourlyRate] = useState<number>(190);
 
+  // 績效獎金系統
+  const [performanceScore, setPerformanceScore] = useState<number>(10);
+
   // 業績獎金明細相關欄位
   const [teacherCommissionRate, setTeacherCommissionRate] = useState<number>(0);
   const [phoneCommissionRate, setPhoneCommissionRate] = useState<number>(1);
@@ -168,6 +181,7 @@ export default function SalaryCalculator() {
           employee_name: selectedEmployee,
           period_start: periodStart,
           period_end: periodEnd,
+          performance_score: performanceScore,
           manual_adjustments: {
             performance_percentage: performancePercentage,
             phone_performance_bonus: phoneBonus,
@@ -260,13 +274,17 @@ export default function SalaryCalculator() {
       performanceAmount = hourlyWorkHours * hourlyWorkRate;
     }
 
+    // 績效獎金系統獎金
+    const performanceBonusAmount = toNumber(result.total_performance_bonus);
+
     // 小計（未加保薪資）
     const subtotal =
       baseAmount +
       performanceAmount +
       otherBonus +
       phoneBonus +
-      performanceBonus -
+      performanceBonus +
+      performanceBonusAmount -
       leaveDeduction;
 
     // 最終薪資
@@ -378,9 +396,37 @@ export default function SalaryCalculator() {
     }
 
     try {
+      // 在截圖前，將所有 input 的值設置為 value 屬性，這樣 html2canvas 才能正確捕捉
+      const inputs = salaryTableRef.current.querySelectorAll('input');
+      const originalValues: { input: HTMLInputElement; originalValue: string }[] = [];
+
+      inputs.forEach((input) => {
+        originalValues.push({ input, originalValue: input.getAttribute('value') || '' });
+        input.setAttribute('value', input.value);
+      });
+
       const canvas = await html2canvas(salaryTableRef.current, {
         backgroundColor: '#ffffff',
         scale: 2,
+        onclone: (clonedDoc) => {
+          // 在克隆的文檔中，確保 input 顯示正確的值
+          const clonedInputs = clonedDoc.querySelectorAll('input');
+          clonedInputs.forEach((input) => {
+            // 將 input 替換為顯示值的 span
+            const span = clonedDoc.createElement('span');
+            span.textContent = input.value;
+            span.style.cssText = window.getComputedStyle(input).cssText;
+            span.style.display = 'inline-block';
+            span.style.border = 'none';
+            span.style.background = 'transparent';
+            input.parentNode?.replaceChild(span, input);
+          });
+        },
+      });
+
+      // 恢復原始值
+      originalValues.forEach(({ input, originalValue }) => {
+        input.setAttribute('value', originalValue);
       });
 
       canvas.toBlob((blob) => {
@@ -749,14 +795,111 @@ export default function SalaryCalculator() {
                     </td>
                   </tr>
 
-                  {/* 績效區塊 */}
+                  {/* 績效獎金系統區塊 - 只有有資格的員工才顯示 */}
+                  {displayResult.has_performance_bonus && (
+                    <>
+                      <tr className="border-t-4 border-indigo-500 bg-gradient-to-r from-indigo-50 to-purple-50">
+                        <td className="p-4 font-bold text-center text-indigo-900" colSpan={4}>
+                          🏆 績效獎金系統
+                        </td>
+                      </tr>
+                      <tr className="border-t">
+                        <td className="p-3 font-medium bg-muted/30">當月績效分數</td>
+                        <td className="p-3 text-right" colSpan={3}>
+                          <div className="flex items-center justify-end gap-2">
+                            <Select
+                              value={performanceScore.toString()}
+                              onValueChange={(v) => setPerformanceScore(Number(v))}
+                            >
+                              <SelectTrigger className="w-24">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((score) => (
+                                  <SelectItem key={score} value={score.toString()}>
+                                    {score} 分
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <span className="text-sm text-muted-foreground">
+                              {performanceScore >= 8 ? '😊' : performanceScore >= 6 ? '😐' : '😰'}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                      {displayResult.performance_score !== undefined && (
+                        <>
+                          <tr className="border-t">
+                            <td className="p-3 font-medium bg-muted/30">基本績效獎金</td>
+                            <td className="p-3 text-right font-semibold text-green-600" colSpan={3}>
+                              {formatCurrency(displayResult.base_performance_bonus || 0)}
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {displayResult.performance_score >= 8 && '(8-10分: $2,000)'}
+                                {displayResult.performance_score === 7 && '(7分: $1,000)'}
+                                {displayResult.performance_score === 6 && '(6分: $0, 需面談)'}
+                                {displayResult.performance_score >= 3 && displayResult.performance_score <= 5 && '(3-5分: 抽成-1%)'}
+                                {displayResult.performance_score >= 1 && displayResult.performance_score <= 2 && '(1-2分: 抽成-2%)'}
+                              </span>
+                            </td>
+                          </tr>
+                          <tr className="border-t">
+                            <td className="p-3 font-medium bg-muted/30">連續滿分次數</td>
+                            <td className="p-3 text-right" colSpan={3}>
+                              <span className="font-semibold text-indigo-600">
+                                {displayResult.consecutive_full_score_count || 0} 次
+                              </span>
+                              {(displayResult.consecutive_full_score_count || 0) > 0 && (
+                                <span className="ml-2">{'🔥'.repeat(Math.min(displayResult.consecutive_full_score_count || 0, 5))}</span>
+                              )}
+                            </td>
+                          </tr>
+                          <tr className="border-t">
+                            <td className="p-3 font-medium bg-muted/30">連續滿分加成</td>
+                            <td className="p-3 text-right font-semibold text-purple-600" colSpan={3}>
+                              +{formatCurrency(displayResult.consecutive_bonus || 0)}
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {(displayResult.consecutive_full_score_count || 0) === 1 && '(1次: +$500)'}
+                                {(displayResult.consecutive_full_score_count || 0) === 2 && '(2次: +$1,000)'}
+                                {(displayResult.consecutive_full_score_count || 0) >= 3 && '(3次+: +$2,000)'}
+                              </span>
+                            </td>
+                          </tr>
+                          {(displayResult.commission_deduction_rate || 0) > 0 && (
+                            <tr className="border-t bg-red-50">
+                              <td className="p-3 font-medium text-red-700">抽成扣減</td>
+                              <td className="p-3 text-right font-semibold text-red-600" colSpan={3}>
+                                -{displayResult.commission_deduction_rate}%
+                                <span className="ml-2 text-xs">（因績效不佳）</span>
+                              </td>
+                            </tr>
+                          )}
+                          {displayResult.requires_interview && (
+                            <tr className="border-t bg-yellow-100">
+                              <td className="p-3 font-medium text-yellow-800" colSpan={4}>
+                                ⚠️ 績效分數為 6 分，需安排績效面談
+                              </td>
+                            </tr>
+                          )}
+                          <tr className="border-t bg-indigo-50">
+                            <td className="p-3 font-bold text-indigo-900">績效獎金總計</td>
+                            <td className="p-3 text-right font-bold text-xl text-indigo-600" colSpan={3}>
+                              {formatCurrency(displayResult.total_performance_bonus || 0)}
+                            </td>
+                          </tr>
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {/* 其他績效調整區塊 */}
                   <tr className="border-t bg-yellow-50">
                     <td className="p-3 font-bold text-center" colSpan={4}>
-                      績效與調整
+                      其他調整
                     </td>
                   </tr>
                   <tr className="border-t">
-                    <td className="p-3 font-medium bg-muted/30">績效分數</td>
+                    <td className="p-3 font-medium bg-muted/30">績效百分比</td>
                     <td className="p-3 text-right" colSpan={3}>
                       <div className="flex items-center justify-end gap-2">
                         <Input
@@ -766,7 +909,7 @@ export default function SalaryCalculator() {
                           onChange={(e) => setPerformancePercentage(Number(e.target.value))}
                           className="h-8 w-24 text-right"
                         />
-                        <span>分</span>
+                        <span>%</span>
                       </div>
                     </td>
                   </tr>

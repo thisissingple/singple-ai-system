@@ -147,13 +147,14 @@ export function registerEmployeeManagementRoutes(app: Express) {
         .in('user_id', userIds)
         .order('created_at', { ascending: false });
 
-      // 4. 查詢薪資記錄（最新的 active 記錄）
-      const { data: compensations } = await supabase
-        .from('employee_compensation')
+      // 4. 查詢薪資設定（從 employee_salary_settings，用 employee_name 關聯）
+      // 先取得所有員工的名字
+      const employeeNames = users.map(u => `${u.first_name || ''} ${u.last_name || ''}`.trim());
+      const { data: salarySettings } = await supabase
+        .from('employee_salary_settings')
         .select('*')
-        .in('user_id', userIds)
-        .eq('is_active', true)
-        .order('effective_from', { ascending: false });
+        .in('employee_name', employeeNames)
+        .eq('is_active', true);
 
       // 5. 查詢勞健保記錄（最新的 active 記錄）
       const { data: insurances } = await supabase
@@ -167,8 +168,32 @@ export function registerEmployeeManagementRoutes(app: Express) {
       const employees = users.map(user => {
         const profile = profiles?.find(p => p.user_id === user.id) || null;
         const userIdentities = identities?.filter(i => i.user_id === user.id) || [];
-        const latestCompensation = compensations?.find(c => c.user_id === user.id) || null;
+        const employeeName = `${user.first_name || ''} ${user.last_name || ''}`.trim();
+        const salarySetting = salarySettings?.find(s => s.employee_name === employeeName) || null;
         const latestInsurance = insurances?.find(i => i.user_id === user.id) || null;
+
+        // 將 employee_salary_settings 資料轉換為前端期望的 latest_compensation 格式
+        const latestCompensation = salarySetting ? {
+          id: salarySetting.id,
+          user_id: user.id,
+          base_salary: salarySetting.base_salary,
+          commission_type: salarySetting.commission_rate ? 'percentage' : 'none',
+          commission_rate: salarySetting.commission_rate,
+          hourly_rate: salarySetting.hourly_rate,
+          role_type: salarySetting.role_type,
+          employment_type: salarySetting.employment_type,
+          point_commission_rate: salarySetting.point_commission_rate,
+          performance_bonus: salarySetting.performance_bonus,
+          phone_bonus_rate: salarySetting.phone_bonus_rate,
+          original_bonus: salarySetting.original_bonus,
+          labor_insurance: salarySetting.labor_insurance,
+          health_insurance: salarySetting.health_insurance,
+          retirement_fund: salarySetting.retirement_fund,
+          service_fee: salarySetting.service_fee,
+          is_active: salarySetting.is_active,
+          effective_from: salarySetting.created_at?.split('T')[0] || null,
+          notes: salarySetting.notes,
+        } : null;
 
         return {
           user: {
@@ -189,6 +214,7 @@ export function registerEmployeeManagementRoutes(app: Express) {
           identities: userIdentities,
           latest_compensation: latestCompensation,
           latest_insurance: latestInsurance,
+          salary_settings: salarySetting,
         };
       });
 
@@ -227,11 +253,10 @@ export function registerEmployeeManagementRoutes(app: Express) {
       }
 
       // 並行查詢所有資料（效能優化）
-      const [userResult, profileResult, identitiesResult, compensationResult, insuranceResult] = await Promise.all([
+      const [userResult, profileResult, identitiesResult, insuranceResult] = await Promise.all([
         supabase.from('users').select('*').eq('id', userId).single(),
         supabase.from('employee_profiles').select('*').eq('user_id', userId).maybeSingle(),
         supabase.from('business_identities').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-        supabase.from('employee_compensation').select('*').eq('user_id', userId).order('effective_from', { ascending: false }),
         supabase.from('employee_insurance').select('*').eq('user_id', userId).order('effective_from', { ascending: false }),
       ]);
 
@@ -243,14 +268,49 @@ export function registerEmployeeManagementRoutes(app: Express) {
         });
       }
 
+      // 查詢薪資設定（用 employee_name 關聯）
+      const employeeName = `${userResult.data.first_name || ''} ${userResult.data.last_name || ''}`.trim();
+      const { data: salarySettingData } = await supabase
+        .from('employee_salary_settings')
+        .select('*')
+        .eq('employee_name', employeeName)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      // 將 employee_salary_settings 資料轉換為前端期望的 latest_compensation 格式
+      const latestCompensation = salarySettingData ? {
+        id: salarySettingData.id,
+        user_id: userId,
+        base_salary: salarySettingData.base_salary,
+        commission_type: salarySettingData.commission_rate ? 'percentage' : 'none',
+        commission_rate: salarySettingData.commission_rate,
+        hourly_rate: salarySettingData.hourly_rate,
+        role_type: salarySettingData.role_type,
+        employment_type: salarySettingData.employment_type,
+        point_commission_rate: salarySettingData.point_commission_rate,
+        performance_bonus: salarySettingData.performance_bonus,
+        phone_bonus_rate: salarySettingData.phone_bonus_rate,
+        original_bonus: salarySettingData.original_bonus,
+        labor_insurance: salarySettingData.labor_insurance,
+        health_insurance: salarySettingData.health_insurance,
+        retirement_fund: salarySettingData.retirement_fund,
+        service_fee: salarySettingData.service_fee,
+        is_active: salarySettingData.is_active,
+        effective_from: salarySettingData.created_at?.split('T')[0] || null,
+        notes: salarySettingData.notes,
+      } : null;
+
       res.json({
         success: true,
         data: {
           user: userResult.data,
           profile: profileResult.data || null,
           identities: identitiesResult.data || [],
-          compensation: compensationResult.data || [],
+          compensation: latestCompensation ? [latestCompensation] : [],
           insurance: insuranceResult.data || [],
+          latest_compensation: latestCompensation,
+          latest_insurance: insuranceResult.data?.[0] || null,
+          salary_settings: salarySettingData,
         },
       });
     } catch (error: any) {
@@ -397,7 +457,7 @@ export function registerEmployeeManagementRoutes(app: Express) {
 
   /**
    * POST /api/employees/:userId/compensation
-   * 新增薪資設定
+   * 新增薪資設定（寫入到 employee_salary_settings）
    * 需要 Admin 權限
    */
   app.post('/api/employees/:userId/compensation', requireAdmin, async (req, res) => {
@@ -406,56 +466,83 @@ export function registerEmployeeManagementRoutes(app: Express) {
       const {
         base_salary,
         commission_type,
-        commission_config,
-        allowances,
-        effective_from,
-        effective_to,
+        commission_rate,
         adjustment_reason,
       } = req.body;
-      const createdBy = (req as any).user?.id;
 
-      if (!effective_from) {
-        return res.status(400).json({
+      // 取得員工姓名（用於關聯 employee_salary_settings）
+      const userResult = await queryDatabase(
+        `SELECT first_name, last_name, roles FROM users WHERE id = $1`,
+        [userId]
+      );
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({
           success: false,
-          message: 'Missing required field: effective_from',
+          message: 'User not found',
         });
       }
 
-      // Deactivate previous active compensation
-      await queryDatabase(`
-        UPDATE employee_compensation
-        SET is_active = false, effective_to = $2, updated_at = NOW()
-        WHERE user_id = $1 AND is_active = true
-      `, [userId, effective_from]);
+      const user = userResult.rows[0];
+      const employeeName = `${user.first_name || ''} ${user.last_name || ''}`.trim();
 
-      // Insert new compensation
-      const insertQuery = `
-        INSERT INTO employee_compensation (
-          id, user_id, base_salary, commission_type, commission_config,
-          allowances, effective_from, effective_to, adjustment_reason,
-          is_active, created_by
+      if (!employeeName) {
+        return res.status(400).json({
+          success: false,
+          message: 'Employee name is required',
+        });
+      }
+
+      // 確定角色類型
+      let roleType = 'teacher';
+      if (user.roles?.includes('consultant') || user.roles?.includes('closer')) {
+        roleType = 'closer';
+      } else if (user.roles?.includes('setter')) {
+        roleType = 'setter';
+      }
+
+      // 提取抽成比例
+      let commissionRate = commission_rate || 0;
+      if (commission_type === 'percentage' && !commission_rate) {
+        commissionRate = 0;
+      }
+
+      // UPSERT 到 employee_salary_settings
+      const upsertQuery = `
+        INSERT INTO employee_salary_settings (
+          employee_name,
+          role_type,
+          employment_type,
+          base_salary,
+          commission_rate,
+          is_active,
+          notes,
+          updated_at
         )
-        VALUES (
-          gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, true, $9
-        )
+        VALUES ($1, $2, 'full_time', $3, $4, true, $5, NOW())
+        ON CONFLICT (employee_name)
+        DO UPDATE SET
+          role_type = EXCLUDED.role_type,
+          base_salary = EXCLUDED.base_salary,
+          commission_rate = EXCLUDED.commission_rate,
+          is_active = true,
+          notes = EXCLUDED.notes,
+          updated_at = NOW()
         RETURNING *
       `;
 
-      const result = await queryDatabase(insertQuery, [
-        userId,
-        base_salary || null,
-        commission_type || null,
-        commission_config ? JSON.stringify(commission_config) : null,
-        allowances ? JSON.stringify(allowances) : null,
-        effective_from,
-        effective_to || null,
-        adjustment_reason || null,
-        createdBy,
+      const result = await queryDatabase(upsertQuery, [
+        employeeName,
+        roleType,
+        base_salary || 0,
+        commissionRate,
+        adjustment_reason || `透過員工管理設定 (userId: ${userId})`,
       ]);
 
       res.json({
         success: true,
         data: result.rows[0],
+        message: '薪資設定已更新',
       });
     } catch (error: any) {
       console.error('Error creating compensation:', error);
@@ -806,40 +893,46 @@ export function registerEmployeeManagementRoutes(app: Express) {
 
   /**
    * PUT /api/employees/:userId/compensation/:compensationId
-   * 編輯薪資記錄
+   * 編輯薪資記錄（寫入 employee_salary_settings）
    */
   app.put('/api/employees/:userId/compensation/:compensationId', requireAdmin, async (req, res) => {
     try {
       const { userId, compensationId } = req.params;
       const { base_salary, commission_type, commission_rate, effective_from, adjustment_reason } = req.body;
 
+      // 提取抽成比例 - 處理「無抽成」的情況
+      let commissionRate: number | null = commission_rate;
+      if (commission_type === 'none') {
+        // 明確設置為 0，表示無抽成
+        commissionRate = 0;
+      } else if (commission_type === 'percentage' && (commission_rate === null || commission_rate === undefined)) {
+        commissionRate = 0;
+      }
+
+      // 更新 employee_salary_settings（用 id 查找）
+      // 注意：commission_rate 不使用 COALESCE，以便能正確更新為 0
       const query = `
-        UPDATE employee_compensation
+        UPDATE employee_salary_settings
         SET
           base_salary = COALESCE($1, base_salary),
-          commission_type = COALESCE($2, commission_type),
-          commission_rate = COALESCE($3, commission_rate),
-          effective_from = COALESCE($4, effective_from),
-          adjustment_reason = COALESCE($5, adjustment_reason),
+          commission_rate = $2,
+          notes = COALESCE($3, notes),
           updated_at = NOW()
-        WHERE id = $6 AND user_id = $7
+        WHERE id = $4
         RETURNING *
       `;
 
       const result = await queryDatabase(query, [
         base_salary,
-        commission_type,
-        commission_rate,
-        effective_from,
+        commissionRate,
         adjustment_reason,
         compensationId,
-        userId,
-      ]);
+      ], 'session');  // 使用 session 模式進行寫入操作
 
       if (result.rows.length === 0) {
         return res.status(404).json({
           success: false,
-          message: 'Compensation record not found',
+          message: 'Salary setting record not found',
         });
       }
 

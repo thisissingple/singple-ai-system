@@ -11,8 +11,11 @@
  * - Admin/super_admin bypass (always have full access)
  */
 
-import { createPool, queryDatabase, insertAndReturn } from './pg-client';
+import { getSharedPool, queryDatabase, insertAndReturn } from './pg-client';
 import type { Pool } from 'pg';
+
+// 不再使用 createPool，改用 getSharedPool
+const createPool = () => getSharedPool();
 
 // =====================================================
 // Type Definitions
@@ -127,9 +130,8 @@ export async function hasModulePermission(
   } catch (error) {
     console.error('[Permission Service] Error checking module permission:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
+  // 注意：使用共享連線池，不需要 pool.end()
 }
 
 /**
@@ -181,8 +183,6 @@ export async function hasAnyModulePermission(
   } catch (error) {
     console.error('[Permission Service] Error checking any module permission:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
 }
 
@@ -209,8 +209,6 @@ export async function getUserPermissions(userId: string): Promise<UserPermission
   } catch (error) {
     console.error('[Permission Service] Error getting user permissions:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
 }
 
@@ -245,8 +243,6 @@ export async function getUserPermissionsWithModules(userId: string) {
   } catch (error) {
     console.error('[Permission Service] Error getting user permissions with modules:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
 }
 
@@ -309,7 +305,6 @@ export async function setUserPermissions(
     throw error;
   } finally {
     client.release();
-    await pool.end();
   }
 }
 
@@ -342,8 +337,6 @@ export async function addUserPermission(
   } catch (error) {
     console.error('[Permission Service] Error adding user permission:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
 }
 
@@ -365,8 +358,6 @@ export async function removeUserPermission(
   } catch (error) {
     console.error('[Permission Service] Error removing user permission:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
 }
 
@@ -393,8 +384,6 @@ export async function getAllModules(includeInactive = false): Promise<Permission
   } catch (error) {
     console.error('[Permission Service] Error getting all modules:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
 }
 
@@ -416,8 +405,6 @@ export async function getModulesByCategory(category: string): Promise<Permission
   } catch (error) {
     console.error('[Permission Service] Error getting modules by category:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
 }
 
@@ -435,8 +422,6 @@ export async function getModuleById(moduleId: string): Promise<PermissionModule 
   } catch (error) {
     console.error('[Permission Service] Error getting module by ID:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
 }
 
@@ -470,8 +455,6 @@ export async function createModule(moduleData: Partial<PermissionModule>): Promi
   } catch (error) {
     console.error('[Permission Service] Error creating module:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
 }
 
@@ -516,8 +499,6 @@ export async function updateModule(
   } catch (error) {
     console.error('[Permission Service] Error updating module:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
 }
 
@@ -536,8 +517,6 @@ export async function deactivateModule(moduleId: string): Promise<void> {
   } catch (error) {
     console.error('[Permission Service] Error deactivating module:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
 }
 
@@ -574,8 +553,6 @@ export async function getUserPermissionsSummary() {
   } catch (error) {
     console.error('[Permission Service] Error getting user permissions summary:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
 }
 
@@ -626,7 +603,5 @@ export async function getUserAccessibleModules(userId: string): Promise<string[]
   } catch (error) {
     console.error('[Permission Service] Error getting user accessible modules:', error);
     throw error;
-  } finally {
-    await pool.end();
   }
 }

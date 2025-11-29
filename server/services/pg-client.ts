@@ -29,51 +29,86 @@
 import pkg from 'pg';
 const { Pool } = pkg;
 
+// 共享連線池（避免頻繁創建/關閉連線導致 Supabase pooler 超時）
+let sharedTransactionPool: ReturnType<typeof Pool.prototype.constructor> | null = null;
+let sharedSessionPool: ReturnType<typeof Pool.prototype.constructor> | null = null;
+
 /**
- * 建立 PostgreSQL 連線池
- * @param mode - 'transaction' for simple queries, 'session' for complex operations
+ * 設置連線池錯誤處理
  */
-export function createPool(mode: 'transaction' | 'session' = 'transaction') {
-  // Transaction Mode: 適用於簡單讀取查詢
-  // Session Mode: 適用於複雜操作、Prepared Statements、Transactions
-  const dbUrl = mode === 'session'
-    ? (process.env.SUPABASE_SESSION_DB_URL || process.env.SUPABASE_DB_URL)
-    : process.env.SUPABASE_DB_URL;
-
-  if (!dbUrl) {
-    throw new Error('資料庫 URL 未配置 (SUPABASE_DB_URL)');
-  }
-
-  const pool = new Pool({
-    connectionString: dbUrl,
-    ssl: { rejectUnauthorized: false },
-    // 連線池設定
-    max: 20,
-    idleTimeoutMillis: 30000, // 閒置連線逾時（30秒）
-    connectionTimeoutMillis: 10000, // 連線逾時（10秒）
-    query_timeout: 30000, // 查詢逾時（30秒）
-  });
-
-  // 🛡️ 防止 pooler 斷線導致 Node.js 崩潰
-  // Supabase Transaction Pooler 會強制終止長時間查詢，造成 unhandled error event
-  pool.on('error', (err, client) => {
-    console.error('❌ Unexpected database connection error:', err.message);
+function setupPoolErrorHandler(pool: ReturnType<typeof Pool.prototype.constructor>, mode: string) {
+  pool.on('error', (err: any) => {
+    console.error(`❌ [${mode}] Unexpected database connection error:`, err.message);
     console.error('   Error code:', err.code);
     console.error('   This error has been caught and will not crash the server.');
 
-    // 如果是 pooler 斷線錯誤，記錄詳細資訊
     if (err.message?.includes('termination') || err.message?.includes('shutdown')) {
       console.error('⚠️  This appears to be a Supabase pooler timeout.');
       console.error('   Consider using Session Pooler (port 6543) instead of Transaction Pooler (port 5432)');
       console.error('   Or optimize queries to complete faster.');
     }
   });
-
-  return pool;
 }
 
 /**
- * 單次查詢（自動管理連線）
+ * 獲取或創建共享連線池
+ * @param mode - 'transaction' for simple queries, 'session' for complex operations
+ */
+export function getSharedPool(mode: 'transaction' | 'session' = 'transaction') {
+  if (mode === 'session') {
+    if (!sharedSessionPool) {
+      let dbUrl = process.env.SUPABASE_SESSION_DB_URL || process.env.SESSION_DB_URL || process.env.SUPABASE_DB_URL;
+      if (!dbUrl) {
+        throw new Error('資料庫 URL 未配置 (SUPABASE_DB_URL)');
+      }
+      // 自動將端口 5432 (Transaction Pooler) 轉換為 6543 (Session Pooler)
+      // Session mode 需要長連線支持，Transaction Pooler 會強制斷線
+      if (dbUrl.includes('pooler.supabase.com:5432')) {
+        dbUrl = dbUrl.replace(':5432', ':6543');
+        console.log('🔄 [Session Pool] Auto-switched to Session Pooler (port 6543)');
+      }
+      sharedSessionPool = new Pool({
+        connectionString: dbUrl,
+        ssl: { rejectUnauthorized: false },
+        max: 10,
+        idleTimeoutMillis: 60000,
+        connectionTimeoutMillis: 10000,
+        query_timeout: 30000,
+      });
+      setupPoolErrorHandler(sharedSessionPool, 'session');
+    }
+    return sharedSessionPool;
+  } else {
+    if (!sharedTransactionPool) {
+      const dbUrl = process.env.SUPABASE_DB_URL;
+      if (!dbUrl) {
+        throw new Error('資料庫 URL 未配置 (SUPABASE_DB_URL)');
+      }
+      sharedTransactionPool = new Pool({
+        connectionString: dbUrl,
+        ssl: { rejectUnauthorized: false },
+        max: 20,
+        idleTimeoutMillis: 60000,
+        connectionTimeoutMillis: 10000,
+        query_timeout: 30000,
+      });
+      setupPoolErrorHandler(sharedTransactionPool, 'transaction');
+    }
+    return sharedTransactionPool;
+  }
+}
+
+/**
+ * 建立 PostgreSQL 連線池（向後兼容，但現在返回共享池）
+ * @param mode - 'transaction' for simple queries, 'session' for complex operations
+ * @deprecated 使用 getSharedPool() 代替
+ */
+export function createPool(mode: 'transaction' | 'session' = 'transaction') {
+  return getSharedPool(mode);
+}
+
+/**
+ * 單次查詢（使用共享連線池）
  *
  * @param query SQL 查詢語句
  * @param params 查詢參數
@@ -81,14 +116,10 @@ export function createPool(mode: 'transaction' | 'session' = 'transaction') {
  * @returns 查詢結果
  */
 export async function queryDatabase(query: string, params?: any[], mode: 'transaction' | 'session' = 'transaction') {
-  const pool = createPool(mode);
-
-  try {
-    const result = await pool.query(query, params);
-    return result;
-  } finally {
-    await pool.end();
-  }
+  const pool = getSharedPool(mode);
+  const result = await pool.query(query, params);
+  return result;
+  // 注意：不再關閉 pool，使用共享連線池
 }
 
 /**
@@ -125,33 +156,30 @@ export async function updateAndReturn(
   whereParams: any[],
   returnColumns: string[] = ['*']
 ) {
-  const pool = createPool();
+  const pool = getSharedPool('session');
 
-  try {
-    // 使用 parameterized query 避免 SQL injection
-    const columns = Object.keys(data);
-    const values = Object.values(data);
+  // 使用 parameterized query 避免 SQL injection
+  const columns = Object.keys(data);
+  const values = Object.values(data);
 
-    // 建立參數索引
-    const setClause = columns.map((col, i) => `"${col}" = $${i + 1}`).join(', ');
-    const allParams = [...values, ...whereParams];
+  // 建立參數索引
+  const setClause = columns.map((col, i) => `"${col}" = $${i + 1}`).join(', ');
+  const allParams = [...values, ...whereParams];
 
-    // 更新 WHERE 子句中的參數索引
-    let paramIndex = values.length + 1;
-    const adjustedWhereClause = whereClause.replace(/\$(\d+)/g, () => `$${paramIndex++}`);
+  // 更新 WHERE 子句中的參數索引
+  let paramIndex = values.length + 1;
+  const adjustedWhereClause = whereClause.replace(/\$(\d+)/g, () => `$${paramIndex++}`);
 
-    const query = `
-      UPDATE "${table}"
-      SET ${setClause}
-      WHERE ${adjustedWhereClause}
-      RETURNING ${returnColumns.join(', ')}
-    `;
+  const query = `
+    UPDATE "${table}"
+    SET ${setClause}
+    WHERE ${adjustedWhereClause}
+    RETURNING ${returnColumns.join(', ')}
+  `;
 
-    const result = await pool.query(query, allParams);
-    return result.rows;
-  } finally {
-    await pool.end();
-  }
+  const result = await pool.query(query, allParams);
+  return result.rows;
+  // 注意：不再關閉 pool，使用共享連線池
 }
 
 /**

@@ -104,6 +104,34 @@ export interface EmployeeCompensation {
   created_by: string;
 }
 
+// ==================== Employee Salary Settings (for Salary Calculator) ====================
+
+export type SalaryRoleType = 'teacher' | 'closer' | 'setter';
+export type SalaryEmploymentType = 'full_time' | 'part_time';
+
+export interface EmployeeSalarySettings {
+  id: string;
+  employee_name: string;
+  role_type: SalaryRoleType;
+  employment_type: SalaryEmploymentType;
+  base_salary: number | null;
+  hourly_rate: number | null;
+  commission_rate: number | null;
+  point_commission_rate: number | null;
+  performance_bonus: number | null;
+  phone_bonus_rate: number | null;
+  original_bonus: number | null;
+  online_course_rate: number | null;
+  labor_insurance: number | null;
+  health_insurance: number | null;
+  retirement_fund: number | null;
+  service_fee: number | null;
+  is_active: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ==================== Employee Insurance ====================
 
 export interface EmployeeInsurance {
@@ -152,6 +180,18 @@ export interface EmployeeData {
   identities: BusinessIdentity[];
   compensation: EmployeeCompensation[];
   insurance: EmployeeInsurance[];
+  // 新增：薪資計算器用的薪資設定
+  salary_settings?: EmployeeSalarySettings | null;
+  // 前端快捷存取（從 API 直接映射）
+  latest_compensation?: {
+    id?: string;
+    base_salary?: number | null;
+    commission_type?: CommissionType | null;
+    commission_rate?: number | null;
+    effective_from?: string;
+    adjustment_reason?: string | null;
+  } | null;
+  latest_insurance?: EmployeeInsurance | null;
 }
 
 // ==================== API Response Types ====================
