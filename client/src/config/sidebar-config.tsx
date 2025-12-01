@@ -170,6 +170,12 @@ export const sidebarConfig: SidebarSection[] = [
         requiredRoles: ['admin'],
       },
       {
+        label: '薪資記錄',
+        href: '/salary/records',
+        icon: FileText,
+        requiredRoles: ['admin'],
+      },
+      {
         label: '資料庫瀏覽器',
         href: '/tools/database-browser',
         icon: Database,

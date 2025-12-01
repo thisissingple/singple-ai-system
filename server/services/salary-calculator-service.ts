@@ -890,12 +890,13 @@ export class SalaryCalculatorService {
         total_salary,
         calculation_details,
         performance_score, consecutive_full_score_count, consecutive_bonus, commission_deduction_rate,
+        role_type,
         status
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16, $17, $18,
         $19, $20, $21, $22, $23, $24,
-        $25, $26, $27, $28, 'draft'
+        $25, $26, $27, $28, $29, 'draft'
       )
       RETURNING id
     `;
@@ -930,10 +931,85 @@ export class SalaryCalculatorService {
       calculation.consecutive_full_score_count || 0,
       calculation.consecutive_bonus || 0,
       calculation.commission_deduction_rate || 0,
+      // 職位類型
+      calculation.role_type || null,
     ];
 
     const result = await queryDatabase(query, values, 'session');
     return result.rows[0].id;
+  }
+
+  /**
+   * 查詢薪資記錄
+   */
+  async getSalaryRecords(options: {
+    employeeName?: string;
+    status?: string;
+    limit?: number;
+  }): Promise<any[]> {
+    const { employeeName, status, limit = 50 } = options;
+
+    let query = `
+      SELECT
+        id, employee_name, period_start, period_end,
+        base_salary, original_bonus,
+        total_revenue, commission_amount, point_contribution,
+        online_course_revenue, other_income,
+        performance_type, performance_combo, performance_percentage,
+        total_commission_adjusted, phone_performance_bonus,
+        performance_bonus, leave_deduction,
+        subtotal_before_deductions,
+        labor_insurance, health_insurance, retirement_fund, service_fee,
+        total_salary, status,
+        performance_score, consecutive_full_score_count, consecutive_bonus,
+        commission_deduction_rate,
+        monthly_hours, hourly_wage_subtotal,
+        role_type, contract_id, contract_name,
+        calculation_details, notes,
+        created_at, updated_at
+      FROM salary_calculations
+      WHERE 1=1
+    `;
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (employeeName) {
+      query += ` AND employee_name = $${paramIndex}`;
+      values.push(employeeName);
+      paramIndex++;
+    }
+
+    if (status) {
+      query += ` AND status = $${paramIndex}`;
+      values.push(status);
+      paramIndex++;
+    }
+
+    query += ` ORDER BY period_end DESC, created_at DESC LIMIT $${paramIndex}`;
+    values.push(limit);
+
+    const result = await queryDatabase(query, values);
+    return result.rows;
+  }
+
+  /**
+   * 更新薪資記錄狀態
+   */
+  async updateSalaryRecordStatus(id: string, status: string): Promise<void> {
+    const query = `
+      UPDATE salary_calculations
+      SET status = $1, updated_at = NOW()
+      WHERE id = $2
+    `;
+    await queryDatabase(query, [status, id], 'session');
+  }
+
+  /**
+   * 刪除薪資記錄
+   */
+  async deleteSalaryRecord(id: string): Promise<void> {
+    const query = `DELETE FROM salary_calculations WHERE id = $1`;
+    await queryDatabase(query, [id], 'session');
   }
 
   /**

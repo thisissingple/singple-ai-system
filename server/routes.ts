@@ -10018,6 +10018,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // 列出薪資記錄
+  app.get('/api/salary/records', async (req, res) => {
+    try {
+      const { employee_name, status, limit = '50' } = req.query;
+
+      const { salaryCalculatorService } = await import('./services/salary-calculator-service');
+      const records = await salaryCalculatorService.getSalaryRecords({
+        employeeName: employee_name as string,
+        status: status as string,
+        limit: parseInt(limit as string, 10),
+      });
+
+      res.json({ success: true, data: records });
+    } catch (error: any) {
+      console.error('Failed to fetch salary records:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 更新薪資記錄狀態
+  app.put('/api/salary/records/:id/status', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+
+      if (!['draft', 'confirmed', 'paid'].includes(status)) {
+        return res.status(400).json({ error: '無效的狀態值' });
+      }
+
+      const { salaryCalculatorService } = await import('./services/salary-calculator-service');
+      await salaryCalculatorService.updateSalaryRecordStatus(id, status);
+
+      res.json({ success: true, message: '狀態已更新' });
+    } catch (error: any) {
+      console.error('Failed to update salary record status:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 刪除薪資記錄
+  app.delete('/api/salary/records/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const { salaryCalculatorService } = await import('./services/salary-calculator-service');
+      await salaryCalculatorService.deleteSalaryRecord(id);
+
+      res.json({ success: true, message: '記錄已刪除' });
+    } catch (error: any) {
+      console.error('Failed to delete salary record:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // 更新員工設定
   app.put('/api/salary/employees/:name', async (req, res) => {
     try {

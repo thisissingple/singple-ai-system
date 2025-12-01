@@ -37,6 +37,7 @@ const PermissionsPage = lazy(() => import("@/pages/settings/permissions"));
 const ConsultationAnalysisConfig = lazy(() => import("@/pages/settings/consultation-analysis-config"));
 const AIUsageDashboard = lazy(() => import("@/pages/settings/ai-usage-dashboard"));
 const SalaryCalculator = lazy(() => import("@/pages/salary/salary-calculator"));
+const SalaryRecords = lazy(() => import("@/pages/salary/salary-records"));
 const UserImpersonationPage = lazy(() => import("@/pages/settings/user-impersonation"));
 const TeachingQualityDetail = lazy(() => import("@/pages/teaching-quality/teaching-quality-detail"));
 const ChangePasswordPage = lazy(() => import("@/pages/auth/change-password"));
@@ -135,6 +136,7 @@ function ProtectedRoutes() {
       <Route path="/settings/consultation-analysis-config" component={ConsultationAnalysisConfig} />
       <Route path="/settings/ai-usage" component={AIUsageDashboard} />
       <Route path="/salary/calculator" component={SalaryCalculator} />
+      <Route path="/salary/records" component={SalaryRecords} />
       <Route path="/settings/user-impersonation" component={UserImpersonationPage} />
       <Route path="/settings/facebook" component={FacebookSettings} />
 
