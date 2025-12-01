@@ -261,22 +261,13 @@ function formatNumber(num: number): string {
 // Database Cache Functions
 // ============================================================================
 
+import { getSharedPool } from './pg-client';
+
 /**
- * 創建資料庫連線池
+ * 獲取共享資料庫連線池（不再每次創建新的）
  */
 function createDbPool() {
-  const pool = new Pool({
-    connectionString: process.env.SUPABASE_DB_URL,
-    ssl: { rejectUnauthorized: false },
-    max: 5,
-    idleTimeoutMillis: 30000,
-  });
-
-  pool.on('error', (err) => {
-    console.error('[AI Report Cache] Pool error (ignored):', err.message);
-  });
-
-  return pool;
+  return getSharedPool();
 }
 
 /**
@@ -323,7 +314,7 @@ export async function getCachedReport(
     console.error('[AI Report Cache] Error checking cache:', error.message);
     return null;
   } finally {
-    await pool.end();
+    // pool.end() removed - using shared pool
   }
 }
 
@@ -358,7 +349,7 @@ export async function saveReportToCache(report: AIReport): Promise<void> {
     console.error('[AI Report Cache] Error saving to cache:', error.message);
     // Don't throw - cache save failure shouldn't break the main flow
   } finally {
-    await pool.end();
+    // pool.end() removed - using shared pool
   }
 }
 

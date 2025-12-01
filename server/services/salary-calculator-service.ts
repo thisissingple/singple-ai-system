@@ -399,15 +399,20 @@ export class SalaryCalculatorService {
     }
 
     // 計算連續滿分次數
+    // 邏輯：必須「連續」多個月都是滿分才算
+    // - 第一次滿分：consecutive = 0（還沒有「連續」）
+    // - 第二次連續滿分：consecutive = 1（連續 1 次）
+    // - 第三次連續滿分：consecutive = 2（連續 2 次）
+    // - 以此類推
     let consecutiveCount = 0;
     if (performanceScore === 10) {
       // 本次滿分
       if (lastPerformance && lastPerformance.performance_score === 10) {
-        // 上次也是滿分，延續連續次數
+        // 上次也是滿分，延續連續次數 +1
         consecutiveCount = (lastPerformance.consecutive_full_score_count || 0) + 1;
       } else {
-        // 上次不是滿分，重新開始計算
-        consecutiveCount = 1;
+        // 上次不是滿分或沒有記錄，這是「第一次」滿分，還不算「連續」
+        consecutiveCount = 0;
       }
     } else {
       // 本次不是滿分，連續次數歸零

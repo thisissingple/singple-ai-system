@@ -3,7 +3,10 @@
  * Manual-triggered AI analysis for consultation transcripts
  */
 
-import { createPool } from './services/pg-client';
+import { getSharedPool } from './services/pg-client';
+
+// 使用共享連線池（不再每次調用 pool.end()）
+const createPool = () => getSharedPool();
 import { consultationQualityGPTService } from './services/consultation-quality-gpt-service';
 import { streamText } from 'ai';
 import { openai } from '@ai-sdk/openai';
@@ -112,7 +115,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
       `;
       const closerResult = await pool.query(closerQuery, []);
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({
         success: true,
@@ -143,7 +146,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
         WHERE id = '00000000-0000-0000-0000-000000000001'::UUID
       `;
       const result = await pool.query(query);
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: '配置不存在' });
@@ -212,7 +215,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
         chat_system_prompt,
         userEmail,
       ]);
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       // Clear GPT service cache
       consultationQualityGPTService.clearConfigCache();
@@ -454,7 +457,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
         RETURNING *
       `;
       const result = await pool.query(query, [defaultPrompt, defaultChatPrompt, userEmail]);
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       // Clear GPT service cache
       consultationQualityGPTService.clearConfigCache();
@@ -511,7 +514,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
       const result = await pool.query(consultationQuery, [eodId]);
 
       if (result.rows.length === 0) {
-        await pool.end();
+        // pool.end() removed - using shared pool
         return res.status(404).json({ error: 'Consultation record not found' });
       }
 
@@ -521,7 +524,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
       console.log('📤 [DEBUG] GET detail - raw_markdown_output length:', record.raw_markdown_output?.length || 0);
       console.log('📤 [DEBUG] GET detail - has_analysis:', record.analysis_id ? 'YES' : 'NO');
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({
         success: true,
@@ -563,7 +566,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
       const result = await pool.query(consultationQuery, [eodId]);
 
       if (result.rows.length === 0) {
-        await pool.end();
+        // pool.end() removed - using shared pool
         return res.status(404).json({ error: '找不到諮詢分析記錄' });
       }
 
@@ -571,7 +574,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
 
       // Validate student email
       if (!record.student_email) {
-        await pool.end();
+        // pool.end() removed - using shared pool
         return res.status(400).json({ error: '該諮詢記錄缺少學員 email，無法儲存至知識庫' });
       }
 
@@ -590,7 +593,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
 
       const consultantEmail = userQuery.rows.length > 0 ? userQuery.rows[0].email : null;
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       // 1. Save to student knowledge base
       await getOrCreateStudentKB(record.student_email, record.student_name);
@@ -649,7 +652,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
       const result = await pool.query(consultationQuery, [eodId]);
 
       if (result.rows.length === 0) {
-        await pool.end();
+        // pool.end() removed - using shared pool
         return res.status(404).json({ error: 'Consultation record not found' });
       }
 
@@ -657,7 +660,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
 
       // Check if transcript exists
       if (!consultation.consultation_transcript || consultation.consultation_transcript.trim().length === 0) {
-        await pool.end();
+        // pool.end() removed - using shared pool
         return res.status(400).json({ error: '此諮詢記錄沒有轉錄內容，無法進行 AI 分析' });
       }
 
@@ -673,7 +676,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
       ]);
 
       if (existingResult.rows.length > 0) {
-        await pool.end();
+        // pool.end() removed - using shared pool
         return res.status(400).json({ error: '此諮詢記錄已有 AI 分析，請先刪除舊分析後再重新分析' });
       }
 
@@ -753,7 +756,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
       // DEBUG: Log what was saved
       console.log('✅ [DEBUG] Saved to DB - raw_markdown_output length:', insertResult.rows[0]?.raw_markdown_output?.length || 0);
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({
         success: true,
@@ -783,7 +786,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
       const consultationResult = await pool.query(consultationQuery, [eodId]);
 
       if (consultationResult.rows.length === 0) {
-        await pool.end();
+        // pool.end() removed - using shared pool
         return res.status(404).json({ error: '找不到此諮詢記錄' });
       }
 
@@ -798,7 +801,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
 
       const result = await pool.query(deleteQuery, [student_email, consultation_date, closer_name]);
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: '找不到此諮詢記錄的 AI 分析' });
@@ -852,7 +855,7 @@ export function registerConsultationQualityRoutes(app: any, isAuthenticated: any
         WHERE id = '00000000-0000-0000-0000-000000000001'::UUID
       `;
       const configResult = await pool.query(configQuery);
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       if (configResult.rows.length === 0) {
         return res.status(500).json({ error: '無法讀取聊天配置' });
@@ -967,7 +970,7 @@ ${aiAnalysis || '（無分析結果）'}`;
       const result = await pool.query(consultationQuery, [eodId]);
 
       if (result.rows.length === 0) {
-        await pool.end();
+        // pool.end() removed - using shared pool
         return res.status(404).json({ error: '找不到諮詢記錄' });
       }
 
@@ -987,7 +990,7 @@ ${aiAnalysis || '（無分析結果）'}`;
 
       const consultantEmail = userQuery.rows.length > 0 ? userQuery.rows[0].email : null;
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       // Generate recap
       const recap = await generateChatRecap({
@@ -1130,7 +1133,7 @@ ${aiAnalysis || '（無分析結果）'}`;
         apiCostUsd || null,
       ]);
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       const savedConversation = insertResult.rows[0];
 

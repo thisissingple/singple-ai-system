@@ -3,7 +3,10 @@
  * Auto-analysis from trial_class_attendance.class_transcript
  */
 
-import { createPool, queryDatabase, insertAndReturn } from './services/pg-client';
+import { getSharedPool, queryDatabase, insertAndReturn } from './services/pg-client';
+
+// 使用共享連線池（不再每次調用 pool.end()）
+const createPool = (mode: 'transaction' | 'session' = 'transaction') => getSharedPool(mode);
 import { getSupabaseClient } from './services/supabase-client';
 import * as teachingQualityGPT from './services/teaching-quality-gpt-service';
 import { parseScoresFromMarkdown } from './services/parse-teaching-scores';
@@ -555,7 +558,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
       `, [attendanceId]);
 
       if (attendanceResult.rows.length === 0) {
-        await pool.end();
+        // pool.end() removed - using shared pool
         if (wantsSSE) {
           res.write(`data: ${JSON.stringify({ error: 'Attendance record not found' })}\n\n`);
           return res.end();
@@ -567,7 +570,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
 
       // Check if already analyzed
       if (attendance.ai_analysis_id) {
-        await pool.end();
+        // pool.end() removed - using shared pool
         if (wantsSSE) {
           res.write(`data: ${JSON.stringify({ error: 'This record has already been analyzed' })}\n\n`);
           return res.end();
@@ -577,7 +580,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
 
       // Check if has transcript
       if (!attendance.class_transcript || attendance.class_transcript.trim().length === 0) {
-        await pool.end();
+        // pool.end() removed - using shared pool
         if (wantsSSE) {
           res.write(`data: ${JSON.stringify({ error: 'No transcript available for this record' })}\n\n`);
           return res.end();
@@ -591,7 +594,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         if (userResult.rows.length > 0) {
           const teacherName = `${userResult.rows[0].first_name} ${userResult.rows[0].last_name}`.trim();
           if (teacherName !== attendance.teacher_name) {
-            await pool.end();
+            // pool.end() removed - using shared pool
             if (wantsSSE) {
               res.write(`data: ${JSON.stringify({ error: 'Permission denied' })}\n\n`);
               return res.end();
@@ -698,7 +701,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         console.error('⚠️ Failed to save to knowledge base:', kbError);
       }
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({
         success: true,
@@ -818,7 +821,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         }
       }
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       res.json({
         success: true,
@@ -850,7 +853,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
       `, [analysisId]);
 
       if (analysisResult.rows.length === 0) {
-        await pool.end();
+        // pool.end() removed - using shared pool
         return res.status(404).json({ error: 'Analysis record not found' });
       }
 
@@ -858,11 +861,11 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
 
       // Check if has transcript
       if (!existingAnalysis.transcript_text && !existingAnalysis.class_transcript) {
-        await pool.end();
+        // pool.end() removed - using shared pool
         return res.status(400).json({ error: 'No transcript available for re-analysis' });
       }
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       // Create analysis job
       const { analysisJobService } = await import('./services/analysis-job-service');

@@ -9,7 +9,10 @@
  */
 
 import OpenAI from 'openai';
-import { createPool } from './pg-client';
+import { getSharedPool } from './pg-client';
+
+// 使用共享連線池
+const createPool = () => getSharedPool();
 
 // ============================================================================
 // Types
@@ -423,7 +426,7 @@ export class ConsultationQualityGPTService {
 
       return this.config;
     } finally {
-      await pool.end();
+      // pool.end() removed - using shared pool
     }
   }
 

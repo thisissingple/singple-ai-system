@@ -8,7 +8,10 @@
  */
 
 import { analysisJobService } from './analysis-job-service';
-import { createPool } from './pg-client';
+import { getSharedPool } from './pg-client';
+
+// 使用共享連線池
+const createPool = () => getSharedPool();
 import * as teachingQualityGPT from './teaching-quality-gpt-service';
 import { parseScoresFromMarkdown } from './parse-teaching-scores';
 
@@ -118,7 +121,7 @@ export async function executeAnalysisJob(params: ExecuteAnalysisParams): Promise
         `, [analysisId, i, analysis.suggestions[i].suggestion]);
       }
 
-      await pool.end();
+      // pool.end() removed - using shared pool
 
       // Mark job as completed
       await analysisJobService.completeJob(jobId, {
@@ -131,7 +134,7 @@ export async function executeAnalysisJob(params: ExecuteAnalysisParams): Promise
 
       console.log(`✅ Background analysis job completed: ${jobId}`);
     } catch (error) {
-      await pool.end();
+      // pool.end() removed - using shared pool
       throw error;
     }
   } catch (error: any) {

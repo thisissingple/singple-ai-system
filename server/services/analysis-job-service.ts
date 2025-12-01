@@ -9,8 +9,11 @@
  * - Store results temporarily before committing
  */
 
-import { createPool, queryDatabase, insertAndReturn } from './pg-client';
+import { getSharedPool, queryDatabase, insertAndReturn } from './pg-client';
 import type { Pool } from 'pg';
+
+// 使用共享連線池
+const createPool = () => getSharedPool();
 
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';
 export type JobType = 'reanalysis' | 'initial_analysis';
@@ -230,10 +233,10 @@ class AnalysisJobService {
   }
 
   /**
-   * Close database pool
+   * Close database pool (no-op - using shared pool)
    */
   async close(): Promise<void> {
-    await this.pool.end();
+    // Using shared pool - don't close it
   }
 }
 

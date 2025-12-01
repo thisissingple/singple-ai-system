@@ -1118,15 +1118,11 @@ export default function SalaryCalculator() {
                   </tr>
                   <tr className="border-t">
                     <td className="p-3 font-medium bg-muted/30">勞保扣除（員工負擔）</td>
-                    <td className="p-3 text-right text-red-600">{formatCurrency(displayResult?.labor_insurance || 0)}</td>
-                    <td className="p-3 font-medium bg-muted/30">健保扣除（員工負擔）</td>
-                    <td className="p-3 text-right text-red-600">{formatCurrency(displayResult?.health_insurance || 0)}</td>
+                    <td className="p-3 text-right text-red-600" colSpan={3}>{formatCurrency(displayResult?.labor_insurance || 0)}</td>
                   </tr>
-                  <tr className="border-t bg-red-50/50">
-                    <td className="p-3 font-semibold text-red-800" colSpan={2}>勞健保小計</td>
-                    <td className="p-3 text-right font-bold text-red-600" colSpan={2}>
-                      {formatCurrency((displayResult?.labor_insurance || 0) + (displayResult?.health_insurance || 0))}
-                    </td>
+                  <tr className="border-t">
+                    <td className="p-3 font-medium bg-muted/30">健保扣除（員工負擔）</td>
+                    <td className="p-3 text-right text-red-600" colSpan={3}>{formatCurrency(displayResult?.health_insurance || 0)}</td>
                   </tr>
                   <tr className="border-t">
                     <td className="p-3 font-medium bg-muted/30">手續費</td>
