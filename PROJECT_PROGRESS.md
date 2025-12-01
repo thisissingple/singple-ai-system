@@ -2,14 +2,75 @@
 
 > **最後更新**: 2025-12-01
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ 新師分潤制度規劃完成
-> **當前階段**: 2025 年新師分潤制度設計
-> **今日進度**: 完成新師分潤制度架構設計（固定卡片價值 + 模組完成獎勵）
+> **專案狀態**: ✅ 同步管理頁面增強完成
+> **當前階段**: Google Sheets 同步詳細追蹤
+> **今日進度**: 同步記錄頁面新增重複/跳過記錄詳情顯示
 > **整體進度**: 100% ████████████████████
 
 ---
 
 ## 📅 2025-12-01 更新日誌
+
+### 📊 Google Sheets 同步詳細追蹤功能
+
+#### 需求背景
+用戶發現 Google Sheets 同步後有部分記錄被合併（因為是重複記錄），需要在 UI 上清楚顯示：
+1. 哪些記錄在 Google Sheets 中是重複的
+2. 哪些記錄因缺少必要欄位被跳過
+3. 每次同步的統計數據（來源筆數、已同步筆數、重複筆數、跳過筆數）
+
+#### 實作內容
+
+**1. 資料庫擴展 (Migration 086)**
+- 檔案：[`supabase/migrations/086_add_sync_details_to_logs.sql`](supabase/migrations/086_add_sync_details_to_logs.sql)
+- 新增欄位：
+  - `source_records` (INTEGER) - 來源記錄總數
+  - `duplicate_records` (INTEGER) - 重複記錄數
+  - `skipped_records` (INTEGER) - 跳過記錄數
+  - `duplicate_details` (JSONB) - 重複記錄詳情
+  - `skipped_details` (JSONB) - 跳過記錄詳情
+
+**2. 同步服務追蹤**
+- 檔案：[`server/services/sheets/sync-service.ts`](server/services/sheets/sync-service.ts)
+- 修改 `deduplicateByConfig()` 方法：
+  - 返回 `DeduplicateResult` 包含去重資料和詳細資訊
+  - 追蹤每筆重複記錄的 Google Sheets 行號
+  - 追蹤跳過記錄的原因和缺少的欄位
+- 修改 `logSync()` 方法：
+  - 儲存詳細同步資訊到 `sync_logs`
+
+**3. 前端 UI 更新**
+- 檔案：[`client/src/components/sheets/sync-logs-dialog.tsx`](client/src/components/sheets/sync-logs-dialog.tsx)
+- 新增顯示：
+  - 同步統計（來源筆數、已同步筆數、重複筆數、跳過筆數）
+  - 黃色警告提示：「X 筆重複記錄被合併」
+  - 可展開的「查看詳細資訊」按鈕
+  - 重複記錄詳情（重複次數、行號、唯一鍵）
+  - 跳過記錄詳情（行號、跳過原因）
+
+#### 效果展示
+
+**同步記錄列表**：
+```
+收支表單 → income_expense_records  ✅ 成功
+來源: 6798 筆  已同步: 6771 筆  重複: 27 筆
+⚠️ 27 筆重複記錄被合併
+```
+
+**重複記錄詳情**：
+```
+重複 2 次  行號: 32, 33
+唯一鍵: 2019-02-17|Eddie Wan|4000|頂歌計畫
+
+重複 3 次  行號: 266, 267, 268
+唯一鍵: 2019-09-05|曹暐昊|5999|聲線練功坊（豪華版）
+```
+
+#### 相關腳本
+- [`scripts/run-migration-086.ts`](scripts/run-migration-086.ts) - 執行 Migration
+- [`scripts/find-duplicates.ts`](scripts/find-duplicates.ts) - 查找 Google Sheets 重複記錄
+
+---
 
 ### 💰 新師分潤制度設計完成（2025 年 1 月上線）
 

@@ -40,6 +40,33 @@ interface UpsertConfig {
   indexName?: string;             // 🔑 Partial index 名稱（必要時使用）
 }
 
+/**
+ * 📊 同步詳細資訊：追蹤重複和跳過的記錄
+ */
+interface SyncDetails {
+  sourceRecords: number;          // 來源記錄總數
+  duplicateRecords: number;       // 重複記錄數
+  skippedRecords: number;         // 跳過記錄數（NULL 鍵）
+  duplicateDetails: Array<{       // 重複記錄詳情
+    key: string;                  // 唯一鍵組合
+    count: number;                // 重複次數
+    rows: number[];               // Google Sheets 行號
+  }>;
+  skippedDetails: Array<{         // 跳過記錄詳情
+    row: number;                  // Google Sheets 行號
+    reason: string;               // 跳過原因
+    missingFields: string[];      // 缺少的欄位
+  }>;
+}
+
+/**
+ * 📊 去重結果：包含去重後的資料和詳細資訊
+ */
+interface DeduplicateResult {
+  data: any[];                    // 去重後的資料
+  details: SyncDetails;           // 詳細資訊
+}
+
 export interface SyncProgress {
   mappingId: string;
   stage: 'reading' | 'transforming' | 'clearing' | 'inserting' | 'upserting' | 'completed' | 'failed';
@@ -121,11 +148,29 @@ export class SyncService {
         percentage: 30,
       });
 
-      const transformedData = this.transformData(rawData, mapping.field_mappings);
+      let transformedData = this.transformData(rawData, mapping.field_mappings);
       console.log(`🔄 Transformed ${transformedData.length} records`);
+
+      // 🔑 特殊處理：為 income_expense_records 計算衍生欄位
+      // 確保所有唯一鍵欄位都有值，讓每一筆記錄都能參與 UPSERT
+      if (mapping.target_table === 'income_expense_records') {
+        transformedData = transformedData.map(record => ({
+          ...record,
+          // 確保 transaction_date 有值（唯一鍵之一）
+          transaction_date: record.transaction_date || '1900-01-01',
+          // 確保 item_key 有值：優先使用 income_item，其次 expense_item，最後用預設值
+          item_key: record.income_item || record.expense_item || '(無項目)',
+          // 確保 customer_name 有值：優先使用原值，其次 email，最後用預設值
+          customer_name: record.customer_name || record.customer_email || '(未填寫)',
+          // 確保 amount_twd 有值（唯一鍵之一）
+          amount_twd: record.amount_twd ?? 0,
+        }));
+        console.log(`🔑 Ensured all unique keys for income_expense_records`);
+      }
 
       // 5. 根據表格類型選擇同步策略
       let syncResult: { successCount: number; errorCount: number; errors: string[] };
+      let syncDetails: SyncDetails | null = null;  // 📊 追蹤同步詳細資訊
 
       // 🎯 從資料庫讀取 UPSERT 配置（透過 UI 設定，全自動）
       const upsertConfig = mapping.upsert_config;
@@ -143,7 +188,9 @@ export class SyncService {
         };
 
         // 先對源資料去重（同一個 batch 內不能有重複 key，否則 PostgreSQL UPSERT 會報錯）
-        const deduplicatedData = this.deduplicateByConfig(transformedData, config);
+        const deduplicateResult = this.deduplicateByConfig(transformedData, config);
+        const deduplicatedData = deduplicateResult.data;
+        syncDetails = deduplicateResult.details;
         console.log(`📊 Deduplicated: ${transformedData.length} → ${deduplicatedData.length} records`);
 
         this.sendProgress({
@@ -160,6 +207,15 @@ export class SyncService {
         // ⚠️ 沒有 UPSERT 配置的表格：使用 DELETE + INSERT
         console.log(`ℹ️ No UPSERT config for ${mapping.target_table}, using DELETE + INSERT`);
         console.log(`   (可在同步設定中配置唯一鍵以啟用 UPSERT)`);
+
+        // 沒有 UPSERT 配置時，建立基本的 syncDetails
+        syncDetails = {
+          sourceRecords: transformedData.length,
+          duplicateRecords: 0,
+          skippedRecords: 0,
+          duplicateDetails: [],
+          skippedDetails: [],
+        };
 
         this.sendProgress({
           mappingId,
@@ -185,7 +241,7 @@ export class SyncService {
         syncResult = await this.loadToSupabase(mapping.target_table, transformedData, mappingId);
       }
 
-      // 7. 記錄同步結果（包含成功/失敗數量）
+      // 7. 記錄同步結果（包含成功/失敗數量和詳細資訊）
       const logMessage = syncResult.errorCount > 0
         ? `成功: ${syncResult.successCount}, 失敗: ${syncResult.errorCount}。失敗原因: ${syncResult.errors.slice(0, 3).join('; ')}${syncResult.errors.length > 3 ? '...' : ''}`
         : null;
@@ -194,7 +250,8 @@ export class SyncService {
         mappingId,
         syncResult.errorCount > 0 ? 'failed' : 'success',
         syncResult.successCount,
-        logMessage ?? undefined
+        logMessage ?? undefined,
+        syncDetails  // 📊 傳入詳細同步資訊
       );
 
       const completionMessage = syncResult.errorCount > 0
@@ -399,7 +456,7 @@ export class SyncService {
   }
 
   /**
-   * 🔑 通用資料去重方法（根據 UPSERT 配置）
+   * 🔑 通用資料去重方法（根據 UPSERT 配置）+ 詳細追蹤
    *
    * 去重策略：
    * - allowNullKeys = false (partial index): 只保留所有 key 都有值的記錄
@@ -407,13 +464,17 @@ export class SyncService {
    *
    * @param data 原始資料
    * @param config UPSERT 配置
-   * @returns 去重後的資料
+   * @returns 去重結果（包含去重後的資料和詳細資訊）
    */
-  private deduplicateByConfig(data: any[], config: UpsertConfig): any[] {
-    const uniqueMap = new Map<string, any>();
-    const incompleteKeyRecords: any[] = [];
+  private deduplicateByConfig(data: any[], config: UpsertConfig): DeduplicateResult {
+    // 追蹤每個 key 出現的記錄（含行號）
+    const keyRecordMap = new Map<string, Array<{ record: any; rowNumber: number }>>();
+    const skippedDetails: SyncDetails['skippedDetails'] = [];
 
-    for (const record of data) {
+    for (let i = 0; i < data.length; i++) {
+      const record = data[i];
+      const rowNumber = i + 2;  // +2 因為 Google Sheets: 行號從1開始 + 標題行
+
       // 建立唯一鍵值（正規化處理）
       const keyValues = config.uniqueKeys.map(key => record[key]);
       const normalizedKeyValues = config.uniqueKeys.map(key =>
@@ -424,25 +485,85 @@ export class SyncService {
       if (config.allowNullKeys) {
         // 允許 NULL：用完整 key 組合去重（包含 NULL 值）
         const key = normalizedKeyValues.join('|');
-        uniqueMap.set(key, record);
+        if (!keyRecordMap.has(key)) {
+          keyRecordMap.set(key, []);
+        }
+        keyRecordMap.get(key)!.push({ record, rowNumber });
       } else {
         // 不允許 NULL (partial index)：只保留完整 key 的記錄
         if (hasAllKeys) {
           const key = normalizedKeyValues.join('|');
-          uniqueMap.set(key, record);
+          if (!keyRecordMap.has(key)) {
+            keyRecordMap.set(key, []);
+          }
+          keyRecordMap.get(key)!.push({ record, rowNumber });
         } else {
-          incompleteKeyRecords.push(record);
+          // 記錄跳過的記錄詳情
+          const missingFields = config.uniqueKeys.filter((key, idx) => {
+            const v = keyValues[idx];
+            return v === null || v === undefined || v === '';
+          });
+          skippedDetails.push({
+            row: rowNumber,
+            reason: `缺少必要欄位: ${missingFields.join(', ')}`,
+            missingFields,
+          });
         }
       }
     }
 
-    // 記錄跳過的記錄
-    if (incompleteKeyRecords.length > 0) {
-      console.log(`⚠️ Skipped ${incompleteKeyRecords.length} records with incomplete key`);
+    // 找出重複的記錄
+    const duplicateDetails: SyncDetails['duplicateDetails'] = [];
+    const uniqueRecords: any[] = [];
+    let duplicateCount = 0;
+
+    keyRecordMap.forEach((records, key) => {
+      // 保留最後一筆（覆蓋邏輯）
+      uniqueRecords.push(records[records.length - 1].record);
+
+      if (records.length > 1) {
+        duplicateCount += records.length - 1;
+        duplicateDetails.push({
+          key,
+          count: records.length,
+          rows: records.map(r => r.rowNumber),
+        });
+      }
+    });
+
+    // 記錄跳過的記錄（只顯示前 5 筆）
+    if (skippedDetails.length > 0) {
+      console.log(`⚠️ Skipped ${skippedDetails.length} records with incomplete key`);
       console.log(`   Required keys: ${config.uniqueKeys.join(', ')}`);
+      skippedDetails.slice(0, 5).forEach(s => {
+        console.log(`   - Row ${s.row}: ${s.reason}`);
+      });
+      if (skippedDetails.length > 5) {
+        console.log(`   ... and ${skippedDetails.length - 5} more`);
+      }
     }
 
-    return Array.from(uniqueMap.values());
+    // 記錄重複的記錄（只顯示前 5 組）
+    if (duplicateDetails.length > 0) {
+      console.log(`📊 Found ${duplicateDetails.length} groups of duplicates (${duplicateCount} extra records)`);
+      duplicateDetails.slice(0, 5).forEach(d => {
+        console.log(`   - "${d.key}" appears ${d.count} times at rows: ${d.rows.join(', ')}`);
+      });
+      if (duplicateDetails.length > 5) {
+        console.log(`   ... and ${duplicateDetails.length - 5} more groups`);
+      }
+    }
+
+    return {
+      data: uniqueRecords,
+      details: {
+        sourceRecords: data.length,
+        duplicateRecords: duplicateCount,
+        skippedRecords: skippedDetails.length,
+        duplicateDetails,
+        skippedDetails,
+      },
+    };
   }
 
   /**
@@ -759,19 +880,33 @@ export class SyncService {
   }
 
   /**
-   * 記錄同步日誌
+   * 記錄同步日誌（含詳細資訊）
    */
   private async logSync(
     mappingId: string,
     status: 'running' | 'success' | 'failed',
     recordsSynced: number,
-    errorMessage?: string
+    errorMessage?: string,
+    syncDetails?: SyncDetails | null
   ): Promise<void> {
-    await insertAndReturn('sync_logs', {
+    // 📊 建立日誌記錄（含詳細資訊）
+    const logData: Record<string, any> = {
       mapping_id: mappingId,
       status,
       records_synced: recordsSynced,
-      error_message: errorMessage || null
-    });
+      error_message: errorMessage || null,
+    };
+
+    // 📊 如果有詳細資訊，加入日誌
+    if (syncDetails) {
+      logData.source_records = syncDetails.sourceRecords;
+      logData.duplicate_records = syncDetails.duplicateRecords;
+      logData.skipped_records = syncDetails.skippedRecords;
+      // 限制詳細資訊的大小（最多保存前 50 筆）
+      logData.duplicate_details = JSON.stringify(syncDetails.duplicateDetails.slice(0, 50));
+      logData.skipped_details = JSON.stringify(syncDetails.skippedDetails.slice(0, 50));
+    }
+
+    await insertAndReturn('sync_logs', logData);
   }
 }

@@ -7460,17 +7460,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 查詢收支記錄（支援多種篩選）
   app.get('/api/income-expense/records', isAuthenticated, requireModulePermission('income_expense'), async (req: any, res) => {
     try {
-      // 使用 service 的查詢方法
+      // 使用 service 的查詢方法（對應實際表結構 - Migration 071）
       const result = await incomeExpenseService.queryRecords({
         month: req.query.month as string,
         transaction_category: req.query.transaction_category as string,
-        course_category: req.query.course_category as string,
-        teacher_id: req.query.teacher_id as string,
-        closer_id: req.query.closer_id as string,
-        setter_id: req.query.setter_id as string,
+        teacher_name: req.query.teacher_name as string,
+        closer: req.query.closer as string,
+        setter: req.query.setter as string,
         customer_email: req.query.customer_email as string,
         search: req.query.search as string,
-        is_confirmed: req.query.is_confirmed ? req.query.is_confirmed === 'true' : undefined,
         start_date: req.query.start_date as string,
         end_date: req.query.end_date as string,
         page: req.query.page ? parseInt(req.query.page as string) : 1,
@@ -7539,19 +7537,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // 取得教師相關記錄
-  app.get('/api/income-expense/by-teacher/:teacherId', isAuthenticated, async (req: any, res) => {
+  // 取得教師相關記錄（注意：此表使用 teacher_name 字串，非 UUID）
+  app.get('/api/income-expense/by-teacher/:teacherName', isAuthenticated, async (req: any, res) => {
     try {
-      const { teacherId } = req.params;
+      const { teacherName } = req.params;
 
-      // 權限檢查：教師只能查看自己的資料（admin 可以查看所有）
-      if (req.user.id !== teacherId && !req.user.roles?.includes('super_admin') && !req.user.roles?.includes('admin')) {
-        return res.status(403).json({ success: false, error: '沒有權限查看此教師的資料' });
-      }
-
-      // 使用 service 的查詢方法
+      // 使用 service 的查詢方法（使用 teacher_name 字串欄位）
       const result = await incomeExpenseService.queryRecords({
-        teacher_id: teacherId,
+        teacher_name: teacherName,
         month: req.query.month as string,
         page: req.query.page ? parseInt(req.query.page as string) : 1,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
@@ -7581,21 +7574,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // 同步到成本獲利表
+  // 同步到成本獲利表（暫時停用 - 待實作）
   app.post('/api/income-expense/sync-to-cost-profit', async (req, res) => {
-    try {
-      const { month } = req.body;
-
-      if (!month) {
-        return res.status(400).json({ success: false, error: '請提供月份 (YYYY-MM)' });
-      }
-
-      await incomeExpenseService.syncToCostProfit(month);
-      res.json({ success: true, message: '同步完成' });
-    } catch (error: any) {
-      console.error('同步到成本獲利表失敗:', error);
-      res.status(500).json({ success: false, error: error.message });
-    }
+    res.status(501).json({ success: false, error: '此功能暫時停用' });
   });
 
   // ========================================
@@ -9804,7 +9785,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ORDER BY sl.synced_at DESC
         LIMIT 100
       `);
-      res.json({ success: true, data: result.rows });
+
+      // 格式化響應，將 mapping 資訊整理成物件
+      const formattedLogs = result.rows.map((row: any) => ({
+        ...row,
+        mapping: {
+          worksheet_name: row.worksheet_name,
+          target_table: row.target_table,
+          source_name: row.source_name,
+        },
+      }));
+
+      res.json({ success: true, data: formattedLogs });
     } catch (error: any) {
       console.error('Error fetching logs:', error);
       res.status(500).json({ success: false, error: error.message });
