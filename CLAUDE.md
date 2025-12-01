@@ -413,6 +413,41 @@ See [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md) for detailed progress tracking.
 - Test API endpoints: `test-field-mapping-api.ts`
 - Check environment setup: `test-env-check.ts`
 
+## ⚠️ MCP 驗證要求（強制執行）
+
+**CRITICAL**: 每次完成前端 UI 修改後，**必須**使用 MCP Chrome DevTools 進行驗證，確認功能正常後才能告知用戶已完成。
+
+### 驗證流程
+
+1. **修改完成後**：使用 `mcp__chrome-devtools__take_snapshot` 檢查頁面狀態
+2. **觸發更新**：點擊相關按鈕（如「重新計算」）觸發 API 呼叫
+3. **等待載入**：使用 `mcp__chrome-devtools__wait_for` 等待頁面更新完成
+4. **確認結果**：再次 snapshot 確認修改已生效
+5. **報告驗收**：只有在 MCP 驗證通過後，才能告訴用戶「已完成，可以驗收」
+
+### 驗證範例
+
+```
+1. take_snapshot → 檢查當前狀態
+2. click 按鈕 → 觸發操作
+3. wait_for "按鈕文字" → 等待載入完成
+4. take_snapshot → 確認結果正確
+5. 告知用戶：「MCP 驗證通過，功能正常」
+```
+
+### 常見驗證項目
+
+- 姓名顯示格式是否正確
+- 業績分類是否正確（一般業績/其他業績）
+- 數字計算是否正確
+- 表格資料是否正確顯示
+- 錯誤提示是否正確處理
+
+**禁止行為**：
+- ❌ 修改完程式碼就直接說「已完成」
+- ❌ 只看程式碼邏輯就認定功能正常
+- ❌ 跳過 MCP 驗證步驟
+
 ## Database Best Practices
 
 ### Date and Time Handling

@@ -40,6 +40,7 @@ export interface PerformanceBonusResult {
 
 export interface SalaryCalculationResult {
   employee_name: string;
+  display_name?: string; // 格式化後的顯示名稱（姓+名）
   period_start: string;
   period_end: string;
 
@@ -298,7 +299,15 @@ export class SalaryCalculatorService {
   }> {
     const firstNameOnly = employeeName.split(' ')[0];
 
+    // 先查詢員工的暱稱（因為 trial_class_attendance.teacher_name 可能存暱稱）
+    const settingResult = await queryDatabase(`
+      SELECT nickname FROM employee_salary_settings
+      WHERE employee_name = $1 AND is_active = true
+    `, [employeeName]);
+    const nickname = settingResult.rows[0]?.nickname || '';
+
     // 查詢體驗課打卡記錄，並聯結購買記錄取得課程類型
+    // 同時匹配：本名、暱稱、名字（firstNameOnly）
     const result = await queryDatabase(`
       SELECT
         tca.class_date,
@@ -309,11 +318,11 @@ export class SalaryCalculatorService {
       FROM trial_class_attendance tca
       LEFT JOIN trial_class_purchases tcp
         ON tca.student_email = tcp.student_email
-      WHERE (tca.teacher_name = $1 OR tca.teacher_name ILIKE $4)
+      WHERE (tca.teacher_name = $1 OR tca.teacher_name = $5 OR tca.teacher_name ILIKE $4)
         AND tca.class_date >= $2
         AND tca.class_date <= $3
       ORDER BY tca.class_date DESC
-    `, [employeeName, periodStart, periodEnd, `%${firstNameOnly}%`]);
+    `, [employeeName, periodStart, periodEnd, `%${firstNameOnly}%`, nickname]);
 
     // 按課程類型統計
     const byCourseType: {
@@ -471,6 +480,18 @@ export class SalaryCalculatorService {
     const retirementFund = insuranceData?.retirement_fund ?? parseFloat(String(setting.retirement_fund)) ?? 0;
     const serviceFee = parseFloat(String(setting.service_fee)) ?? 0;
 
+    // 1.6 格式化顯示名稱（將「名 姓」轉換成「姓名」）
+    // 例如：「微書 黃」→「黃微書」
+    const formatDisplayName = (name: string): string => {
+      const parts = name.trim().split(/\s+/);
+      if (parts.length === 2) {
+        // 假設格式是「名 姓」，轉換成「姓名」
+        return parts[1] + parts[0];
+      }
+      return name; // 如果不是兩個部分，保持原樣
+    };
+    const displayName = formatDisplayName(employeeName);
+
     // 2. 計算業績 (根據角色類型)
     const revenueData = await this.calculateRevenue(
       employeeName,
@@ -586,6 +607,7 @@ export class SalaryCalculatorService {
 
     return {
       employee_name: employeeName,
+      display_name: displayName, // 格式化後的顯示名稱（姓+名）
       period_start: periodStart,
       period_end: periodEnd,
 
@@ -679,13 +701,18 @@ export class SalaryCalculatorService {
       setter?: string;
       is_self_closed?: boolean;
       commission_amount?: number;
+      commission_formula?: string;
+      revenue_type?: 'regular' | 'other';
     }>;
-    // 老師業績分類
+    // 老師業績分類（自己成交 vs 別人成交）
     self_closed_revenue?: number;
     self_closed_commission?: number;
     other_closed_revenue?: number;
     other_closed_commission?: number;
     commission_rate_used?: number;
+    // 老師業績分類（一般業績 vs 其他業績）
+    regular_revenue?: number;
+    other_type_revenue?: number;
   }> {
     let query = '';
     let params: any[] = [];
@@ -694,9 +721,16 @@ export class SalaryCalculatorService {
       // 支援部分匹配：先嘗試完全匹配，如果沒結果則使用模糊匹配
       const firstNameOnly = employeeName.split(' ')[0]; // 取得名字部分（如 "Gladys"）
 
+      // 先查詢員工的暱稱（因為 income_expense_records 的名字欄位可能存暱稱）
+      const settingResult = await queryDatabase(`
+        SELECT nickname FROM employee_salary_settings
+        WHERE employee_name = $1 AND is_active = true
+      `, [employeeName]);
+      const nickname = settingResult.rows[0]?.nickname || '';
+
       switch (roleType) {
         case 'teacher':
-          // 教練：查詢 teacher_name 或 income_item 包含名字（支援完全匹配或名字匹配）
+          // 教練：查詢 teacher_name 或 income_item 包含名字（支援完全匹配、暱稱或名字匹配）
           query = `
             SELECT
               transaction_date,
@@ -710,8 +744,10 @@ export class SalaryCalculatorService {
             FROM income_expense_records
             WHERE (
               teacher_name = $1
+              OR teacher_name = $5
               OR teacher_name ILIKE $4
               OR income_item ILIKE $4
+              OR income_item ILIKE $6
             )
               AND transaction_date >= $2
               AND transaction_date <= $3
@@ -719,11 +755,11 @@ export class SalaryCalculatorService {
               AND amount_twd IS NOT NULL
             ORDER BY transaction_date DESC
           `;
-          params = [employeeName, periodStart, periodEnd, `%${firstNameOnly}%`];
+          params = [employeeName, periodStart, periodEnd, `%${firstNameOnly}%`, nickname, `%${nickname}%`];
           break;
 
         case 'closer':
-          // 業績人員：查詢 closer（支援完全匹配或名字匹配）
+          // 業績人員：查詢 closer（支援完全匹配、暱稱或名字匹配）
           query = `
             SELECT
               transaction_date,
@@ -735,18 +771,18 @@ export class SalaryCalculatorService {
               closer,
               setter
             FROM income_expense_records
-            WHERE (closer = $1 OR closer ILIKE $4)
+            WHERE (closer = $1 OR closer = $5 OR closer ILIKE $4)
               AND transaction_date >= $2
               AND transaction_date <= $3
               AND transaction_category = '收入'
               AND amount_twd IS NOT NULL
             ORDER BY transaction_date DESC
           `;
-          params = [employeeName, periodStart, periodEnd, `%${firstNameOnly}%`];
+          params = [employeeName, periodStart, periodEnd, `%${firstNameOnly}%`, nickname];
           break;
 
         case 'setter':
-          // 電訪人員：查詢 setter（支援完全匹配或名字匹配）
+          // 電訪人員：查詢 setter（支援完全匹配、暱稱或名字匹配）
           query = `
             SELECT
               transaction_date,
@@ -758,14 +794,14 @@ export class SalaryCalculatorService {
               closer,
               setter
             FROM income_expense_records
-            WHERE (setter = $1 OR setter ILIKE $4)
+            WHERE (setter = $1 OR setter = $5 OR setter ILIKE $4)
               AND transaction_date >= $2
               AND transaction_date <= $3
               AND transaction_category = '收入'
               AND amount_twd IS NOT NULL
             ORDER BY transaction_date DESC
           `;
-          params = [employeeName, periodStart, periodEnd, `%${firstNameOnly}%`];
+          params = [employeeName, periodStart, periodEnd, `%${firstNameOnly}%`, nickname];
           break;
       }
 
@@ -779,13 +815,35 @@ export class SalaryCalculatorService {
         item: string;
         amount: number;
         student_name?: string;
+        student_email?: string;
         payment_method?: string;
         teacher_name?: string;
         closer?: string;
         setter?: string;
         is_self_closed?: boolean;
         commission_amount?: number;
+        commission_formula?: string;
+        cumulative_before?: number;
+        cumulative_after?: number;
+        revenue_type?: 'regular' | 'other'; // 一般業績 vs 其他業績
       }> = [];
+
+      // 一般業績 vs 其他業績（老師專用）
+      let regularRevenue = 0;  // 一般業績（高階一對一訓練）
+      let otherRevenue = 0;    // 其他業績（初學專案、體驗課等）
+
+      // 判斷是否為一般業績（高階一對一訓練）
+      // 一般業績：高階一對一訓練（不包含體驗課）
+      // 其他業績：體驗課、初學專案、其他所有項目
+      const isRegularRevenue = (item: string): boolean => {
+        const itemLower = (item || '').toLowerCase();
+        // 體驗課不算一般業績
+        if (itemLower.includes('體驗課') || itemLower.includes('體驗')) {
+          return false;
+        }
+        // 只有「高階一對一」才算一般業績
+        return itemLower.includes('高階一對一');
+      };
 
       // 老師業績分類（自己成交 vs 別人成交）
       let selfClosedRevenue = 0;
@@ -799,19 +857,30 @@ export class SalaryCalculatorService {
         const category = row.income_item || '未分類';
         byCategory[category] = (byCategory[category] || 0) + amount;
 
+        // 判斷業績類型（一般 vs 其他）
+        const revenueType: 'regular' | 'other' = isRegularRevenue(category) ? 'regular' : 'other';
+        if (revenueType === 'regular') {
+          regularRevenue += amount;
+        } else {
+          otherRevenue += amount;
+        }
+
         // 判斷是否自己成交（老師專用）
-        // closer 欄位如果是老師本人的名字或代號，則為自己成交
+        // closer 欄位如果是老師本人的名字、暱稱或代號，則為自己成交
         let isSelfClosed = false;
         if (roleType === 'teacher') {
-          const closer = (row.closer || '').toLowerCase().trim();
+          const closerValue = (row.closer || '').toLowerCase().trim();
           const teacherNameLower = employeeName.toLowerCase().trim();
           const firstNameLower = firstNameOnly.toLowerCase().trim();
+          const nicknameLower = nickname.toLowerCase().trim();
 
-          // 判斷 closer 是否為老師本人
-          isSelfClosed = closer === teacherNameLower ||
-                         closer === firstNameLower ||
-                         closer.includes(firstNameLower) ||
-                         firstNameLower.includes(closer);
+          // 判斷 closer 是否為老師本人（包含暱稱比對）
+          isSelfClosed = closerValue === teacherNameLower ||
+                         closerValue === firstNameLower ||
+                         closerValue === nicknameLower ||
+                         (nicknameLower && closerValue.includes(nicknameLower)) ||
+                         closerValue.includes(firstNameLower) ||
+                         firstNameLower.includes(closerValue);
 
           if (isSelfClosed) {
             selfClosedRevenue += amount;
@@ -826,11 +895,13 @@ export class SalaryCalculatorService {
           item: row.income_item || '未分類',
           amount: amount,
           student_name: row.customer_name,
+          student_email: row.customer_email,
           payment_method: row.payment_method,
           teacher_name: row.teacher_name,
           closer: row.closer,
           setter: row.setter,
           is_self_closed: roleType === 'teacher' ? isSelfClosed : undefined,
+          revenue_type: roleType === 'teacher' ? revenueType : undefined,
         });
       });
 
@@ -840,22 +911,171 @@ export class SalaryCalculatorService {
       let commissionRateUsed = 0;
 
       if (roleType === 'teacher') {
-        // 自己成交：22% 或 23.3%（月業績 > 70萬）
-        commissionRateUsed = selfClosedRevenue > 700000 ? 0.233 : 0.22;
-        selfClosedCommission = Math.round(selfClosedRevenue * commissionRateUsed);
+        // 檢查是否為 Vicky（特殊階梯式固定金額抽成）
+        const isVicky = nickname.toLowerCase() === 'vicky' ||
+                        employeeName.includes('微書') ||
+                        employeeName.includes('Vicky');
 
-        // 別人成交：固定比例抽成（約 16.13%，即 150000 -> 24200）
-        const otherClosedRate = 24200 / 150000; // ≈ 0.1613
-        otherClosedCommission = Math.round(otherClosedRevenue * otherClosedRate);
+        if (isVicky) {
+          // Vicky 特殊規則（按學生累積金額，階梯式按比例計算）：
+          // 自己成交：
+          //   - 0~105,000：按比例抽 30,000（30,000/105,000 ≈ 28.57%）
+          //   - 105,001~150,000：這部分按比例抽 7,500（7,500/45,000 ≈ 16.67%）
+          //   - 重點：同一學生的多筆付款需要累積計算，新付款按累積後所在階梯計算
+          // 他人成交：固定 24,200
 
-        // 更新每筆記錄的抽成金額
-        records.forEach(record => {
-          if (record.is_self_closed === true) {
-            record.commission_amount = Math.round(record.amount * commissionRateUsed);
-          } else if (record.is_self_closed === false) {
-            record.commission_amount = Math.round(record.amount * otherClosedRate);
+          const TIER1_MAX = 105000;      // 第一階梯上限
+          const TIER1_COMMISSION = 30000; // 第一階梯抽成
+          const TIER2_MAX = 150000;      // 第二階梯上限
+          const TIER2_COMMISSION = 7500;  // 第二階梯抽成（105,001~150,000 這段的總抽成）
+          const TIER2_RANGE = TIER2_MAX - TIER1_MAX; // 45,000
+
+          // 計算單筆金額在特定累積起點的抽成
+          const calculateCommissionForAmount = (amount: number, cumulativeBefore: number): { commission: number; formula: string } => {
+            const cumulativeAfter = cumulativeBefore + amount;
+            let commission = 0;
+            let formulaParts: string[] = [];
+
+            // 第一階梯：0 ~ 105,000
+            if (cumulativeBefore < TIER1_MAX) {
+              const tier1Start = cumulativeBefore;
+              const tier1End = Math.min(cumulativeAfter, TIER1_MAX);
+              const tier1Amount = tier1End - tier1Start;
+              if (tier1Amount > 0) {
+                const tier1Commission = Math.round((tier1Amount / TIER1_MAX) * TIER1_COMMISSION);
+                commission += tier1Commission;
+                formulaParts.push(`第一階梯: ${tier1Amount.toLocaleString()} ÷ 105,000 × 30,000 = ${tier1Commission.toLocaleString()}`);
+              }
+            }
+
+            // 第二階梯：105,001 ~ 150,000
+            if (cumulativeAfter > TIER1_MAX && cumulativeBefore < TIER2_MAX) {
+              const tier2Start = Math.max(cumulativeBefore, TIER1_MAX);
+              const tier2End = Math.min(cumulativeAfter, TIER2_MAX);
+              const tier2Amount = tier2End - tier2Start;
+              if (tier2Amount > 0) {
+                const tier2Commission = Math.round((tier2Amount / TIER2_RANGE) * TIER2_COMMISSION);
+                commission += tier2Commission;
+                formulaParts.push(`第二階梯: ${tier2Amount.toLocaleString()} ÷ 45,000 × 7,500 = ${tier2Commission.toLocaleString()}`);
+              }
+            }
+
+            // 超過 150,000：按 25% 計算
+            if (cumulativeAfter > TIER2_MAX) {
+              const tier3Start = Math.max(cumulativeBefore, TIER2_MAX);
+              const tier3Amount = cumulativeAfter - tier3Start;
+              if (tier3Amount > 0) {
+                const tier3Commission = Math.round(tier3Amount * 0.25);
+                commission += tier3Commission;
+                formulaParts.push(`超額: ${tier3Amount.toLocaleString()} × 25% = ${tier3Commission.toLocaleString()}`);
+              }
+            }
+
+            const formula = cumulativeBefore > 0
+              ? `累積前 $${cumulativeBefore.toLocaleString()} + 本筆 $${amount.toLocaleString()} = $${cumulativeAfter.toLocaleString()}\n${formulaParts.join('\n')}\n抽成: $${commission.toLocaleString()}`
+              : `${formulaParts.join('\n')}\n抽成: $${commission.toLocaleString()}`;
+
+            return { commission, formula };
+          };
+
+          // 按學生分組，依時間排序計算累積
+          const studentRecords: { [studentName: string]: typeof records } = {};
+          records.filter(r => r.is_self_closed === true).forEach(record => {
+            const studentName = record.student_name || 'unknown';
+            if (!studentRecords[studentName]) {
+              studentRecords[studentName] = [];
+            }
+            studentRecords[studentName].push(record);
+          });
+
+          // 查詢每個學生在 periodStart 之前的歷史累積金額（Vicky 的自己成交記錄）
+          const studentNames = Object.keys(studentRecords);
+          const historicalAmounts: { [studentName: string]: number } = {};
+
+          if (studentNames.length > 0) {
+            // 查詢歷史記錄（periodStart 之前，Vicky 是 closer 的記錄）
+            const historyQuery = `
+              SELECT
+                customer_name,
+                SUM(amount_twd) as total_amount
+              FROM income_expense_records
+              WHERE customer_name = ANY($1)
+                AND transaction_date < $2
+                AND transaction_category = '收入'
+                AND amount_twd IS NOT NULL
+                AND (closer = $3 OR closer = $4 OR closer ILIKE $5)
+              GROUP BY customer_name
+            `;
+            const historyResult = await queryDatabase(historyQuery, [
+              studentNames,
+              periodStart,
+              employeeName,
+              nickname,
+              `%${firstNameOnly}%`
+            ]);
+
+            historyResult.rows.forEach(row => {
+              historicalAmounts[row.customer_name] = parseFloat(row.total_amount || 0);
+            });
+
+            console.log('[Vicky Commission] 歷史累積金額:', historicalAmounts);
           }
-        });
+
+          // 對每個學生的記錄按日期排序並計算累積抽成（包含歷史累積）
+          for (const studentName in studentRecords) {
+            const studentRecs = studentRecords[studentName].sort((a, b) =>
+              new Date(a.date).getTime() - new Date(b.date).getTime()
+            );
+
+            // 從歷史累積金額開始計算
+            let cumulativeAmount = historicalAmounts[studentName] || 0;
+            const historicalAmount = cumulativeAmount;
+
+            for (const record of studentRecs) {
+              const { commission, formula } = calculateCommissionForAmount(record.amount, cumulativeAmount);
+              record.commission_amount = commission;
+              // 如果有歷史累積，在公式中標註
+              record.commission_formula = historicalAmount > 0
+                ? `歷史累積: $${historicalAmount.toLocaleString()}\n${formula}`
+                : formula;
+              record.cumulative_before = cumulativeAmount;
+              record.cumulative_after = cumulativeAmount + record.amount;
+              cumulativeAmount += record.amount;
+              selfClosedCommission += commission;
+            }
+          }
+
+          // 處理他人成交
+          records.filter(r => r.is_self_closed === false).forEach(record => {
+            record.commission_amount = 24200;
+            record.commission_formula = '他人成交固定 24,200';
+            otherClosedCommission += 24200;
+          });
+
+          // 計算等效抽成比例（用於顯示）
+          commissionRateUsed = selfClosedRevenue > 0 ? selfClosedCommission / selfClosedRevenue : 0;
+        } else {
+          // 其他老師：自己成交 22% 或 23.3%（月業績 > 70萬）
+          commissionRateUsed = selfClosedRevenue > 700000 ? 0.233 : 0.22;
+          selfClosedCommission = Math.round(selfClosedRevenue * commissionRateUsed);
+
+          // 別人成交：固定比例抽成（約 16.13%，即 150000 -> 24200）
+          const otherClosedRate = 24200 / 150000; // ≈ 0.1613
+          otherClosedCommission = Math.round(otherClosedRevenue * otherClosedRate);
+
+          // 更新每筆記錄的抽成金額（非 Vicky，含計算說明）
+          const ratePercent = (commissionRateUsed * 100).toFixed(1);
+          const otherRatePercent = (otherClosedRate * 100).toFixed(1);
+          records.forEach(record => {
+            if (record.is_self_closed === true) {
+              record.commission_amount = Math.round(record.amount * commissionRateUsed);
+              record.commission_formula = `${record.amount.toLocaleString()} × ${ratePercent}% = ${record.commission_amount.toLocaleString()}`;
+            } else if (record.is_self_closed === false) {
+              record.commission_amount = Math.round(record.amount * otherClosedRate);
+              record.commission_formula = `${record.amount.toLocaleString()} × ${otherRatePercent}% = ${record.commission_amount.toLocaleString()}`;
+            }
+          });
+        }
       }
 
       return {
@@ -863,12 +1083,15 @@ export class SalaryCalculatorService {
         byCategory,
         recordCount: records.length,
         records,
-        // 老師業績分類
+        // 老師業績分類（自己成交 vs 別人成交）
         self_closed_revenue: roleType === 'teacher' ? selfClosedRevenue : undefined,
         self_closed_commission: roleType === 'teacher' ? selfClosedCommission : undefined,
         other_closed_revenue: roleType === 'teacher' ? otherClosedRevenue : undefined,
         other_closed_commission: roleType === 'teacher' ? otherClosedCommission : undefined,
         commission_rate_used: roleType === 'teacher' ? commissionRateUsed : undefined,
+        // 老師業績分類（一般業績 vs 其他業績）
+        regular_revenue: roleType === 'teacher' ? regularRevenue : undefined,
+        other_type_revenue: roleType === 'teacher' ? otherRevenue : undefined,
       };
   }
 

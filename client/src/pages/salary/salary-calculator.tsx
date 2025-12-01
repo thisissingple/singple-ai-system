@@ -17,10 +17,56 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Calculator, Save, RefreshCw, Download, FileSpreadsheet, Camera } from 'lucide-react';
+import { Calculator, Save, RefreshCw, Download, FileSpreadsheet, Camera, Info, ArrowUpDown, Filter, ChevronUp, ChevronDown, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
+
+// 計算公式 Dialog 的狀態類型
+interface FormulaDialogState {
+  open: boolean;
+  title: string;
+  content: string;
+}
+
+// 學員歷史記錄 Dialog 的狀態類型
+interface StudentHistoryDialogState {
+  open: boolean;
+  studentName: string;
+  loading: boolean;
+  totalAmount: number;
+  records: Array<{
+    date: string;
+    item: string;
+    amount: number;
+    payment_method?: string;
+    teacher_name?: string;
+    closer?: string;
+    setter?: string;
+  }>;
+}
+
+// 表格排序類型
+type SortField = 'date' | 'item' | 'student_name' | 'amount' | 'commission_amount' | 'revenue_type';
+type SortDirection = 'asc' | 'desc';
+
+interface SortConfig {
+  field: SortField;
+  direction: SortDirection;
+}
+
+// 表格過濾類型
+interface FilterConfig {
+  revenue_type: 'all' | 'regular' | 'other';
+  is_self_closed: 'all' | 'self' | 'other';
+  searchText: string;
+}
 
 interface EmployeeSetting {
   employee_name: string;
@@ -38,6 +84,7 @@ interface EmployeeSetting {
 
 interface SalaryResult {
   employee_name: string;
+  display_name?: string; // 格式化後的顯示名稱（姓+名）
   period_start: string;
   period_end: string;
   role_type: 'teacher' | 'closer' | 'setter';
@@ -80,19 +127,25 @@ interface SalaryResult {
       item: string;
       amount: number;
       student_name?: string;
+      student_email?: string;
       payment_method?: string;
       teacher_name?: string;
       closer?: string;
       setter?: string;
       is_self_closed?: boolean;
       commission_amount?: number;
+      commission_formula?: string; // 計算說明
+      revenue_type?: 'regular' | 'other'; // 一般業績 vs 其他業績
     }>;
-    // 老師業績分類
+    // 老師業績分類（自己成交 vs 別人成交）
     self_closed_revenue?: number;
     self_closed_commission?: number;
     other_closed_revenue?: number;
     other_closed_commission?: number;
     commission_rate_used?: number;
+    // 老師業績分類（一般業績 vs 其他業績）
+    regular_revenue?: number;
+    other_type_revenue?: number;
   };
   // 老師專用
   trial_class_fee?: number;           // 體驗課鐘點費
@@ -139,6 +192,35 @@ export default function SalaryCalculator() {
   const revenueDetailsRef = useRef<HTMLDivElement>(null);
   const salaryTableRef = useRef<HTMLDivElement>(null);
   const [employees, setEmployees] = useState<EmployeeSetting[]>([]);
+
+  // 計算公式 Dialog 狀態
+  const [formulaDialog, setFormulaDialog] = useState<FormulaDialogState>({
+    open: false,
+    title: '',
+    content: '',
+  });
+
+  // 學員歷史記錄 Dialog 狀態
+  const [studentHistoryDialog, setStudentHistoryDialog] = useState<StudentHistoryDialogState>({
+    open: false,
+    studentName: '',
+    loading: false,
+    totalAmount: 0,
+    records: [],
+  });
+
+  // 表格排序狀態
+  const [sortConfig, setSortConfig] = useState<SortConfig>({
+    field: 'date',
+    direction: 'desc',
+  });
+
+  // 表格過濾狀態
+  const [filterConfig, setFilterConfig] = useState<FilterConfig>({
+    revenue_type: 'all',
+    is_self_closed: 'all',
+    searchText: '',
+  });
 
   // 從 localStorage 讀取初始狀態
   const savedState = getSavedState();
@@ -603,6 +685,109 @@ export default function SalaryCalculator() {
     return `$${numValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   };
 
+  // 查詢學員歷史付款記錄
+  const fetchStudentHistory = async (studentName: string) => {
+    setStudentHistoryDialog({
+      open: true,
+      studentName,
+      loading: true,
+      totalAmount: 0,
+      records: [],
+    });
+
+    try {
+      const response = await fetch(`/api/salary/student-history/${encodeURIComponent(studentName)}`);
+      const data = await response.json();
+
+      if (data.success) {
+        setStudentHistoryDialog({
+          open: true,
+          studentName,
+          loading: false,
+          totalAmount: data.data.total_amount,
+          records: data.data.records,
+        });
+      } else {
+        throw new Error(data.error);
+      }
+    } catch (error) {
+      console.error('Failed to fetch student history:', error);
+      toast({
+        title: '載入失敗',
+        description: '無法載入學員歷史記錄',
+        variant: 'destructive',
+      });
+      setStudentHistoryDialog(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  // 排序表格記錄
+  const handleSort = (field: SortField) => {
+    setSortConfig(prev => ({
+      field,
+      direction: prev.field === field && prev.direction === 'desc' ? 'asc' : 'desc',
+    }));
+  };
+
+  // 獲取排序和過濾後的記錄
+  const getFilteredAndSortedRecords = () => {
+    if (!displayResult?.details?.records) return [];
+
+    let records = [...displayResult.details.records];
+
+    // 過濾
+    if (filterConfig.revenue_type !== 'all') {
+      records = records.filter(r => r.revenue_type === filterConfig.revenue_type);
+    }
+    if (filterConfig.is_self_closed !== 'all') {
+      records = records.filter(r =>
+        filterConfig.is_self_closed === 'self' ? r.is_self_closed === true : r.is_self_closed === false
+      );
+    }
+    if (filterConfig.searchText) {
+      const searchLower = filterConfig.searchText.toLowerCase();
+      records = records.filter(r =>
+        (r.student_name || '').toLowerCase().includes(searchLower) ||
+        (r.item || '').toLowerCase().includes(searchLower)
+      );
+    }
+
+    // 排序
+    records.sort((a, b) => {
+      let comparison = 0;
+      switch (sortConfig.field) {
+        case 'date':
+          comparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+          break;
+        case 'item':
+          comparison = (a.item || '').localeCompare(b.item || '');
+          break;
+        case 'student_name':
+          comparison = (a.student_name || '').localeCompare(b.student_name || '');
+          break;
+        case 'amount':
+          comparison = a.amount - b.amount;
+          break;
+        case 'commission_amount':
+          comparison = (a.commission_amount || 0) - (b.commission_amount || 0);
+          break;
+        case 'revenue_type':
+          comparison = (a.revenue_type || '').localeCompare(b.revenue_type || '');
+          break;
+      }
+      return sortConfig.direction === 'asc' ? comparison : -comparison;
+    });
+
+    return records;
+  };
+
+  // 獲取業績類型標籤
+  const getRevenueTypeLabel = (type?: 'regular' | 'other') => {
+    if (type === 'regular') return '一般業績';
+    if (type === 'other') return '其他業績';
+    return '-';
+  };
+
   return (
     <DashboardLayout sidebarSections={sidebarConfig} title="薪資計算器">
       <div className="container mx-auto p-6 space-y-6">
@@ -670,7 +855,7 @@ export default function SalaryCalculator() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>
-              {displayResult ? `${displayResult.employee_name} 的薪資試算結果` : '薪資試算表'}
+              {displayResult ? `${displayResult.display_name || displayResult.employee_name} 的薪資試算結果` : '薪資試算表'}
             </CardTitle>
             {displayResult && (
               <div className="flex gap-2">
@@ -695,7 +880,7 @@ export default function SalaryCalculator() {
                   <tr className="bg-gradient-to-r from-slate-50 to-slate-100 border-b-2 border-slate-200">
                     <td className="p-4 font-semibold text-slate-700 w-1/4">姓名</td>
                     <td className="p-4 text-right font-bold text-lg text-slate-900" colSpan={3}>
-                      {displayResult?.employee_name || selectedEmployee || '請選擇員工'}
+                      {displayResult?.display_name || displayResult?.employee_name || selectedEmployee || '請選擇員工'}
                     </td>
                   </tr>
                   <tr className="border-t hover:bg-slate-50 transition-colors">
@@ -1175,37 +1360,207 @@ export default function SalaryCalculator() {
                     </Button>
                   </div>
                 </div>
+
+                {/* 過濾控制區 */}
+                <div className="mb-3 p-3 bg-muted/30 rounded-lg border">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <Filter className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">過濾：</span>
+                    </div>
+                    {/* 業績類型過濾 */}
+                    {displayResult.role_type === 'teacher' && (
+                      <Select
+                        value={filterConfig.revenue_type}
+                        onValueChange={(v: 'all' | 'regular' | 'other') => setFilterConfig(prev => ({ ...prev, revenue_type: v }))}
+                      >
+                        <SelectTrigger className="w-32 h-8">
+                          <SelectValue placeholder="業績類型" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">全部業績</SelectItem>
+                          <SelectItem value="regular">一般業績</SelectItem>
+                          <SelectItem value="other">其他業績</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {/* 成交類型過濾 */}
+                    {displayResult.role_type === 'teacher' && (
+                      <Select
+                        value={filterConfig.is_self_closed}
+                        onValueChange={(v: 'all' | 'self' | 'other') => setFilterConfig(prev => ({ ...prev, is_self_closed: v }))}
+                      >
+                        <SelectTrigger className="w-32 h-8">
+                          <SelectValue placeholder="成交類型" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">全部成交</SelectItem>
+                          <SelectItem value="self">自己成交</SelectItem>
+                          <SelectItem value="other">他人成交</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {/* 搜尋框 */}
+                    <div className="flex-1 min-w-[200px]">
+                      <Input
+                        type="text"
+                        placeholder="搜尋學員名稱或項目..."
+                        value={filterConfig.searchText}
+                        onChange={(e) => setFilterConfig(prev => ({ ...prev, searchText: e.target.value }))}
+                        className="h-8"
+                      />
+                    </div>
+                    {/* 清除過濾 */}
+                    {(filterConfig.revenue_type !== 'all' || filterConfig.is_self_closed !== 'all' || filterConfig.searchText) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setFilterConfig({ revenue_type: 'all', is_self_closed: 'all', searchText: '' })}
+                        className="h-8"
+                      >
+                        <X className="h-3 w-3 mr-1" />
+                        清除
+                      </Button>
+                    )}
+                  </div>
+                  {/* 顯示過濾後筆數 */}
+                  {(filterConfig.revenue_type !== 'all' || filterConfig.is_self_closed !== 'all' || filterConfig.searchText) && (
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      顯示 {getFilteredAndSortedRecords().length} / {displayResult.details.recordCount} 筆
+                    </div>
+                  )}
+                </div>
+
+                {/* 業績類型統計（老師專用） */}
+                {displayResult.role_type === 'teacher' && displayResult.details.regular_revenue !== undefined && (
+                  <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <div className="font-semibold text-blue-700">一般業績（高階一對一訓練）</div>
+                      <div className="text-xl font-bold text-blue-600">{formatCurrency(displayResult.details.regular_revenue || 0)}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="font-semibold text-purple-700">其他業績（初學專案/體驗課）</div>
+                      <div className="text-xl font-bold text-purple-600">{formatCurrency(displayResult.details.other_type_revenue || 0)}</div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="border rounded-lg overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50">
                       <tr>
-                        <th className="p-2 text-left font-medium">日期</th>
-                        <th className="p-2 text-left font-medium">項目</th>
-                        <th className="p-2 text-left font-medium">學員名稱</th>
+                        <th
+                          className="p-2 text-left font-medium cursor-pointer hover:bg-muted/70 transition-colors"
+                          onClick={() => handleSort('date')}
+                        >
+                          <div className="flex items-center gap-1">
+                            日期
+                            {sortConfig.field === 'date' ? (
+                              sortConfig.direction === 'desc' ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />
+                            ) : <ArrowUpDown className="h-3 w-3 text-muted-foreground" />}
+                          </div>
+                        </th>
+                        <th
+                          className="p-2 text-left font-medium cursor-pointer hover:bg-muted/70 transition-colors"
+                          onClick={() => handleSort('item')}
+                        >
+                          <div className="flex items-center gap-1">
+                            項目
+                            {sortConfig.field === 'item' ? (
+                              sortConfig.direction === 'desc' ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />
+                            ) : <ArrowUpDown className="h-3 w-3 text-muted-foreground" />}
+                          </div>
+                        </th>
+                        <th
+                          className="p-2 text-left font-medium cursor-pointer hover:bg-muted/70 transition-colors"
+                          onClick={() => handleSort('student_name')}
+                        >
+                          <div className="flex items-center gap-1">
+                            學員名稱
+                            {sortConfig.field === 'student_name' ? (
+                              sortConfig.direction === 'desc' ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />
+                            ) : <ArrowUpDown className="h-3 w-3 text-muted-foreground" />}
+                          </div>
+                        </th>
                         <th className="p-2 text-left font-medium">付款方式</th>
                         <th className="p-2 text-left font-medium">諮詢師</th>
                         <th className="p-2 text-left font-medium">電訪人員</th>
                         {displayResult.role_type === 'teacher' && (
+                          <th
+                            className="p-2 text-center font-medium cursor-pointer hover:bg-muted/70 transition-colors"
+                            onClick={() => handleSort('revenue_type')}
+                          >
+                            <div className="flex items-center justify-center gap-1">
+                              業績類型
+                              {sortConfig.field === 'revenue_type' ? (
+                                sortConfig.direction === 'desc' ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />
+                              ) : <ArrowUpDown className="h-3 w-3 text-muted-foreground" />}
+                            </div>
+                          </th>
+                        )}
+                        {displayResult.role_type === 'teacher' && (
                           <th className="p-2 text-center font-medium">成交類型</th>
                         )}
-                        <th className="p-2 text-right font-medium">實收金額</th>
+                        <th
+                          className="p-2 text-right font-medium cursor-pointer hover:bg-muted/70 transition-colors"
+                          onClick={() => handleSort('amount')}
+                        >
+                          <div className="flex items-center justify-end gap-1">
+                            實收金額
+                            {sortConfig.field === 'amount' ? (
+                              sortConfig.direction === 'desc' ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />
+                            ) : <ArrowUpDown className="h-3 w-3 text-muted-foreground" />}
+                          </div>
+                        </th>
                         {displayResult.role_type === 'teacher' && (
-                          <th className="p-2 text-right font-medium">抽成金額</th>
+                          <th
+                            className="p-2 text-right font-medium cursor-pointer hover:bg-muted/70 transition-colors"
+                            onClick={() => handleSort('commission_amount')}
+                          >
+                            <div className="flex items-center justify-end gap-1">
+                              抽成金額
+                              {sortConfig.field === 'commission_amount' ? (
+                                sortConfig.direction === 'desc' ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />
+                              ) : <ArrowUpDown className="h-3 w-3 text-muted-foreground" />}
+                            </div>
+                          </th>
                         )}
                       </tr>
                     </thead>
                     <tbody>
-                      {displayResult.details.records.map((record, index) => {
+                      {getFilteredAndSortedRecords().map((record, index) => {
                         const date = new Date(record.date);
                         const formattedDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
                         return (
                           <tr key={index} className="border-t hover:bg-muted/20">
                             <td className="p-2">{formattedDate}</td>
                             <td className="p-2">{record.item}</td>
-                            <td className="p-2">{record.student_name || '-'}</td>
+                            <td className="p-2">
+                              {record.student_name ? (
+                                <button
+                                  className="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer font-medium"
+                                  onClick={() => fetchStudentHistory(record.student_name!)}
+                                >
+                                  {record.student_name}
+                                </button>
+                              ) : '-'}
+                            </td>
                             <td className="p-2">{record.payment_method || '-'}</td>
                             <td className="p-2">{record.closer || '-'}</td>
                             <td className="p-2">{record.setter || '-'}</td>
+                            {displayResult.role_type === 'teacher' && (
+                              <td className="p-2 text-center">
+                                {record.revenue_type === 'regular' ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                                    一般業績
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
+                                    其他業績
+                                  </span>
+                                )}
+                              </td>
+                            )}
                             {displayResult.role_type === 'teacher' && (
                               <td className="p-2 text-center">
                                 {record.is_self_closed ? (
@@ -1224,14 +1579,26 @@ export default function SalaryCalculator() {
                             </td>
                             {displayResult.role_type === 'teacher' && (
                               <td className="p-2 text-right font-semibold text-green-600">
-                                {formatCurrency(record.commission_amount || 0)}
+                                <div className="flex items-center justify-end gap-1">
+                                  {formatCurrency(record.commission_amount || 0)}
+                                  {record.commission_formula && (
+                                    <Info
+                                      className="h-3.5 w-3.5 text-gray-400 hover:text-blue-600 cursor-pointer transition-colors"
+                                      onClick={() => setFormulaDialog({
+                                        open: true,
+                                        title: `${record.student_name || '學員'} 抽成計算`,
+                                        content: record.commission_formula || '',
+                                      })}
+                                    />
+                                  )}
+                                </div>
                               </td>
                             )}
                           </tr>
                         );
                       })}
                       <tr className="border-t bg-blue-50 font-bold">
-                        <td colSpan={displayResult.role_type === 'teacher' ? 7 : 6} className="p-2 text-right">總計</td>
+                        <td colSpan={displayResult.role_type === 'teacher' ? 9 : 6} className="p-2 text-right">總計</td>
                         <td className="p-2 text-right text-blue-600">
                           {formatCurrency(displayResult.total_revenue)}
                         </td>
@@ -1244,34 +1611,57 @@ export default function SalaryCalculator() {
                     </tbody>
                   </table>
                   {/* 老師業績分類統計 */}
-                  {displayResult.role_type === 'teacher' && displayResult.details.self_closed_revenue !== undefined && (
-                    <div className="border-t bg-gradient-to-r from-green-50 to-orange-50 p-3">
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div className="space-y-1">
-                          <div className="font-semibold text-green-700">自己成交（抽成 {((displayResult.details.commission_rate_used || 0.22) * 100).toFixed(1)}%）</div>
-                          <div className="flex justify-between">
-                            <span>業績總額:</span>
-                            <span className="font-bold">{formatCurrency(displayResult.details.self_closed_revenue || 0)}</span>
+                  {displayResult.role_type === 'teacher' && displayResult.details.self_closed_revenue !== undefined && (() => {
+                    // 判斷是否為 Vicky（特殊階梯規則）
+                    const isVicky = displayResult.employee_name.includes('微書') ||
+                                   displayResult.employee_name.toLowerCase().includes('vicky');
+                    return (
+                      <div className="border-t bg-gradient-to-r from-green-50 to-orange-50 p-3">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div className="space-y-1">
+                            {isVicky ? (
+                              <>
+                                <div className="font-semibold text-green-700 flex items-center gap-1">
+                                  自己成交（階梯式抽成）
+                                  <Info
+                                    className="h-3.5 w-3.5 text-green-500 hover:text-green-700 cursor-pointer transition-colors"
+                                    onClick={() => setFormulaDialog({
+                                      open: true,
+                                      title: 'Vicky 階梯式抽成規則',
+                                      content: `按學生累積金額計算：\n\n第一階梯：0 ~ 105,000\n→ 按比例抽 30,000（約28.57%）\n\n第二階梯：105,001 ~ 150,000\n→ 這部分按比例抽 7,500（約16.67%）\n\n第三階梯：超過 150,000\n→ 超出部分抽 25%\n\n計算範例：\n• 單筆 $150,000 = $30,000 + $7,500 = $37,500\n• 單筆 $120,000 = $30,000 + $2,500 = $32,500\n\n注意：同一學生的多筆付款會累計計算，新付款使用累積後的階梯比例。`,
+                                    })}
+                                  />
+                                </div>
+                              </>
+                            ) : (
+                              <div className="font-semibold text-green-700">自己成交（抽成 {((displayResult.details.commission_rate_used || 0.22) * 100).toFixed(1)}%）</div>
+                            )}
+                            <div className="flex justify-between">
+                              <span>業績總額:</span>
+                              <span className="font-bold">{formatCurrency(displayResult.details.self_closed_revenue || 0)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>抽成金額:</span>
+                              <span className="font-bold text-green-600">{formatCurrency(displayResult.details.self_closed_commission || 0)}</span>
+                            </div>
                           </div>
-                          <div className="flex justify-between">
-                            <span>抽成金額:</span>
-                            <span className="font-bold text-green-600">{formatCurrency(displayResult.details.self_closed_commission || 0)}</span>
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          <div className="font-semibold text-orange-700">他人成交（固定比例 16.13%）</div>
-                          <div className="flex justify-between">
-                            <span>業績總額:</span>
-                            <span className="font-bold">{formatCurrency(displayResult.details.other_closed_revenue || 0)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>抽成金額:</span>
-                            <span className="font-bold text-orange-600">{formatCurrency(displayResult.details.other_closed_commission || 0)}</span>
+                          <div className="space-y-1">
+                            <div className="font-semibold text-orange-700">
+                              他人成交（{isVicky ? '固定 $24,200/筆' : '固定比例 16.13%'}）
+                            </div>
+                            <div className="flex justify-between">
+                              <span>業績總額:</span>
+                              <span className="font-bold">{formatCurrency(displayResult.details.other_closed_revenue || 0)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>抽成金額:</span>
+                              <span className="font-bold text-orange-600">{formatCurrency(displayResult.details.other_closed_commission || 0)}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -1364,6 +1754,90 @@ export default function SalaryCalculator() {
             )}
           </CardContent>
         </Card>
+
+        {/* 計算公式 Dialog */}
+        <Dialog open={formulaDialog.open} onOpenChange={(open) => setFormulaDialog(prev => ({ ...prev, open }))}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>{formulaDialog.title}</DialogTitle>
+            </DialogHeader>
+            <div className="mt-2 p-4 bg-muted/50 rounded-lg">
+              <pre className="text-sm whitespace-pre-wrap font-mono leading-relaxed">
+                {formulaDialog.content}
+              </pre>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* 學員歷史記錄 Dialog */}
+        <Dialog open={studentHistoryDialog.open} onOpenChange={(open) => setStudentHistoryDialog(prev => ({ ...prev, open }))}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>
+                {studentHistoryDialog.studentName} 的付款記錄
+              </DialogTitle>
+            </DialogHeader>
+            <div className="mt-4">
+              {studentHistoryDialog.loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+                  <span className="ml-2 text-muted-foreground">載入中...</span>
+                </div>
+              ) : (
+                <>
+                  {/* 總金額統計 */}
+                  <div className="mb-4 p-4 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border">
+                    <div className="text-sm text-muted-foreground">累計付款總額</div>
+                    <div className="text-2xl font-bold text-green-600">
+                      {formatCurrency(studentHistoryDialog.totalAmount)}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      共 {studentHistoryDialog.records.length} 筆記錄
+                    </div>
+                  </div>
+
+                  {/* 記錄列表 */}
+                  {studentHistoryDialog.records.length > 0 ? (
+                    <div className="border rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/50">
+                          <tr>
+                            <th className="p-2 text-left font-medium">日期</th>
+                            <th className="p-2 text-left font-medium">項目</th>
+                            <th className="p-2 text-left font-medium">付款方式</th>
+                            <th className="p-2 text-left font-medium">教練</th>
+                            <th className="p-2 text-right font-medium">金額</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {studentHistoryDialog.records.map((record, index) => {
+                            const date = new Date(record.date);
+                            const formattedDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                            return (
+                              <tr key={index} className="border-t hover:bg-muted/20">
+                                <td className="p-2">{formattedDate}</td>
+                                <td className="p-2">{record.item}</td>
+                                <td className="p-2">{record.payment_method || '-'}</td>
+                                <td className="p-2">{record.teacher_name || '-'}</td>
+                                <td className="p-2 text-right font-semibold text-green-600">
+                                  {formatCurrency(record.amount)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      找不到此學員的付款記錄
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

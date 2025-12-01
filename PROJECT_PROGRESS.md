@@ -2,14 +2,79 @@
 
 > **最後更新**: 2025-12-01
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ 同步管理頁面增強完成
-> **當前階段**: Google Sheets 同步詳細追蹤
-> **今日進度**: 同步記錄頁面新增重複/跳過記錄詳情顯示
+> **專案狀態**: ✅ 薪資計算器 UI 優化完成
+> **當前階段**: 薪資計算器增強
+> **今日進度**: 姓名顯示格式修正 + 業績分類標籤功能
 > **整體進度**: 100% ████████████████████
 
 ---
 
 ## 📅 2025-12-01 更新日誌
+
+### 💰 薪資計算器 UI 優化（MCP 驗證通過）
+
+#### 需求背景
+用戶要求改善薪資計算器的顯示方式：
+1. 姓名顯示格式：將 "名 姓"（如「微書 黃」）改為 "姓名"（如「黃微書」）
+2. 業績分類標籤：區分「一般業績」（高階一對一訓練）和「其他業績」（體驗課）
+
+#### 實作內容
+
+**1. 後端 - 姓名格式化函數**
+- 檔案：[`server/services/salary-calculator-service.ts`](server/services/salary-calculator-service.ts)
+- 新增 `formatDisplayName()` 函數（第 485-493 行）：
+  ```typescript
+  const formatDisplayName = (name: string): string => {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 2) {
+      return parts[1] + parts[0]; // 姓 + 名
+    }
+    return name;
+  };
+  ```
+- API 返回新增 `display_name` 欄位
+
+**2. 後端 - 業績分類邏輯**
+- 新增 `isRegularRevenue()` 函數（第 838-846 行）：
+  ```typescript
+  const isRegularRevenue = (item: string): boolean => {
+    const itemLower = (item || '').toLowerCase();
+    if (itemLower.includes('體驗課') || itemLower.includes('體驗')) {
+      return false; // 體驗課 → 其他業績
+    }
+    return itemLower.includes('高階一對一'); // 高階一對一 → 一般業績
+  };
+  ```
+- 每筆業績記錄新增 `revenue_type: 'regular' | 'other'`
+
+**3. 前端 - UI 顯示**
+- 檔案：[`client/src/pages/salary/salary-calculator.tsx`](client/src/pages/salary/salary-calculator.tsx)
+- 標題使用 `display_name`（第 857 行）
+- 姓名欄位使用 `display_name`（第 882 行）
+- 業績類型標籤顯示（第 1552-1560 行）：
+  - 一般業績：藍色標籤 (`bg-blue-100 text-blue-700`)
+  - 其他業績：紫色標籤 (`bg-purple-100 text-purple-700`)
+
+#### MCP 驗證結果
+
+✅ **姓名顯示格式**：
+- 標題：「黃微書 的薪資試算結果」
+- 姓名欄位：「黃微書」
+
+✅ **業績分類**：
+| 項目 | 業績類型 |
+|------|---------|
+| Vicky高階一對一訓練 | 一般業績 (藍色) |
+| Vicky一對一體驗課 | 其他業績 (紫色) |
+
+#### 開發規範更新
+
+在 `CLAUDE.md` 新增「MCP 驗證要求」章節，規定：
+- 每次前端修改後必須使用 MCP Chrome DevTools 驗證
+- 驗證通過後才能告知用戶「已完成」
+- 禁止只看程式碼就認定功能正常
+
+---
 
 ### 📊 Google Sheets 同步詳細追蹤功能
 
