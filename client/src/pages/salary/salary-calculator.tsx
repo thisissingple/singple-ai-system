@@ -24,6 +24,7 @@ import html2canvas from 'html2canvas';
 
 interface EmployeeSetting {
   employee_name: string;
+  nickname?: string;  // 暱稱（下拉選單顯示用）
   role_type: string;
   base_salary: number;
   commission_rate: number;
@@ -625,7 +626,7 @@ export default function SalaryCalculator() {
                 <SelectContent>
                   {employees.map((emp) => (
                     <SelectItem key={emp.employee_name} value={emp.employee_name}>
-                      {emp.employee_name} ({emp.role_type})
+                      {emp.nickname || emp.employee_name} ({emp.role_type})
                     </SelectItem>
                   ))}
                 </SelectContent>

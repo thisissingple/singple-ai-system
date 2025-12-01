@@ -7611,9 +7611,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           COALESCE(
             json_agg(
               DISTINCT jsonb_build_object(
-                'type', bi.identity_type,
-                'code', bi.identity_code,
-                'display_name', bi.display_name
+                'id', bi.id,
+                'identity_type', bi.identity_type,
+                'identity_code', bi.identity_code,
+                'display_name', bi.display_name,
+                'is_active', bi.is_active,
+                'is_primary', bi.is_primary
               )
             ) FILTER (WHERE bi.id IS NOT NULL),
             '[]'::json
@@ -7648,7 +7651,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ORDER BY u.created_at DESC
       `);
 
-      res.json({ success: true, data: result.rows });
+      // 轉換資料格式為前端需要的格式
+      const employeeList = result.rows.map(row => ({
+        user: {
+          id: row.id,
+          email: row.email,
+          first_name: row.first_name,
+          last_name: row.last_name,
+          role: row.role,
+          department: row.department,
+          status: row.status || 'active',
+          created_at: row.created_at,
+        },
+        profile: row.employee_number || row.hire_date ? {
+          employee_number: row.employee_number,
+          national_id: row.national_id,
+          hire_date: row.hire_date,
+          resign_date: row.resign_date,
+          employment_type: row.employment_type,
+          residential_address: row.residential_address,
+          emergency_contact_name: row.emergency_contact_name,
+          emergency_contact_phone: row.emergency_contact_phone,
+        } : null,
+        identities: row.business_identities || [],
+        compensation: [],
+        insurance: [],
+        latest_compensation: row.base_salary ? {
+          base_salary: row.base_salary,
+          commission_rate: row.commission_rate,
+        } : null,
+      }));
+
+      res.json({ success: true, data: employeeList });
     } catch (error: any) {
       console.error('取得員工列表失敗:', error);
       res.status(500).json({ success: false, error: error.message });
@@ -7670,10 +7704,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             json_agg(
               DISTINCT jsonb_build_object(
                 'id', bi.id,
-                'type', bi.identity_type,
-                'code', bi.identity_code,
+                'identity_type', bi.identity_type,
+                'identity_code', bi.identity_code,
                 'display_name', bi.display_name,
-                'is_active', bi.is_active
+                'effective_from', bi.effective_from,
+                'effective_to', bi.effective_to,
+                'is_active', bi.is_active,
+                'is_primary', bi.is_primary
               )
             ) FILTER (WHERE bi.id IS NOT NULL),
             '[]'::json
@@ -7726,7 +7763,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ success: false, error: '找不到該員工' });
       }
 
-      res.json({ success: true, employee: result.rows[0] });
+      // 轉換資料格式為前端需要的格式
+      const row = result.rows[0];
+      const employeeData = {
+        user: {
+          id: row.id,
+          email: row.email,
+          first_name: row.first_name,
+          last_name: row.last_name,
+          role: row.role,
+          department: row.department,
+          status: row.status || 'active',
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+        },
+        profile: row.employee_number || row.hire_date ? {
+          employee_number: row.employee_number,
+          national_id: row.national_id,
+          hire_date: row.hire_date,
+          resign_date: row.resign_date,
+          employment_type: row.employment_type,
+          residential_address: row.residential_address,
+          emergency_contact_name: row.emergency_contact_name,
+          emergency_contact_phone: row.emergency_contact_phone,
+        } : null,
+        identities: row.business_identities || [],
+        compensation: [],
+        insurance: [],
+        latest_compensation: row.base_salary ? {
+          id: row.salary_setting_id,
+          base_salary: row.base_salary,
+          commission_type: row.commission_type,
+          commission_rate: row.commission_rate,
+          effective_from: row.effective_from,
+        } : null,
+      };
+
+      res.json({ success: true, data: employeeData });
     } catch (error: any) {
       console.error('取得員工詳細資料失敗:', error);
       res.status(500).json({ success: false, error: error.message });
@@ -7966,6 +8039,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // 設定主身份
+  app.put('/api/employees/:userId/business-identities/:identityId/set-primary', isAuthenticated, async (req, res) => {
+    try {
+      const { userId, identityId } = req.params;
+
+      // 先將該員工所有身份的 is_primary 設為 false
+      await queryDatabase(`
+        UPDATE business_identities
+        SET is_primary = false
+        WHERE user_id = $1
+      `, [userId]);
+
+      // 再將指定的身份設為主身份
+      await queryDatabase(`
+        UPDATE business_identities
+        SET is_primary = true
+        WHERE id = $1 AND user_id = $2
+      `, [identityId, userId]);
+
+      res.json({ success: true, message: '已設定為主身份' });
+    } catch (error: any) {
+      console.error('設定主身份失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // ========================================
   // 薪資管理 API
   // ========================================
@@ -7984,6 +8083,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } = req.body;
 
       // 先取得員工姓名和聘用類型（用於 employee_salary_settings）
+      // 優先使用主身份 (is_primary = true)
       const userResult = await queryDatabase(`
         SELECT
           u.first_name,
@@ -7994,6 +8094,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         LEFT JOIN employee_profiles ep ON ep.user_id = u.id
         LEFT JOIN business_identities bi ON bi.user_id = u.id AND bi.is_active = true
         WHERE u.id = $1
+        ORDER BY bi.is_primary DESC NULLS LAST
         LIMIT 1
       `, [userId]);
 
@@ -8004,12 +8105,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = userResult.rows[0];
       const employeeName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || userId;
 
-      // 根據業務身份判斷角色類型
-      let roleType = 'teacher';
-      if (user.identity_type === 'consultant') {
-        roleType = 'closer';
-      } else if (user.identity_type === 'setter') {
-        roleType = 'setter';
+      // 根據主身份判斷角色類型
+      let roleType: string;
+      switch (user.identity_type) {
+        case 'consultant':
+          roleType = 'closer';
+          break;
+        case 'setter':
+          roleType = 'setter';
+          break;
+        case 'teacher':
+          roleType = 'teacher';
+          break;
+        case 'employee':
+          roleType = 'employee';
+          break;
+        default:
+          roleType = user.identity_type || 'employee';  // 直接使用身份類型，無身份則預設 employee
       }
 
       // 計算抽成比例（從 commission_config 提取）

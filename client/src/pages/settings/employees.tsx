@@ -549,6 +549,47 @@ export default function EmployeesPage() {
     }
   };
 
+  // 設定主身份
+  const handleSetPrimaryIdentity = async (identityId: string) => {
+    if (!viewingEmployee) return;
+
+    try {
+      const response = await fetch(
+        `/api/employees/${viewingEmployee.user.id}/business-identities/${identityId}/set-primary`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: '設定成功',
+          description: '已設定為主身份',
+        });
+        // 重新載入員工詳情
+        handleViewDetail(viewingEmployee);
+        // 重新載入列表
+        fetchEmployees();
+      } else {
+        toast({
+          title: '設定失敗',
+          description: data.message || '無法設定主身份',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('設定主身份失敗:', error);
+      toast({
+        title: '設定失敗',
+        description: '網路錯誤，請稍後再試',
+        variant: 'destructive',
+      });
+    }
+  };
+
   // 新增薪資設定
   const handleAddCompensation = async () => {
     if (!viewingEmployee) return;
@@ -1168,8 +1209,13 @@ export default function EmployeesPage() {
                     <div className="flex gap-1 flex-wrap">
                       {empData.identities?.filter(id => id.is_active).length > 0 ? (
                         empData.identities.filter(id => id.is_active).map((identity) => (
-                          <Badge key={identity.id} variant="secondary" className="text-xs">
+                          <Badge
+                            key={identity.id}
+                            variant={identity.is_primary ? 'default' : 'secondary'}
+                            className={`text-xs ${identity.is_primary ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200' : ''}`}
+                          >
                             {getIdentityTypeLabel(identity.identity_type)} {identity.identity_code}
+                            {identity.is_primary && ' ★'}
                           </Badge>
                         ))
                       ) : (
@@ -1374,6 +1420,11 @@ export default function EmployeesPage() {
                           <Badge variant={identity.is_active ? 'default' : 'secondary'}>
                             {getIdentityTypeLabel(identity.identity_type)}
                           </Badge>
+                          {identity.is_primary && (
+                            <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-300">
+                              主身份
+                            </Badge>
+                          )}
                           <span className="font-mono text-sm font-medium">{identity.identity_code}</span>
                           {identity.display_name && (
                             <span className="text-sm text-muted-foreground">
@@ -1406,6 +1457,16 @@ export default function EmployeesPage() {
                             <Pencil className="h-3 w-3 mr-1" />
                             編輯
                           </Button>
+                          {identity.is_active && !identity.is_primary && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleSetPrimaryIdentity(identity.id)}
+                              className="text-yellow-700 hover:bg-yellow-50"
+                            >
+                              設為主身份
+                            </Button>
+                          )}
                           {identity.is_active && (
                             <Button
                               variant="outline"

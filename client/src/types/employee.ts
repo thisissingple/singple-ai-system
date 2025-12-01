@@ -16,6 +16,7 @@ export interface BusinessIdentity {
   effective_from: string; // ISO date
   effective_to: string | null; // ISO date
   is_active: boolean;
+  is_primary: boolean; // 是否為主身份（用於薪資計算器）
   notes: string | null;
   created_at: string;
   updated_at: string;
