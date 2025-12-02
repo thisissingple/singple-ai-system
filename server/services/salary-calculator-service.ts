@@ -272,8 +272,75 @@ export class SalaryCalculatorService {
   }
 
   /**
+   * 課程方案堂數對照表（從 course_plans 表載入）
+   * 使用快取避免每次查詢資料庫
+   */
+  private coursePlanClassCounts: { [planName: string]: number } | null = null;
+
+  /**
+   * 載入課程方案堂數對照表
+   */
+  private async loadCoursePlanClassCounts(): Promise<{ [planName: string]: number }> {
+    if (this.coursePlanClassCounts) {
+      return this.coursePlanClassCounts;
+    }
+
+    const result = await queryDatabase(`
+      SELECT plan_name, total_classes
+      FROM course_plans
+      WHERE is_active = true
+    `);
+
+    this.coursePlanClassCounts = {};
+    for (const row of result.rows) {
+      this.coursePlanClassCounts[row.plan_name] = row.total_classes;
+    }
+
+    console.log('[SalaryCalculator] Loaded course plan class counts:', this.coursePlanClassCounts);
+    return this.coursePlanClassCounts;
+  }
+
+  /**
+   * 從 package_name 取得課程堂數
+   * 優先順序：
+   * 1. 從 course_plans 表查詢（精確匹配）
+   * 2. 部分匹配 course_plans 表
+   * 3. 從名稱中提取數字（如 "Elena一對一體驗課4堂"）
+   * 4. 找不到則拋出錯誤，要求補登記錄
+   */
+  private getClassCountFromPackage(packageName: string, coursePlans: { [planName: string]: number }): number {
+    if (!packageName) {
+      console.error(`❌ [SalaryCalculator] 課程名稱為空，無法判斷堂數`);
+      throw new Error(`課程名稱為空，請檢查 trial_class_purchases 資料`);
+    }
+
+    // 1. 精確匹配 course_plans 表
+    if (coursePlans[packageName] !== undefined) {
+      return coursePlans[packageName];
+    }
+
+    // 2. 部分匹配 course_plans 表（處理名稱略有不同的情況）
+    for (const [planName, count] of Object.entries(coursePlans)) {
+      if (packageName.includes(planName) || planName.includes(packageName)) {
+        return count;
+      }
+    }
+
+    // 3. 從名稱提取數字（如 "4堂", "12堂"）
+    const match = packageName.match(/(\d+)堂/);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
+
+    // 4. 找不到則拋出錯誤
+    console.error(`❌ [SalaryCalculator] 未知課程方案「${packageName}」，請到 course_plans 表新增此方案`);
+    throw new Error(`未知課程方案「${packageName}」，請到 course_plans 表新增此方案`);
+  }
+
+  /**
    * 查詢老師的體驗課明細（從 trial_class_attendance 表）
    * 根據學生購買的課程類型計算不同鐘點費
+   * 使用 FIFO 邏輯：先買的課程包先消耗完才用下一個
    */
   async getTrialClassDetails(
     employeeName: string,
@@ -306,23 +373,124 @@ export class SalaryCalculatorService {
     `, [employeeName]);
     const nickname = settingResult.rows[0]?.nickname || '';
 
-    // 查詢體驗課打卡記錄，並聯結購買記錄取得課程類型
-    // 同時匹配：本名、暱稱、名字（firstNameOnly）
-    const result = await queryDatabase(`
+    // Step 1: 查詢該老師在此期間的所有體驗課打卡記錄（不 JOIN，避免笛卡兒積）
+    const attendanceResult = await queryDatabase(`
       SELECT
         tca.class_date,
         tca.student_name,
         tca.student_email,
-        tca.is_showed,
-        tcp.package_name as course_type
+        tca.is_showed
       FROM trial_class_attendance tca
-      LEFT JOIN trial_class_purchases tcp
-        ON tca.student_email = tcp.student_email
       WHERE (tca.teacher_name = $1 OR tca.teacher_name = $5 OR tca.teacher_name ILIKE $4)
         AND tca.class_date >= $2
         AND tca.class_date <= $3
       ORDER BY tca.class_date DESC
     `, [employeeName, periodStart, periodEnd, `%${firstNameOnly}%`, nickname]);
+
+    // Step 2: 取得這些學生的 email 清單
+    const studentEmails = Array.from(new Set(
+      attendanceResult.rows
+        .map((r: any) => r.student_email)
+        .filter((e: any) => e)
+    ));
+
+    // Step 3: 載入課程方案堂數對照表（從 course_plans 表）
+    const coursePlans = await this.loadCoursePlanClassCounts();
+
+    // Step 4: 批次查詢這些學生的所有購買記錄（用於 FIFO 匹配）
+    let purchasesByStudent: { [email: string]: Array<{ package_name: string; purchase_date: string; class_count: number }> } = {};
+
+    if (studentEmails.length > 0) {
+      const purchasesResult = await queryDatabase(`
+        SELECT
+          student_email,
+          package_name,
+          purchase_date
+        FROM trial_class_purchases
+        WHERE student_email = ANY($1)
+        ORDER BY student_email, purchase_date ASC
+      `, [studentEmails]);
+
+      // 按學生分組購買記錄
+      for (const row of purchasesResult.rows) {
+        const email = row.student_email;
+        if (!purchasesByStudent[email]) {
+          purchasesByStudent[email] = [];
+        }
+        purchasesByStudent[email].push({
+          package_name: row.package_name,
+          purchase_date: row.purchase_date,
+          class_count: this.getClassCountFromPackage(row.package_name, coursePlans)
+        });
+      }
+    }
+
+    // Step 5: 查詢每個學生的所有歷史出席記錄（用於計算該學生上到第幾堂）
+    // 這裡我們需要知道每個學生在 periodStart 之前已經上了幾堂課
+    // 使用 class_date::text 轉換為字串格式以便比較
+    let allAttendanceByStudent: { [email: string]: string[] } = {};
+
+    if (studentEmails.length > 0) {
+      const allAttendanceResult = await queryDatabase(`
+        SELECT student_email, class_date::text as class_date_str
+        FROM trial_class_attendance
+        WHERE student_email = ANY($1)
+        ORDER BY student_email, class_date ASC
+      `, [studentEmails]);
+
+      for (const row of allAttendanceResult.rows) {
+        const email = row.student_email;
+        if (!allAttendanceByStudent[email]) {
+          allAttendanceByStudent[email] = [];
+        }
+        allAttendanceByStudent[email].push(row.class_date_str);
+      }
+    }
+
+    // 輔助函數：將日期轉換為 YYYY-MM-DD 格式字串
+    const formatDateToString = (date: any): string => {
+      if (!date) return '';
+      if (typeof date === 'string') return date.substring(0, 10);
+      if (date instanceof Date) {
+        // 使用本地時間避免時區問題
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+      return String(date).substring(0, 10);
+    };
+
+    // Step 6: 用 FIFO 邏輯為每筆出席記錄匹配正確的課程包
+    const matchCourseType = (studentEmail: string, classDate: any): string => {
+      const purchases = purchasesByStudent[studentEmail];
+      if (!purchases || purchases.length === 0) {
+        return '未知';
+      }
+
+      // 取得該學生所有出席日期（已按日期排序，字串格式）
+      const allDates = allAttendanceByStudent[studentEmail] || [];
+      // 將傳入的 classDate 轉換為字串格式
+      const classDateStr = formatDateToString(classDate);
+      // 找出此次上課是第幾堂（從 1 開始）
+      const classIndex = allDates.findIndex(d => d === classDateStr) + 1;
+
+      if (classIndex === 0) {
+        return '未知';
+      }
+
+      // FIFO 邏輯：累計堂數，找出對應的課程包
+      let cumulativeClasses = 0;
+      for (const purchase of purchases) {
+        cumulativeClasses += purchase.class_count;
+        if (classIndex <= cumulativeClasses) {
+          return purchase.package_name;
+        }
+      }
+
+      // 超出所有購買堂數，使用最後一個課程包
+      return purchases[purchases.length - 1].package_name;
+    };
 
     // 按課程類型統計
     const byCourseType: {
@@ -333,9 +501,9 @@ export class SalaryCalculatorService {
       };
     } = {};
 
-    const records = result.rows.map(row => {
-      const courseType = row.course_type || '未知';
-      const hourlyRate = this.getTrialClassHourlyRate(row.course_type);
+    const records = attendanceResult.rows.map((row: any) => {
+      const courseType = matchCourseType(row.student_email, row.class_date);
+      const hourlyRate = this.getTrialClassHourlyRate(courseType);
 
       // 有打卡記錄就算鐘點費（不用判斷出席）
       if (!byCourseType[courseType]) {

@@ -234,10 +234,15 @@ export async function calculateAllKPIs(
       // ✅ 從 course_plans 表取得總堂數
       totalTrialClasses = planTotalFromDB;
     } else {
-      // ⚠️ Fallback: 使用原始資料的堂數
-      totalTrialClasses = purchase.trial_class_count ||
-        purchase.data?.trial_class_count ||
-        parseNumberField(purchase.data?.體驗堂數) || 0;
+      // ⚠️ Fallback: 從方案名稱提取數字（如 "4堂"）
+      const match = packageName?.match(/(\d+)堂/);
+      if (match) {
+        totalTrialClasses = parseInt(match[1], 10);
+      } else {
+        // 找不到則警告並設為 0
+        console.warn(`⚠️ [KPI] 未知課程方案「${packageName}」，請到 course_plans 表新增`);
+        totalTrialClasses = 0;
+      }
     }
 
     // 🆕 取得體驗課購買日期

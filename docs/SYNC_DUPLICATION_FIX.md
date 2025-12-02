@@ -368,7 +368,123 @@ trial_class_purchases:
 
 ---
 
+## 2025-12-02 更新：併發鎖機制
+
+### 問題再現
+
+2025-12-02 06:00 發現 `income_expense_records` 表出現重複資料（13,600 筆，應為 6,773 筆）。
+
+經調查 sync_logs 發現：
+- **06:00:02** - 第一個同步開始 (status: running)
+- **06:00:12** - 第二個同步開始 (status: running) ← 併發觸發
+- **06:00:34** - 第一個完成，插入 6,800 筆
+- **06:00:47** - 第二個完成，又插入 6,800 筆
+
+### 根本原因
+
+`syncMapping()` 函數沒有併發檢查。當 cron job 或使用者同時觸發同一 mapping 的同步，會導致：
+1. 兩個同步請求同時執行
+2. 對於使用 DELETE + INSERT 策略的表（如 `income_expense_records`），兩次都會完整插入資料
+
+### 解決方案：併發鎖
+
+在 `syncMapping()` 開始時，檢查 sync_logs 中是否已有同一 mapping 正在執行（status = 'running' 且在最近 10 分鐘內）。
+
+**檔案**: [`server/services/sheets/sync-service.ts:100-117`](../server/services/sheets/sync-service.ts#L100-L117)
+
+```typescript
+async syncMapping(mappingId: string): Promise<void> {
+  console.log(`\n🔄 Starting sync for mapping ${mappingId}...`);
+
+  try {
+    // 🔐 併發鎖檢查：防止同一 mapping 同時執行多次同步
+    const isRunning = await this.checkIfAlreadyRunning(mappingId);
+    if (isRunning) {
+      console.log(`⚠️ Sync for mapping ${mappingId} is already running. Skipping...`);
+      this.sendProgress({
+        mappingId,
+        stage: 'failed',
+        current: 0,
+        total: 0,
+        message: '同步已在進行中，請稍後再試',
+        percentage: 0,
+      });
+      return;  // 直接返回，不執行同步
+    }
+    // ... 繼續執行同步
+  }
+}
+```
+
+**新增方法 `checkIfAlreadyRunning()`**: [`server/services/sheets/sync-service.ts:1002-1029`](../server/services/sheets/sync-service.ts#L1002-L1029)
+
+```typescript
+private async checkIfAlreadyRunning(mappingId: string): Promise<boolean> {
+  const result = await queryDatabase(`
+    SELECT id, synced_at
+    FROM sync_logs
+    WHERE mapping_id = $1
+      AND status = 'running'
+      AND synced_at > NOW() - INTERVAL '10 minutes'
+    ORDER BY synced_at DESC
+    LIMIT 1
+  `, [mappingId]);
+
+  if (result.rows.length > 0) {
+    const runningLog = result.rows[0];
+    console.log(`🔒 Found running sync log: ${runningLog.id} (started at ${runningLog.synced_at})`);
+    return true;
+  }
+
+  return false;
+}
+```
+
+### 清理步驟
+
+1. **清理卡住的 running 記錄**：
+```sql
+UPDATE sync_logs
+SET status = 'failed',
+    error_message = 'Timeout: Sync was running for over 10 minutes (auto-cleanup)'
+WHERE status = 'running'
+  AND synced_at < NOW() - INTERVAL '10 minutes';
+```
+
+2. **清理重複資料**（如果有）：
+```bash
+# 檢查重複數量
+npx tsx -e "
+import { queryDatabase } from './server/services/pg-client';
+async function main() {
+  const result = await queryDatabase('SELECT COUNT(*) FROM income_expense_records');
+  console.log('總記錄數:', result.rows[0].count);
+}
+main();
+"
+```
+
+### 防護層級更新
+
+| 層級 | 機制 | 說明 |
+|------|------|------|
+| 1 | **併發鎖** | 🆕 檢查 sync_logs 是否有 running 狀態，防止同時執行 |
+| 2 | `session` mode | 確保寫入操作使用正確的連線模式 |
+| 3 | Transaction | DELETE + INSERT 包在 Transaction 內，失敗會 ROLLBACK |
+| 4 | 源資料去重 | UPSERT 表的 `deduplicateByConfig()` 避免同 batch 內重複 |
+| 5 | UPSERT | `ON CONFLICT DO UPDATE` 覆蓋而非重複插入 |
+| 6 | 唯一約束 | 資料庫層級防護，絕對防止重複 |
+
+### 為什麼 income_expense_records 不使用 UPSERT
+
+根據之前的設計決策（2025-11-28）：
+- **沒有明確業務唯一鍵**：大量欄位為 NULL（5172/13580 筆沒有 email）
+- **PostgreSQL NULL 不參與唯一性檢查**
+- **正確策略**：使用 Transaction 包裝的 DELETE + INSERT + 併發鎖
+
+---
+
 **修正人員**: Claude Code
 **審核狀態**: 已驗證
 **驗證方式**: 實際執行 Google Sheets 同步並確認資料無重複
-**最後更新**: 2025-11-28
+**最後更新**: 2025-12-02

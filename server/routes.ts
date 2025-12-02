@@ -7600,6 +7600,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           -- 員工基本資料
           ep.employee_number,
           ep.national_id,
+          ep.nickname,
           ep.hire_date,
           ep.resign_date,
           ep.employment_type,
@@ -7663,9 +7664,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           status: row.status || 'active',
           created_at: row.created_at,
         },
-        profile: row.employee_number || row.hire_date ? {
+        profile: row.employee_number || row.hire_date || row.nickname ? {
           employee_number: row.employee_number,
           national_id: row.national_id,
+          nickname: row.nickname,
           hire_date: row.hire_date,
           resign_date: row.resign_date,
           employment_type: row.employment_type,
@@ -7777,9 +7779,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           created_at: row.created_at,
           updated_at: row.updated_at,
         },
-        profile: row.employee_number || row.hire_date ? {
+        profile: row.employee_number || row.hire_date || row.nickname ? {
           employee_number: row.employee_number,
           national_id: row.national_id,
+          nickname: row.nickname,
           hire_date: row.hire_date,
           resign_date: row.resign_date,
           employment_type: row.employment_type,
@@ -7871,6 +7874,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         email,
         first_name,
         last_name,
+        nickname,
         role,
         department,
         status,
@@ -7907,24 +7911,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await queryDatabase(`
           UPDATE employee_profiles
           SET
-            national_id = COALESCE($1, national_id),
-            hire_date = COALESCE($2, hire_date),
-            resign_date = $3,
-            employment_type = COALESCE($4, employment_type),
-            residential_address = COALESCE($5, residential_address),
-            emergency_contact_name = COALESCE($6, emergency_contact_name),
-            emergency_contact_phone = COALESCE($7, emergency_contact_phone),
+            nickname = COALESCE($1, nickname),
+            national_id = COALESCE($2, national_id),
+            hire_date = COALESCE($3, hire_date),
+            resign_date = $4,
+            employment_type = COALESCE($5, employment_type),
+            residential_address = COALESCE($6, residential_address),
+            emergency_contact_name = COALESCE($7, emergency_contact_name),
+            emergency_contact_phone = COALESCE($8, emergency_contact_phone),
             updated_at = NOW()
-          WHERE user_id = $8
-        `, [national_id, hire_date, resign_date, employment_type, residential_address, emergency_contact_name, emergency_contact_phone, id]);
+          WHERE user_id = $9
+        `, [nickname, national_id, hire_date, resign_date, employment_type, residential_address, emergency_contact_name, emergency_contact_phone, id]);
       } else {
         await queryDatabase(`
           INSERT INTO employee_profiles (
-            user_id, national_id, hire_date, resign_date, employment_type,
+            user_id, nickname, national_id, hire_date, resign_date, employment_type,
             residential_address, emergency_contact_name, emergency_contact_phone
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        `, [id, national_id, hire_date, resign_date, employment_type, residential_address, emergency_contact_name, emergency_contact_phone]);
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `, [id, nickname, national_id, hire_date, resign_date, employment_type, residential_address, emergency_contact_name, emergency_contact_phone]);
       }
 
       res.json({ success: true, message: '員工資料更新成功' });

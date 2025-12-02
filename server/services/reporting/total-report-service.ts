@@ -716,9 +716,16 @@ export class TotalReportService {
 
       if (!teacher || !teacherMap.has(teacher)) return;
 
-      // 🆕 累計購買堂數
+      // 🆕 累計購買堂數（優先使用 course_plans 表）
       const packageName = row.plan || row.data?.成交方案 || row.data?.plan || '';
-      const totalClasses = row.trial_class_count || parseNumberField(row.data?.體驗堂數) || 0;
+      let totalClasses = planTotalClassesMap.get(packageName) || 0;
+      if (totalClasses === 0 && packageName) {
+        // Fallback: 從方案名稱提取數字（如 "4堂"）
+        const match = packageName.match(/(\d+)堂/);
+        if (match) {
+          totalClasses = parseInt(match[1], 10);
+        }
+      }
 
       if (!studentClassDataMap.has(email)) {
         studentClassDataMap.set(email, { purchased: 0, attended: 0 });
@@ -1097,8 +1104,14 @@ export class TotalReportService {
         // ✅ 從 course_plans 表取得總堂數
         totalTrialClasses = planTotalFromDB;
       } else {
-        // ⚠️ Fallback: 使用原始資料的堂數
-        totalTrialClasses = row.trial_class_count || parseNumberField(row.data?.體驗堂數) || 0;
+        // ⚠️ Fallback: 從方案名稱提取數字（如 "4堂"）
+        const match = packageName?.match(/(\d+)堂/);
+        if (match) {
+          totalTrialClasses = parseInt(match[1], 10);
+        } else {
+          console.warn(`⚠️ [Report] 未知課程方案「${packageName}」，請到 course_plans 表新增`);
+          totalTrialClasses = 0;
+        }
       }
 
       // 🆕 已上堂數初始化為 0，稍後從 attendance 計算

@@ -397,6 +397,85 @@ See [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md) for detailed progress tracking.
 - [`AI_KPI_MODIFICATION_GUIDE.md`](docs/AI_KPI_MODIFICATION_GUIDE.md) - AI guide for KPI changes
 - [`PG_ARCHITECTURE_DECISION.md`](PG_ARCHITECTURE_DECISION.md) - Why direct PostgreSQL connection
 - [`FORM_SYSTEM_COMPLETE.md`](FORM_SYSTEM_COMPLETE.md) - Form system documentation
+- [`SYNC_DUPLICATION_FIX.md`](docs/SYNC_DUPLICATION_FIX.md) - Google Sheets sync duplication fixes history
+
+## ⚠️ 強制閱讀文檔流程（Mandatory Documentation Review）
+
+**CRITICAL**: 在修改任何現有系統之前，Claude **必須**先閱讀相關文檔，了解問題歷史和過去嘗試過的解法。
+
+### 適用場景
+
+以下情況 **必須** 執行此流程：
+- 修復現有 bug（尤其是重複出現的問題）
+- 修改核心系統（sync、KPI、Form Builder 等）
+- 任何用戶說「這個問題之前發生過」的情況
+- 用戶使用觸發短語：「先讀文件再回答」、「查一下歷史」、「之前怎麼解的」
+
+### 強制執行步驟
+
+1. **搜尋相關文檔**
+   ```bash
+   # 搜尋 docs/ 目錄下的相關文件
+   grep -r "關鍵字" docs/
+   # 搜尋 CLAUDE.md 中的相關章節
+   grep "關鍵字" CLAUDE.md
+   ```
+
+2. **閱讀並報告歷史脈絡**
+   - 這個問題過去發生過幾次？
+   - 之前嘗試過哪些解法？
+   - 哪些解法有效？哪些無效？為什麼？
+   - 為什麼問題現在又出現了？
+
+3. **提出方案並等待確認**
+   - 基於歷史分析，提出根本性的解決方案
+   - 解釋為什麼這次的方案能根治問題
+   - **等待用戶確認後才開始實作**
+
+4. **實作並自我驗證**
+   - 完成修改後，使用 MCP 或 curl 等工具自行測試
+   - 確認修改有效後才通知用戶驗收
+
+5. **更新文檔**
+   - 在相關 `docs/*.md` 文件中記錄這次的修復
+   - 包含：日期、問題描述、根因分析、解決方案
+
+### 問題歷史文檔索引
+
+| 問題類型 | 文檔位置 | 關鍵字 |
+|---------|---------|--------|
+| Google Sheets 同步重複 | [`docs/SYNC_DUPLICATION_FIX.md`](docs/SYNC_DUPLICATION_FIX.md) | sync, duplicate, 重複, 併發 |
+| Student Knowledge Base | [`docs/STUDENT_KNOWLEDGE_BASE_SYSTEM.md`](docs/STUDENT_KNOWLEDGE_BASE_SYSTEM.md) | student, sync, batch |
+| PostgreSQL 連線問題 | [`PG_ARCHITECTURE_DECISION.md`](PG_ARCHITECTURE_DECISION.md) | pg, supabase, cache |
+| KPI 計算 | [`docs/AI_KPI_MODIFICATION_GUIDE.md`](docs/AI_KPI_MODIFICATION_GUIDE.md) | kpi, formula, metric |
+
+### 違規行為（禁止）
+
+- ❌ 沒讀文檔就直接修改程式碼
+- ❌ 忽略過去的解法歷史，重新發明輪子
+- ❌ 不等用戶確認就開始實作
+- ❌ 修復完沒有自我驗證就通知用戶
+- ❌ 沒有更新文檔就結束任務
+
+### 範例對話
+
+**用戶**: 「Google Sheets 同步又產生重複資料了」
+
+**正確的回應**:
+> 我先搜尋相關文檔來了解這個問題的歷史...
+>
+> 找到 `docs/SYNC_DUPLICATION_FIX.md`，讓我閱讀歷史記錄...
+>
+> **歷史分析**:
+> - 2025-11-18：首次發現，改用 session mode
+> - 2025-11-28：添加 UPSERT 策略
+> - 2025-12-02：添加併發鎖機制
+>
+> **當前狀況分析**: ...
+>
+> **建議方案**: ...
+>
+> 請確認是否要我執行這個方案？
 
 ## Development Notes
 

@@ -2,14 +2,78 @@
 
 > **最後更新**: 2025-12-02
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ Google Sheets 同步策略優化完成
-> **當前階段**: 資料同步優化
-> **今日進度**: DELETE + INSERT Transaction 包裝 + 唯一索引清理
+> **專案狀態**: ✅ 員工管理系統優化 + 同步防重複機制
+> **當前階段**: 系統功能完善
+> **今日進度**: 員工管理 UI 重構 + 暱稱編輯功能 + 同步併發鎖
 > **整體進度**: 100% ████████████████████
 
 ---
 
-## 📅 2025-12-02 更新日誌
+## 📅 2025-12-02 更新日誌（下午）
+
+### 👥 員工管理系統優化
+
+#### 1. 員工詳情對話框 Tab 重構
+- **檔案**: [`client/src/pages/settings/employees.tsx`](client/src/pages/settings/employees.tsx)
+- **原本**: 5 個 Tab（基本資訊、角色身份、薪資資訊、勞健保、權限管理）
+- **改為**: 2 個 Tab（員工資訊、權限管理）
+- 「員工資訊」Tab 整合 4 個 Card 區塊：基本資訊、角色身份、薪資資訊、勞健保
+
+#### 2. 員工列表顯示優化
+- **顯示格式**: 暱稱在上（粗體）、全名在下（姓+名，小字灰色）
+- **移除**: 部門欄位（不再顯示）
+- **標題**: 改為「暱稱 / 本名」
+
+#### 3. 暱稱編輯功能（完整實作）
+- **前端**:
+  - `editEmployeeData` state 新增 `nickname` 欄位
+  - 編輯對話框新增暱稱輸入欄位（在姓氏和 Email 之間）
+  - API 呼叫加入 `nickname` 參數
+- **後端**（[`server/routes.ts:7870-7933`](server/routes.ts#L7870-L7933)）:
+  - `PUT /api/employees/:id` 新增 `nickname` 欄位處理
+  - UPDATE 和 INSERT `employee_profiles` 時同步更新 `nickname`
+
+### 🔒 Google Sheets 同步防重複機制
+
+#### 併發鎖機制
+- **檔案**: [`server/services/sheets/sync-service.ts`](server/services/sheets/sync-service.ts)
+- **新增**: `checkIfAlreadyRunning()` 方法
+- **邏輯**: 檢查 `sync_logs` 表中是否有 10 分鐘內的 `running` 狀態記錄
+- **效果**: 防止同一 mapping 同時執行多次同步，避免資料重複
+
+```typescript
+private async checkIfAlreadyRunning(mappingId: string): Promise<boolean> {
+  const result = await queryDatabase(`
+    SELECT id, synced_at FROM sync_logs
+    WHERE mapping_id = $1 AND status = 'running'
+      AND synced_at > NOW() - INTERVAL '10 minutes'
+    LIMIT 1
+  `, [mappingId]);
+  return result.rows.length > 0;
+}
+```
+
+#### 專用連線池
+- **檔案**: [`server/services/pg-client.ts`](server/services/pg-client.ts)
+- **新增**: `sharedSyncPool`（專用於 Google Sheets 同步）
+- **設定**: 5 個連線、5 分鐘超時、Session Pooler (port 6543)
+- **目的**: 隔離同步操作與一般查詢，避免連線競爭
+
+### 📚 文檔更新
+
+#### CLAUDE.md 強制閱讀流程
+- 新增「⚠️ 強制閱讀文檔流程」章節
+- 定義必須執行文檔審查的場景
+- 建立問題歷史文檔索引表
+- 列出違規行為（禁止事項）
+
+#### SYNC_DUPLICATION_FIX.md 更新
+- 記錄 2025-12-02 併發鎖機制實作
+- 完整記錄問題歷史（11-18, 11-28, 12-02）
+
+---
+
+## 📅 2025-12-02 更新日誌（上午）
 
 ### 🔄 Google Sheets 同步策略優化
 

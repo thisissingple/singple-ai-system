@@ -101,6 +101,21 @@ export class SyncService {
     console.log(`\n🔄 Starting sync for mapping ${mappingId}...`);
 
     try {
+      // 🔐 併發鎖檢查：防止同一 mapping 同時執行多次同步
+      const isRunning = await this.checkIfAlreadyRunning(mappingId);
+      if (isRunning) {
+        console.log(`⚠️ Sync for mapping ${mappingId} is already running. Skipping...`);
+        this.sendProgress({
+          mappingId,
+          stage: 'failed',
+          current: 0,
+          total: 0,
+          message: '同步已在進行中，請稍後再試',
+          percentage: 0,
+        });
+        return;  // 直接返回，不執行同步
+      }
+
       // 1. 讀取映射設定
       const mapping = await this.getMapping(mappingId);
       console.log(`📋 Target table: ${mapping.target_table}`);
@@ -982,6 +997,35 @@ export class SyncService {
 
     // ✅ 使用 'session' mode 執行 UPSERT（寫入操作）
     await queryDatabase(sql, values, 'session');
+  }
+
+  /**
+   * 🔐 檢查是否已有同一 mapping 正在執行
+   *
+   * 防止併發問題：如果同一 mapping 在最近 10 分鐘內有 status='running' 的記錄，
+   * 表示同步正在進行中，應該跳過本次執行。
+   *
+   * @param mappingId 映射 ID
+   * @returns true 表示正在執行中，應跳過；false 表示可以執行
+   */
+  private async checkIfAlreadyRunning(mappingId: string): Promise<boolean> {
+    const result = await queryDatabase(`
+      SELECT id, synced_at
+      FROM sync_logs
+      WHERE mapping_id = $1
+        AND status = 'running'
+        AND synced_at > NOW() - INTERVAL '10 minutes'
+      ORDER BY synced_at DESC
+      LIMIT 1
+    `, [mappingId]);
+
+    if (result.rows.length > 0) {
+      const runningLog = result.rows[0];
+      console.log(`🔒 Found running sync log: ${runningLog.id} (started at ${runningLog.synced_at})`);
+      return true;
+    }
+
+    return false;
   }
 
   /**

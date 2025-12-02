@@ -163,6 +163,7 @@ export default function EmployeesPage() {
     userId: '',
     firstName: '',
     lastName: '',
+    nickname: '',
     email: '',
     department: '',
   });
@@ -773,12 +774,13 @@ export default function EmployeesPage() {
     }
 
     try {
-      const response = await fetch(`/api/employees/${editEmployeeData.userId}/profile`, {
+      const response = await fetch(`/api/employees/${editEmployeeData.userId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           first_name: editEmployeeData.firstName,
           last_name: editEmployeeData.lastName,
+          nickname: editEmployeeData.nickname,
           email: editEmployeeData.email,
           department: editEmployeeData.department,
         }),
@@ -793,6 +795,7 @@ export default function EmployeesPage() {
           userId: '',
           firstName: '',
           lastName: '',
+          nickname: '',
           email: '',
           department: '',
         });
@@ -1141,7 +1144,7 @@ export default function EmployeesPage() {
                 onClick={() => handleSort('first_name')}
               >
                 <div className="flex items-center gap-1">
-                  姓名
+                  暱稱 / 本名
                   {sortField === 'first_name' ? (
                     sortDirection === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
                   ) : (
@@ -1150,19 +1153,6 @@ export default function EmployeesPage() {
                 </div>
               </TableHead>
               <TableHead>Email</TableHead>
-              <TableHead
-                className="cursor-pointer hover:bg-muted/50 select-none"
-                onClick={() => handleSort('department')}
-              >
-                <div className="flex items-center gap-1">
-                  部門
-                  {sortField === 'department' ? (
-                    sortDirection === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />
-                  ) : (
-                    <ArrowUpDown className="h-4 w-4 opacity-30" />
-                  )}
-                </div>
-              </TableHead>
               <TableHead>角色身份</TableHead>
               <TableHead
                 className="cursor-pointer hover:bg-muted/50 select-none"
@@ -1184,13 +1174,13 @@ export default function EmployeesPage() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">
+                <TableCell colSpan={7} className="text-center py-8">
                   載入中...
                 </TableCell>
               </TableRow>
             ) : filteredAndSortedEmployees.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">
+                <TableCell colSpan={7} className="text-center py-8">
                   {searchTerm ? '找不到符合條件的員工' : '尚無員工資料'}
                 </TableCell>
               </TableRow>
@@ -1200,11 +1190,15 @@ export default function EmployeesPage() {
                   <TableCell className="font-mono text-sm">
                     {empData.profile?.employee_number || '-'}
                   </TableCell>
-                  <TableCell className="font-medium">
-                    {empData.user.first_name} {empData.user.last_name}
+                  <TableCell>
+                    <div className="flex flex-col">
+                      <span className="font-medium">{empData.profile?.nickname || '-'}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {empData.user.last_name || ''}{empData.user.first_name || ''}
+                      </span>
+                    </div>
                   </TableCell>
                   <TableCell>{empData.user.email || '-'}</TableCell>
-                  <TableCell>{empData.user.department || '-'}</TableCell>
                   <TableCell>
                     <div className="flex gap-1 flex-wrap">
                       {empData.identities?.filter(id => id.is_active).length > 0 ? (
@@ -1281,361 +1275,362 @@ export default function EmployeesPage() {
           </DialogHeader>
 
           {viewingEmployee && (
-            <Tabs defaultValue="basic" className="mt-4">
-              <TabsList className="grid w-full grid-cols-5">
-                <TabsTrigger value="basic">基本資訊</TabsTrigger>
-                <TabsTrigger value="identity">角色身份</TabsTrigger>
-                <TabsTrigger value="compensation">薪資資訊</TabsTrigger>
-                <TabsTrigger value="insurance">勞健保</TabsTrigger>
+            <Tabs defaultValue="info" className="mt-4">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="info">員工資訊</TabsTrigger>
                 <TabsTrigger value="permissions">權限管理</TabsTrigger>
               </TabsList>
 
-              {/* 基本資訊分頁 */}
-              <TabsContent value="basic" className="space-y-4">
+              {/* 員工資訊分頁 - 包含基本資訊、角色身份、薪資資訊、勞健保 */}
+              <TabsContent value="info" className="space-y-4">
+                {/* 基本資訊區塊 */}
                 <Card className="p-4">
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <UserPlus className="h-4 w-4" />
-                    基本資訊
-                  </h3>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setEditEmployeeData({
-                          userId: viewingEmployee.user.id,
-                          firstName: viewingEmployee.user.first_name || '',
-                          lastName: viewingEmployee.user.last_name || '',
-                          email: viewingEmployee.user.email || '',
-                          department: viewingEmployee.user.department || '',
-                        });
-                        setShowEditDialog(true);
-                      }}
-                    >
-                      <Pencil className="h-4 w-4 mr-1" />
-                      編輯
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setResetPasswordData({
-                          userId: viewingEmployee.user.id,
-                          newPassword: '',
-                        });
-                        setShowResetPasswordDialog(true);
-                      }}
-                    >
-                      <Key className="h-4 w-4 mr-1" />
-                      重設密碼
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => {
-                        setDeleteEmployeeData({
-                          userId: viewingEmployee.user.id,
-                          name: `${viewingEmployee.user.first_name} ${viewingEmployee.user.last_name || ''}`,
-                        });
-                        setShowDeleteDialog(true);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 mr-1" />
-                      刪除員工
-                    </Button>
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <span className="text-muted-foreground">員工編號：</span>
-                    <span className="font-mono">{viewingEmployee.profile?.employee_number || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Email：</span>
-                    <span>{viewingEmployee.user.email || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">部門：</span>
-                    <span>{viewingEmployee.user.department || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">聘用類型：</span>
-                    <span>
-                      {viewingEmployee.profile?.employment_type
-                        ? getEmploymentTypeLabel(viewingEmployee.profile.employment_type as EmploymentType)
-                        : '-'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">到職日期：</span>
-                    <span>
-                      {viewingEmployee.profile?.hire_date
-                        ? new Date(viewingEmployee.profile.hire_date).toLocaleDateString('zh-TW')
-                        : '-'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">狀態：</span>
-                    <Badge variant={viewingEmployee.user.status === 'active' ? 'default' : 'secondary'}>
-                      {viewingEmployee.user.status === 'active' ? '在職' : '離職'}
-                    </Badge>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleToggleStatus}
-                      className="h-6 text-xs"
-                    >
-                      切換狀態
-                    </Button>
-                  </div>
-                </div>
-                </Card>
-              </TabsContent>
-
-              {/* 角色身份分頁 */}
-              <TabsContent value="identity" className="space-y-4">
-                <Card className="p-4">
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <Briefcase className="h-4 w-4" />
-                    角色身份
-                  </h3>
-                  <Button size="sm" onClick={() => setShowAddIdentityDialog(true)}>
-                    <Plus className="h-4 w-4 mr-1" />
-                    新增身份
-                  </Button>
-                </div>
-
-                {viewingEmployee.identities?.length > 0 ? (
-                  <div className="space-y-2">
-                    {viewingEmployee.identities.map((identity) => (
-                      <div
-                        key={identity.id}
-                        className={`flex items-center justify-between p-3 border rounded-lg ${
-                          !identity.is_active ? 'bg-muted/50' : ''
-                        }`}
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold flex items-center gap-2">
+                      <UserPlus className="h-4 w-4" />
+                      基本資訊
+                    </h3>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setEditEmployeeData({
+                            userId: viewingEmployee.user.id,
+                            firstName: viewingEmployee.user.first_name || '',
+                            lastName: viewingEmployee.user.last_name || '',
+                            nickname: viewingEmployee.profile?.nickname || '',
+                            email: viewingEmployee.user.email || '',
+                            department: viewingEmployee.user.department || '',
+                          });
+                          setShowEditDialog(true);
+                        }}
                       >
-                        <div className="flex items-center gap-3">
-                          <Badge variant={identity.is_active ? 'default' : 'secondary'}>
-                            {getIdentityTypeLabel(identity.identity_type)}
-                          </Badge>
-                          {identity.is_primary && (
-                            <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-300">
-                              主身份
+                        <Pencil className="h-4 w-4 mr-1" />
+                        編輯
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setResetPasswordData({
+                            userId: viewingEmployee.user.id,
+                            newPassword: '',
+                          });
+                          setShowResetPasswordDialog(true);
+                        }}
+                      >
+                        <Key className="h-4 w-4 mr-1" />
+                        重設密碼
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => {
+                          setDeleteEmployeeData({
+                            userId: viewingEmployee.user.id,
+                            name: `${viewingEmployee.user.first_name} ${viewingEmployee.user.last_name || ''}`,
+                          });
+                          setShowDeleteDialog(true);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        刪除員工
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">員工編號：</span>
+                      <span className="font-mono">{viewingEmployee.profile?.employee_number || '-'}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">本名：</span>
+                      <span className="font-medium">
+                        {viewingEmployee.user.first_name || viewingEmployee.user.last_name
+                          ? `${viewingEmployee.user.first_name || ''} ${viewingEmployee.user.last_name || ''}`.trim()
+                          : '-'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">暱稱：</span>
+                      <span>{viewingEmployee.profile?.nickname || '-'}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Email：</span>
+                      <span>{viewingEmployee.user.email || '-'}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">聘用類型：</span>
+                      <span>
+                        {viewingEmployee.profile?.employment_type
+                          ? getEmploymentTypeLabel(viewingEmployee.profile.employment_type as EmploymentType)
+                          : '-'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">到職日期：</span>
+                      <span>
+                        {viewingEmployee.profile?.hire_date
+                          ? new Date(viewingEmployee.profile.hire_date).toLocaleDateString('zh-TW')
+                          : '-'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">狀態：</span>
+                      <Badge variant={viewingEmployee.user.status === 'active' ? 'default' : 'secondary'}>
+                        {viewingEmployee.user.status === 'active' ? '在職' : '離職'}
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleToggleStatus}
+                        className="h-6 text-xs"
+                      >
+                        切換狀態
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+
+                {/* 角色身份區塊 */}
+                <Card className="p-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold flex items-center gap-2">
+                      <Briefcase className="h-4 w-4" />
+                      角色身份
+                    </h3>
+                    <Button size="sm" onClick={() => setShowAddIdentityDialog(true)}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      新增身份
+                    </Button>
+                  </div>
+
+                  {viewingEmployee.identities?.length > 0 ? (
+                    <div className="space-y-2">
+                      {viewingEmployee.identities.map((identity) => (
+                        <div
+                          key={identity.id}
+                          className={`flex items-center justify-between p-3 border rounded-lg ${
+                            !identity.is_active ? 'bg-muted/50' : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Badge variant={identity.is_active ? 'default' : 'secondary'}>
+                              {getIdentityTypeLabel(identity.identity_type)}
                             </Badge>
-                          )}
-                          <span className="font-mono text-sm font-medium">{identity.identity_code}</span>
-                          {identity.display_name && (
-                            <span className="text-sm text-muted-foreground">
-                              ({identity.display_name})
-                            </span>
-                          )}
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Calendar className="h-3 w-3" />
-                            <span>
-                              {new Date(identity.effective_from).toLocaleDateString('zh-TW')}
-                              {identity.effective_to && ` ~ ${new Date(identity.effective_to).toLocaleDateString('zh-TW')}`}
-                            </span>
+                            {identity.is_primary && (
+                              <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-300">
+                                主身份
+                              </Badge>
+                            )}
+                            <span className="font-mono text-sm font-medium">{identity.identity_code}</span>
+                            {identity.display_name && (
+                              <span className="text-sm text-muted-foreground">
+                                ({identity.display_name})
+                              </span>
+                            )}
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <Calendar className="h-3 w-3" />
+                              <span>
+                                {new Date(identity.effective_from).toLocaleDateString('zh-TW')}
+                                {identity.effective_to && ` ~ ${new Date(identity.effective_to).toLocaleDateString('zh-TW')}`}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setEditIdentityData({
+                                  identityId: identity.id,
+                                  userId: viewingEmployee.user.id,
+                                  display_name: identity.display_name || '',
+                                  effective_from: identity.effective_from,
+                                  effective_to: identity.effective_to || '',
+                                });
+                                setShowEditIdentityDialog(true);
+                              }}
+                            >
+                              <Pencil className="h-3 w-3 mr-1" />
+                              編輯
+                            </Button>
+                            {identity.is_active && !identity.is_primary && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleSetPrimaryIdentity(identity.id)}
+                                className="text-yellow-700 hover:bg-yellow-50"
+                              >
+                                設為主身份
+                              </Button>
+                            )}
+                            {identity.is_active && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleDeactivateIdentity(identity.id)}
+                              >
+                                停用
+                              </Button>
+                            )}
                           </div>
                         </div>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setEditIdentityData({
-                                identityId: identity.id,
-                                userId: viewingEmployee.user.id,
-                                display_name: identity.display_name || '',
-                                effective_from: identity.effective_from,
-                                effective_to: identity.effective_to || '',
-                              });
-                              setShowEditIdentityDialog(true);
-                            }}
-                          >
-                            <Pencil className="h-3 w-3 mr-1" />
-                            編輯
-                          </Button>
-                          {identity.is_active && !identity.is_primary && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleSetPrimaryIdentity(identity.id)}
-                              className="text-yellow-700 hover:bg-yellow-50"
-                            >
-                              設為主身份
-                            </Button>
-                          )}
-                          {identity.is_active && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleDeactivateIdentity(identity.id)}
-                            >
-                              停用
-                            </Button>
-                          )}
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground py-4 text-center">
+                      尚無角色身份
+                    </p>
+                  )}
+                </Card>
+
+                {/* 薪資資訊區塊 */}
+                <Card className="p-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      薪資資訊
+                    </h3>
+                    <Button size="sm" onClick={() => setShowCompensationDialog(true)}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      設定薪資
+                    </Button>
+                  </div>
+
+                  {viewingEmployee.latest_compensation ? (
+                    <>
+                      <div className="grid grid-cols-3 gap-4 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">底薪：</span>
+                          <span className="font-medium">
+                            {formatCurrency(viewingEmployee.latest_compensation.base_salary)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">抽成類型：</span>
+                          <span>
+                            {viewingEmployee.latest_compensation.commission_type
+                              ? getCommissionTypeLabel(viewingEmployee.latest_compensation.commission_type)
+                              : '-'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">生效日期：</span>
+                          <span>
+                            {new Date(viewingEmployee.latest_compensation.effective_from).toLocaleDateString('zh-TW')}
+                          </span>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground py-4 text-center">
-                    尚無角色身份
-                  </p>
-                )}
-                </Card>
-              </TabsContent>
-
-              {/* 薪資資訊分頁 */}
-              <TabsContent value="compensation" className="space-y-4">
-                <Card className="p-4">
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    薪資資訊
-                  </h3>
-                  <Button size="sm" onClick={() => setShowCompensationDialog(true)}>
-                    <Plus className="h-4 w-4 mr-1" />
-                    設定薪資
-                  </Button>
-                </div>
-
-                {viewingEmployee.latest_compensation ? (
-                  <>
-                    <div className="grid grid-cols-3 gap-4 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">底薪：</span>
-                        <span className="font-medium">
-                          {formatCurrency(viewingEmployee.latest_compensation.base_salary)}
-                        </span>
+                      <div className="mt-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditCompensationData({
+                              compensationId: viewingEmployee.latest_compensation!.id,
+                              userId: viewingEmployee.user.id,
+                              base_salary: viewingEmployee.latest_compensation!.base_salary?.toString() || '',
+                              commission_type: viewingEmployee.latest_compensation!.commission_type || 'none',
+                              commission_rate: viewingEmployee.latest_compensation!.commission_rate?.toString() || '',
+                              effective_from: viewingEmployee.latest_compensation!.effective_from,
+                              adjustment_reason: viewingEmployee.latest_compensation!.adjustment_reason || '',
+                            });
+                            setShowEditCompensationDialog(true);
+                          }}
+                        >
+                          <Pencil className="h-3 w-3 mr-1" />
+                          編輯薪資
+                        </Button>
                       </div>
-                      <div>
-                        <span className="text-muted-foreground">抽成類型：</span>
-                        <span>
-                          {viewingEmployee.latest_compensation.commission_type
-                            ? getCommissionTypeLabel(viewingEmployee.latest_compensation.commission_type)
-                            : '-'}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">生效日期：</span>
-                        <span>
-                          {new Date(viewingEmployee.latest_compensation.effective_from).toLocaleDateString('zh-TW')}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="mt-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setEditCompensationData({
-                            compensationId: viewingEmployee.latest_compensation!.id,
-                            userId: viewingEmployee.user.id,
-                            base_salary: viewingEmployee.latest_compensation!.base_salary?.toString() || '',
-                            commission_type: viewingEmployee.latest_compensation!.commission_type || 'none',
-                            commission_rate: viewingEmployee.latest_compensation!.commission_rate?.toString() || '',
-                            effective_from: viewingEmployee.latest_compensation!.effective_from,
-                            adjustment_reason: viewingEmployee.latest_compensation!.adjustment_reason || '',
-                          });
-                          setShowEditCompensationDialog(true);
-                        }}
-                      >
-                        <Pencil className="h-3 w-3 mr-1" />
-                        編輯薪資
-                      </Button>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground py-4 text-center">
-                    尚未設定薪資
-                  </p>
-                )}
-
-                {viewingEmployee.compensation && viewingEmployee.compensation.length > 1 && (
-                  <div className="mt-4 pt-4 border-t">
-                    <p className="text-xs text-muted-foreground mb-2">
-                      歷史薪資記錄（共 {viewingEmployee.compensation.length} 筆）
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground py-4 text-center">
+                      尚未設定薪資
                     </p>
-                  </div>
-                )}
+                  )}
+
+                  {viewingEmployee.compensation && viewingEmployee.compensation.length > 1 && (
+                    <div className="mt-4 pt-4 border-t">
+                      <p className="text-xs text-muted-foreground mb-2">
+                        歷史薪資記錄（共 {viewingEmployee.compensation.length} 筆）
+                      </p>
+                    </div>
+                  )}
                 </Card>
-              </TabsContent>
 
-              {/* 勞健保資訊分頁 */}
-              <TabsContent value="insurance" className="space-y-4">
+                {/* 勞健保資訊區塊 */}
                 <Card className="p-4">
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <Shield className="h-4 w-4" />
-                    勞健保資訊
-                  </h3>
-                  <Button size="sm" onClick={() => setShowInsuranceDialog(true)}>
-                    <Plus className="h-4 w-4 mr-1" />
-                    設定勞健保
-                  </Button>
-                </div>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold flex items-center gap-2">
+                      <Shield className="h-4 w-4" />
+                      勞健保資訊
+                    </h3>
+                    <Button size="sm" onClick={() => setShowInsuranceDialog(true)}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      設定勞健保
+                    </Button>
+                  </div>
 
-                {viewingEmployee.latest_insurance ? (
-                  <>
-                    <div className="grid grid-cols-3 gap-4 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">勞保級距：</span>
-                        <span>{viewingEmployee.latest_insurance.labor_insurance_grade || '-'}</span>
+                  {viewingEmployee.latest_insurance ? (
+                    <>
+                      <div className="grid grid-cols-3 gap-4 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">勞保級距：</span>
+                          <span>{viewingEmployee.latest_insurance.labor_insurance_grade || '-'}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">勞保金額：</span>
+                          <span>{formatCurrency(viewingEmployee.latest_insurance.labor_insurance_amount)}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">健保級距：</span>
+                          <span>{viewingEmployee.latest_insurance.health_insurance_grade || '-'}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">健保金額：</span>
+                          <span>{formatCurrency(viewingEmployee.latest_insurance.health_insurance_amount)}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">退休金（雇主）：</span>
+                          <span>{formatCurrency(viewingEmployee.latest_insurance.pension_employer_amount)}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">退休金（員工）：</span>
+                          <span>{formatCurrency(viewingEmployee.latest_insurance.pension_employee_amount)}</span>
+                        </div>
                       </div>
-                      <div>
-                        <span className="text-muted-foreground">勞保金額：</span>
-                        <span>{formatCurrency(viewingEmployee.latest_insurance.labor_insurance_amount)}</span>
+                      <div className="mt-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditInsuranceData({
+                              insuranceId: viewingEmployee.latest_insurance!.id,
+                              userId: viewingEmployee.user.id,
+                              labor_insurance_grade: viewingEmployee.latest_insurance!.labor_insurance_grade?.toString() || '',
+                              labor_insurance_amount: viewingEmployee.latest_insurance!.labor_insurance_amount?.toString() || '',
+                              health_insurance_grade: viewingEmployee.latest_insurance!.health_insurance_grade?.toString() || '',
+                              health_insurance_amount: viewingEmployee.latest_insurance!.health_insurance_amount?.toString() || '',
+                              pension_employer_rate: viewingEmployee.latest_insurance!.pension_employer_rate?.toString() || '',
+                              pension_employee_rate: viewingEmployee.latest_insurance!.pension_employee_rate?.toString() || '',
+                              effective_from: viewingEmployee.latest_insurance!.effective_from,
+                              notes: viewingEmployee.latest_insurance!.notes || '',
+                            });
+                            setShowEditInsuranceDialog(true);
+                          }}
+                        >
+                          <Pencil className="h-3 w-3 mr-1" />
+                          編輯勞健保
+                        </Button>
                       </div>
-                      <div>
-                        <span className="text-muted-foreground">健保級距：</span>
-                        <span>{viewingEmployee.latest_insurance.health_insurance_grade || '-'}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">健保金額：</span>
-                        <span>{formatCurrency(viewingEmployee.latest_insurance.health_insurance_amount)}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">退休金（雇主）：</span>
-                        <span>{formatCurrency(viewingEmployee.latest_insurance.pension_employer_amount)}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">退休金（員工）：</span>
-                        <span>{formatCurrency(viewingEmployee.latest_insurance.pension_employee_amount)}</span>
-                      </div>
-                    </div>
-                    <div className="mt-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setEditInsuranceData({
-                            insuranceId: viewingEmployee.latest_insurance!.id,
-                            userId: viewingEmployee.user.id,
-                            labor_insurance_grade: viewingEmployee.latest_insurance!.labor_insurance_grade?.toString() || '',
-                            labor_insurance_amount: viewingEmployee.latest_insurance!.labor_insurance_amount?.toString() || '',
-                            health_insurance_grade: viewingEmployee.latest_insurance!.health_insurance_grade?.toString() || '',
-                            health_insurance_amount: viewingEmployee.latest_insurance!.health_insurance_amount?.toString() || '',
-                            pension_employer_rate: viewingEmployee.latest_insurance!.pension_employer_rate?.toString() || '',
-                            pension_employee_rate: viewingEmployee.latest_insurance!.pension_employee_rate?.toString() || '',
-                            effective_from: viewingEmployee.latest_insurance!.effective_from,
-                            notes: viewingEmployee.latest_insurance!.notes || '',
-                          });
-                          setShowEditInsuranceDialog(true);
-                        }}
-                      >
-                        <Pencil className="h-3 w-3 mr-1" />
-                        編輯勞健保
-                      </Button>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground py-4 text-center">
-                    尚未設定勞健保
-                  </p>
-                )}
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground py-4 text-center">
+                      尚未設定勞健保
+                    </p>
+                  )}
                 </Card>
               </TabsContent>
 
@@ -2271,6 +2266,18 @@ export default function EmployeesPage() {
                   setEditEmployeeData({ ...editEmployeeData, lastName: e.target.value })
                 }
                 placeholder="姓氏（選填）"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="editNickname">暱稱</Label>
+              <Input
+                id="editNickname"
+                value={editEmployeeData.nickname}
+                onChange={(e) =>
+                  setEditEmployeeData({ ...editEmployeeData, nickname: e.target.value })
+                }
+                placeholder="暱稱（選填）"
               />
             </div>
 
