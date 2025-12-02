@@ -55,6 +55,7 @@ const TeacherWorkspace = lazy(() => import("@/pages/teacher-workspace"));
 const TrialOverviewGamified = lazy(() => import("@/pages/reports/trial-overview-gamified"));
 const StudentProfileGamified = lazy(() => import("@/pages/students/student-profile-gamified"));
 const StudentProfileDemo = lazy(() => import("@/pages/students/student-profile-demo"));
+const CourseProgressPage = lazy(() => import("@/pages/teaching/course-progress"));
 
 // Archive 頁面（低使用頻率，保留但移至 archive 目錄）
 const DataSourcesPage = lazy(() => import("@/pages/archive/settings/data-sources"));
@@ -99,6 +100,9 @@ function ProtectedRoutes() {
 
       {/* 教師工作區 */}
       <Route path="/teacher/workspace" component={TeacherWorkspace} />
+
+      {/* 教學系統 - 課程進度追蹤 */}
+      <Route path="/teaching/course-progress" component={CourseProgressPage} />
 
       {/* 工具路由 */}
       <Route path="/tools/kpi-calculator" component={KPICalculatorPage} />

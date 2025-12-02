@@ -31,6 +31,7 @@ import {
   UserCircle,
   Wallet,
   Cpu,
+  ClipboardList,
 } from 'lucide-react';
 import { SidebarSectionConfig } from '@/components/layout/sidebar';
 import type { Role } from './permissions';
@@ -71,6 +72,12 @@ export const sidebarConfig: SidebarSection[] = [
         label: '體驗課總覽',
         href: '/reports/trial-overview',
         icon: FileText,
+        requiredModule: 'trial_class_report',
+      },
+      {
+        label: '課程進度追蹤',
+        href: '/teaching/course-progress',
+        icon: ClipboardList,
         requiredModule: 'trial_class_report',
       },
       {

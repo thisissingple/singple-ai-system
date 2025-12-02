@@ -8316,9 +8316,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // 1. 取得員工姓名
       const userResult = await queryDatabase(`
-        SELECT first_name, last_name, nickname
-        FROM users
-        WHERE id = $1
+        SELECT u.first_name, u.last_name, bi.display_name
+        FROM users u
+        LEFT JOIN business_identities bi ON bi.user_id = u.id AND bi.identity_type = 'teacher' AND bi.is_active = true
+        WHERE u.id = $1
       `, [userId]);
 
       if (userResult.rows.length === 0) {
@@ -8327,7 +8328,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const user = userResult.rows[0];
       const employeeName = `${user.first_name} ${user.last_name}`.trim();
-      const nickname = user.nickname || '';
+      const nickname = user.display_name || '';
 
       // 2. 更新 employee_compensation 表
       await queryDatabase(`
@@ -10652,6 +10653,174 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error('查詢 AI 使用記錄失敗:', error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // Trello 同步 API (學員課程進度追蹤)
+  // ============================================================================
+
+  // POST - 手動觸發 Trello 同步
+  app.post('/api/trello/sync', isAuthenticated, async (req, res) => {
+    try {
+      console.log('🔄 手動觸發 Trello 同步...');
+      const trelloSyncService = await import('./services/trello-sync-service');
+      const result = await trelloSyncService.syncAllBoards();
+
+      res.json({
+        success: result.success,
+        message: `同步完成：處理 ${result.boardsProcessed} 個看板，${result.cardsCompleted} 張卡片完成`,
+        data: result,
+      });
+    } catch (error: any) {
+      console.error('Trello 同步失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // GET - 取得 Trello 同步狀態
+  app.get('/api/trello/status', isAuthenticated, async (req, res) => {
+    try {
+      const trelloSyncService = await import('./services/trello-sync-service');
+      const status = await trelloSyncService.getSyncStatus();
+
+      res.json({
+        success: true,
+        data: status,
+      });
+    } catch (error: any) {
+      console.error('取得 Trello 同步狀態失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // GET - 取得所有學員看板
+  app.get('/api/trello/boards', isAuthenticated, async (req, res) => {
+    try {
+      const trelloSyncService = await import('./services/trello-sync-service');
+      const boards = await trelloSyncService.getStudentBoards();
+
+      res.json({
+        success: true,
+        data: boards,
+        total: boards.length,
+      });
+    } catch (error: any) {
+      console.error('取得 Trello 看板失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // GET - 取得學員課程進度列表
+  app.get('/api/trello/progress', isAuthenticated, async (req, res) => {
+    try {
+      const { teacherId, limit, offset } = req.query;
+      const trelloSyncService = await import('./services/trello-sync-service');
+
+      const progress = await trelloSyncService.getStudentProgressList({
+        teacherId: teacherId as string | undefined,
+        limit: limit ? parseInt(limit as string) : 50,
+        offset: offset ? parseInt(offset as string) : 0,
+      });
+
+      res.json({
+        success: true,
+        data: progress,
+      });
+    } catch (error: any) {
+      console.error('取得學員進度失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // POST - 啟動定時同步
+  app.post('/api/trello/start-periodic-sync', isAuthenticated, async (req, res) => {
+    try {
+      const { intervalMinutes } = req.body;
+      const trelloSyncService = await import('./services/trello-sync-service');
+
+      const interval = (intervalMinutes || 60) * 60 * 1000; // 預設 1 小時
+      trelloSyncService.startPeriodicSync(interval);
+
+      res.json({
+        success: true,
+        message: `定時同步已啟動，間隔 ${intervalMinutes || 60} 分鐘`,
+      });
+    } catch (error: any) {
+      console.error('啟動定時同步失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // POST - 停止定時同步
+  app.post('/api/trello/stop-periodic-sync', isAuthenticated, async (req, res) => {
+    try {
+      const trelloSyncService = await import('./services/trello-sync-service');
+      trelloSyncService.stopPeriodicSync();
+
+      res.json({
+        success: true,
+        message: '定時同步已停止',
+      });
+    } catch (error: any) {
+      console.error('停止定時同步失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // GET - 取得學員的卡片完成明細
+  app.get('/api/trello/progress/:progressId/cards', isAuthenticated, async (req, res) => {
+    try {
+      const { progressId } = req.params;
+      const trelloSyncService = await import('./services/trello-sync-service');
+
+      const cards = await trelloSyncService.getStudentCardCompletions(progressId);
+
+      res.json({
+        success: true,
+        data: cards,
+      });
+    } catch (error: any) {
+      console.error('取得卡片明細失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // GET - 取得老師週進度統計
+  app.get('/api/trello/teacher-weekly-progress', isAuthenticated, async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+      const trelloSyncService = await import('./services/trello-sync-service');
+
+      const weeklyProgress = await trelloSyncService.getTeacherWeeklyProgress({
+        startDate: startDate as string | undefined,
+        endDate: endDate as string | undefined,
+      });
+
+      res.json({
+        success: true,
+        data: weeklyProgress,
+      });
+    } catch (error: any) {
+      console.error('取得老師週進度失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // GET - 取得老師進度總覽
+  app.get('/api/trello/teacher-summary', isAuthenticated, async (req, res) => {
+    try {
+      const trelloSyncService = await import('./services/trello-sync-service');
+
+      const summary = await trelloSyncService.getTeacherProgressSummary();
+
+      res.json({
+        success: true,
+        data: summary,
+      });
+    } catch (error: any) {
+      console.error('取得老師進度總覽失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 
