@@ -218,8 +218,16 @@ export default function EmployeesPage() {
   const [salaryChanged, setSalaryChanged] = useState(false);
   const [savingSalary, setSavingSalary] = useState(false);
 
-  // Inline editing 狀態 - 抽成
+  // Inline editing 狀態 - 教師抽成（被成交：其他諮詢師幫老師成交）
   const [inlineCommission, setInlineCommission] = useState({
+    commission_rate: '',
+    other_revenue_rate: '',
+  });
+  const [commissionChanged, setCommissionChanged] = useState(false);
+  const [savingCommission, setSavingCommission] = useState(false);
+
+  // Inline editing 狀態 - 教師自己成交（老師自己當諮詢師）
+  const [selfClosingCommission, setSelfClosingCommission] = useState({
     commission_type: 'fixed_rate' as 'fixed_rate' | 'tiered',
     commission_rate: '',
     other_revenue_rate: '',
@@ -228,29 +236,89 @@ export default function EmployeesPage() {
     tier2_max_revenue: '',
     tier2_commission_amount: '',
   });
-  const [commissionChanged, setCommissionChanged] = useState(false);
-  const [savingCommission, setSavingCommission] = useState(false);
+  const [selfClosingChanged, setSelfClosingChanged] = useState(false);
+  const [savingSelfClosing, setSavingSelfClosing] = useState(false);
+
+  // Inline editing 狀態 - 諮詢師抽成
+  const [consultantCommission, setConsultantCommission] = useState({
+    commission_rate: '15',      // 一般業績 15%
+    other_revenue_rate: '8',    // 其他業績 8%
+  });
+  const [consultantChanged, setConsultantChanged] = useState(false);
+  const [savingConsultant, setSavingConsultant] = useState(false);
+
+  // Inline editing 狀態 - 電訪人員抽成
+  const [setterCommission, setSetterCommission] = useState({
+    commission_rate: '10',      // 一般業績 10%
+    other_revenue_rate: '8',    // 其他業績 8%
+  });
+  const [setterChanged, setSetterChanged] = useState(false);
+  const [savingSetter, setSavingSetter] = useState(false);
 
   // 初始化 inline editing 狀態
   useEffect(() => {
-    if (viewingEmployee?.latest_compensation) {
-      const comp = viewingEmployee.latest_compensation;
-      setInlineSalary({
-        base_salary: comp.base_salary?.toString() || '',
-      });
-      setInlineCommission({
-        commission_type: (comp.commission_type as 'fixed_rate' | 'tiered') || 'fixed_rate',
-        commission_rate: comp.commission_rate?.toString() || '',
-        other_revenue_rate: comp.other_revenue_rate?.toString() || '',
-        tier1_max_revenue: comp.tier1_max_revenue?.toString() || '',
-        tier1_commission_amount: comp.tier1_commission_amount?.toString() || '',
-        tier2_max_revenue: comp.tier2_max_revenue?.toString() || '',
-        tier2_commission_amount: comp.tier2_commission_amount?.toString() || '',
-      });
-      setSalaryChanged(false);
-      setCommissionChanged(false);
+    if (viewingEmployee) {
+      // 薪資
+      if (viewingEmployee.latest_compensation) {
+        const comp = viewingEmployee.latest_compensation;
+        setInlineSalary({
+          base_salary: comp.base_salary?.toString() || '',
+        });
+        setSalaryChanged(false);
+      }
+
+      // 從 role_commissions 讀取按角色區分的抽成設定
+      const roleCommissions = (viewingEmployee as any).role_commissions || {};
+
+      // 教師抽成 - 被成交（其他諮詢師幫老師成交）
+      const teacherComm = roleCommissions.teacher || viewingEmployee.latest_compensation;
+      if (teacherComm) {
+        setInlineCommission({
+          commission_rate: teacherComm.commission_rate?.toString() || '',
+          other_revenue_rate: teacherComm.other_revenue_rate?.toString() || '',
+        });
+        setCommissionChanged(false);
+
+        // 教師抽成 - 自己成交（老師自己當諮詢師）
+        // TODO: 目前先使用相同資料，之後需要新增獨立欄位儲存
+        const commType = teacherComm.commission_type === 'tiered' ? 'tiered' : 'fixed_rate';
+        setSelfClosingCommission({
+          commission_type: commType as 'fixed_rate' | 'tiered',
+          commission_rate: teacherComm.commission_rate?.toString() || '',
+          other_revenue_rate: teacherComm.other_revenue_rate?.toString() || '',
+          tier1_max_revenue: teacherComm.tier1_max_revenue?.toString() || '',
+          tier1_commission_amount: teacherComm.tier1_commission_amount?.toString() || '',
+          tier2_max_revenue: teacherComm.tier2_max_revenue?.toString() || '',
+          tier2_commission_amount: teacherComm.tier2_commission_amount?.toString() || '',
+        });
+        setSelfClosingChanged(false);
+      }
+
+      // 諮詢師抽成
+      const consultantComm = roleCommissions.consultant;
+      if (consultantComm) {
+        setConsultantCommission({
+          commission_rate: consultantComm.commission_rate?.toString() || '15',
+          other_revenue_rate: consultantComm.other_revenue_rate?.toString() || '8',
+        });
+      } else {
+        setConsultantCommission({ commission_rate: '15', other_revenue_rate: '8' });
+      }
+      setConsultantChanged(false);
+
+      // 電訪人員抽成
+      const setterComm = roleCommissions.setter;
+      if (setterComm) {
+        setSetterCommission({
+          commission_rate: setterComm.commission_rate?.toString() || '10',
+          other_revenue_rate: setterComm.other_revenue_rate?.toString() || '8',
+        });
+      } else {
+        setSetterCommission({ commission_rate: '10', other_revenue_rate: '8' });
+      }
+      setSetterChanged(false);
     }
-  }, [viewingEmployee?.latest_compensation]);
+  }, [viewingEmployee]);
 
   // 權限管理相關狀態
   const { toast } = useToast();
@@ -1105,31 +1173,27 @@ export default function EmployeesPage() {
     }
   };
 
-  // Inline 儲存抽成資訊
+  // Inline 儲存抽成資訊（教師角色）
   const handleSaveInlineCommission = async () => {
-    if (!viewingEmployee?.latest_compensation) return;
+    if (!viewingEmployee) return;
 
     setSavingCommission(true);
     try {
-      const comp = viewingEmployee.latest_compensation;
+      // 使用新的 role-commission API
       const response = await fetch(
-        `/api/employees/${viewingEmployee.user.id}/compensation/${comp.id}`,
+        `/api/employees/${viewingEmployee.user.id}/role-commission/teacher`,
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            // 保持底薪不變
-            base_salary: comp.base_salary,
-            // 更新抽成欄位
             commission_type: inlineCommission.commission_type,
             commission_rate: inlineCommission.commission_rate ? parseFloat(inlineCommission.commission_rate) : null,
+            other_revenue_rate: inlineCommission.other_revenue_rate ? parseFloat(inlineCommission.other_revenue_rate) : null,
             tier1_max_revenue: inlineCommission.tier1_max_revenue ? parseFloat(inlineCommission.tier1_max_revenue) : null,
             tier1_commission_amount: inlineCommission.tier1_commission_amount ? parseFloat(inlineCommission.tier1_commission_amount) : null,
             tier2_max_revenue: inlineCommission.tier2_max_revenue ? parseFloat(inlineCommission.tier2_max_revenue) : null,
             tier2_commission_amount: inlineCommission.tier2_commission_amount ? parseFloat(inlineCommission.tier2_commission_amount) : null,
-            other_revenue_rate: inlineCommission.other_revenue_rate ? parseFloat(inlineCommission.other_revenue_rate) : null,
-            effective_from: comp.effective_from,
-            adjustment_reason: comp.adjustment_reason,
+            notes: `教師抽成更新 ${new Date().toLocaleDateString('zh-TW')}`,
           }),
         }
       );
@@ -1159,6 +1223,100 @@ export default function EmployeesPage() {
       });
     } finally {
       setSavingCommission(false);
+    }
+  };
+
+  // 儲存諮詢師抽成設定（使用 role-commission API）
+  const handleSaveConsultantCommission = async () => {
+    if (!viewingEmployee) return;
+
+    setSavingConsultant(true);
+    try {
+      const response = await fetch(
+        `/api/employees/${viewingEmployee.user.id}/role-commission/consultant`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            commission_type: 'fixed_rate',
+            commission_rate: consultantCommission.commission_rate ? parseFloat(consultantCommission.commission_rate) : null,
+            other_revenue_rate: consultantCommission.other_revenue_rate ? parseFloat(consultantCommission.other_revenue_rate) : null,
+            notes: `諮詢師抽成更新 ${new Date().toLocaleDateString('zh-TW')}`,
+          }),
+        }
+      );
+
+      const data = await response.json();
+      if (data.success) {
+        toast({
+          title: '已儲存',
+          description: '諮詢師抽成設定已更新成功',
+        });
+        setConsultantChanged(false);
+        handleViewDetail(viewingEmployee);
+      } else {
+        toast({
+          title: '儲存失敗',
+          description: data.message || '更新失敗',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('更新諮詢師抽成設定失敗:', error);
+      toast({
+        title: '儲存失敗',
+        description: '更新失敗',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingConsultant(false);
+    }
+  };
+
+  // 儲存電訪人員抽成設定（使用 role-commission API）
+  const handleSaveSetterCommission = async () => {
+    if (!viewingEmployee) return;
+
+    setSavingSetter(true);
+    try {
+      const response = await fetch(
+        `/api/employees/${viewingEmployee.user.id}/role-commission/setter`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            commission_type: 'fixed_rate',
+            commission_rate: setterCommission.commission_rate ? parseFloat(setterCommission.commission_rate) : null,
+            other_revenue_rate: setterCommission.other_revenue_rate ? parseFloat(setterCommission.other_revenue_rate) : null,
+            notes: `電訪人員抽成更新 ${new Date().toLocaleDateString('zh-TW')}`,
+          }),
+        }
+      );
+
+      const data = await response.json();
+      if (data.success) {
+        toast({
+          title: '已儲存',
+          description: '電訪人員抽成設定已更新成功',
+        });
+        setSetterChanged(false);
+        handleViewDetail(viewingEmployee);
+      } else {
+        toast({
+          title: '儲存失敗',
+          description: data.message || '更新失敗',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('更新電訪人員抽成設定失敗:', error);
+      toast({
+        title: '儲存失敗',
+        description: '更新失敗',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingSetter(false);
     }
   };
 
@@ -1659,294 +1817,573 @@ export default function EmployeesPage() {
                 </Card>
               </TabsContent>
 
-              {/* 薪資設定分頁 */}
+              {/* 薪資設定分頁 - 新版按角色分區設計 */}
               <TabsContent value="salary" className="space-y-4">
-                {/* 薪資資訊區塊 - Inline Editing */}
+                {/* 底薪區塊 */}
                 <Card className="p-4">
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
-                      薪資資訊
-                    </h3>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <Label className="text-sm font-medium">底薪</Label>
+                      <div className="flex items-center gap-1">
+                        <span className="text-muted-foreground">$</span>
+                        <Input
+                          type="number"
+                          value={inlineSalary.base_salary}
+                          onChange={(e) => {
+                            setInlineSalary({ base_salary: e.target.value });
+                            setSalaryChanged(true);
+                          }}
+                          placeholder="0"
+                          className="h-8 w-32"
+                        />
+                      </div>
+                    </div>
+                    {salaryChanged && (
+                      <Button
+                        size="sm"
+                        onClick={handleSaveInlineSalary}
+                        disabled={savingSalary}
+                      >
+                        {savingSalary ? (
+                          <Loader2Icon className="h-4 w-4 mr-1 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4 mr-1" />
+                        )}
+                        儲存
+                      </Button>
+                    )}
                     {!viewingEmployee.latest_compensation && (
-                      <Button size="sm" onClick={() => setShowCompensationDialog(true)}>
+                      <Button size="sm" variant="outline" onClick={() => setShowCompensationDialog(true)}>
                         <Plus className="h-4 w-4 mr-1" />
-                        設定薪資
+                        初始設定
                       </Button>
                     )}
                   </div>
-
-                  {viewingEmployee.latest_compensation ? (
-                    <>
-                      <div className="grid grid-cols-3 gap-4 text-sm">
-                        <div className="space-y-1">
-                          <Label className="text-muted-foreground text-xs">底薪</Label>
-                          <div className="flex items-center gap-2">
-                            <span className="text-muted-foreground">$</span>
-                            <Input
-                              type="number"
-                              value={inlineSalary.base_salary}
-                              onChange={(e) => {
-                                setInlineSalary({ base_salary: e.target.value });
-                                setSalaryChanged(true);
-                              }}
-                              placeholder="0"
-                              className="h-8"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      {salaryChanged && (
-                        <div className="flex justify-end mt-3">
-                          <Button
-                            size="sm"
-                            onClick={handleSaveInlineSalary}
-                            disabled={savingSalary}
-                          >
-                            {savingSalary ? (
-                              <Loader2Icon className="h-4 w-4 mr-1 animate-spin" />
-                            ) : (
-                              <Save className="h-4 w-4 mr-1" />
-                            )}
-                            儲存
-                          </Button>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <p className="text-sm text-muted-foreground py-4 text-center">
-                      尚未設定薪資
-                    </p>
-                  )}
-
-                  {viewingEmployee.compensation && viewingEmployee.compensation.length > 1 && (
-                    <div className="mt-4 pt-4 border-t">
-                      <p className="text-xs text-muted-foreground mb-2">
-                        歷史薪資記錄（共 {viewingEmployee.compensation.length} 筆）
-                      </p>
-                    </div>
-                  )}
                 </Card>
 
-                {/* 抽成資訊區塊 - Inline Editing */}
-                <Card className="p-4">
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4" />
-                      抽成資訊
-                    </h3>
-                  </div>
+                {/* 現行抽成規則標題 */}
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4" />
+                  <span className="font-semibold text-sm">現行抽成規則</span>
+                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                    使用中
+                  </Badge>
+                </div>
 
-                  {viewingEmployee.latest_compensation ? (
-                    <>
-                      <div className="space-y-4">
-                        {/* 抽成類型選擇 */}
-                        <div className="space-y-1">
-                          <Label className="text-muted-foreground text-xs">抽成類型</Label>
-                          <Select
-                            value={inlineCommission.commission_type}
-                            onValueChange={(value: 'fixed_rate' | 'tiered') => {
-                              setInlineCommission(prev => ({ ...prev, commission_type: value }));
-                              setCommissionChanged(true);
-                            }}
-                          >
-                            <SelectTrigger className="h-8 w-40">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="fixed_rate">固定比例</SelectItem>
-                              <SelectItem value="tiered">階梯式</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        {/* 固定比例模式 */}
-                        {inlineCommission.commission_type === 'fixed_rate' && (
-                          <div className="grid grid-cols-3 gap-4 text-sm">
-                            <div className="space-y-1">
-                              <Label className="text-muted-foreground text-xs">一般業績抽成 (%)</Label>
-                              <Input
-                                type="number"
-                                value={inlineCommission.commission_rate}
-                                onChange={(e) => {
-                                  setInlineCommission(prev => ({ ...prev, commission_rate: e.target.value }));
-                                  setCommissionChanged(true);
-                                }}
-                                placeholder="0"
-                                className="h-8"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-muted-foreground text-xs">其他業績抽成 (%)</Label>
-                              <Input
-                                type="number"
-                                value={inlineCommission.other_revenue_rate}
-                                onChange={(e) => {
-                                  setInlineCommission(prev => ({ ...prev, other_revenue_rate: e.target.value }));
-                                  setCommissionChanged(true);
-                                }}
-                                placeholder="8"
-                                className="h-8"
-                              />
-                            </div>
+                {/* 根據身份動態顯示抽成區塊 */}
+                {viewingEmployee.identities.filter(i => i.is_active).length > 0 ? (
+                  <>
+                    {/* 教師抽成區塊 */}
+                    {viewingEmployee.identities.some(i => i.identity_type === 'teacher' && i.is_active) && (
+                      <Card className="overflow-hidden">
+                        <div className="bg-slate-50 px-4 py-3 border-b flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">🎓</span>
+                            <span className="font-medium text-sm">教師抽成</span>
                           </div>
-                        )}
-
-                        {/* 階梯式模式 */}
-                        {inlineCommission.commission_type === 'tiered' && (
-                          <div className="space-y-4">
-                            <div className="grid grid-cols-3 gap-4 text-sm">
-                              <div className="space-y-1">
-                                <Label className="text-muted-foreground text-xs">第一階上限</Label>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-muted-foreground">$</span>
-                                  <Input
-                                    type="number"
-                                    value={inlineCommission.tier1_max_revenue}
-                                    onChange={(e) => {
-                                      setInlineCommission(prev => ({ ...prev, tier1_max_revenue: e.target.value }));
-                                      setCommissionChanged(true);
-                                    }}
-                                    placeholder="105000"
-                                    className="h-8"
-                                  />
-                                </div>
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-muted-foreground text-xs">第一階抽成金額</Label>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-muted-foreground">$</span>
-                                  <Input
-                                    type="number"
-                                    value={inlineCommission.tier1_commission_amount}
-                                    onChange={(e) => {
-                                      setInlineCommission(prev => ({ ...prev, tier1_commission_amount: e.target.value }));
-                                      setCommissionChanged(true);
-                                    }}
-                                    placeholder="33000"
-                                    className="h-8"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-3 gap-4 text-sm">
-                              <div className="space-y-1">
-                                <Label className="text-muted-foreground text-xs">第二階上限</Label>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-muted-foreground">$</span>
-                                  <Input
-                                    type="number"
-                                    value={inlineCommission.tier2_max_revenue}
-                                    onChange={(e) => {
-                                      setInlineCommission(prev => ({ ...prev, tier2_max_revenue: e.target.value }));
-                                      setCommissionChanged(true);
-                                    }}
-                                    placeholder="150000"
-                                    className="h-8"
-                                  />
-                                </div>
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-muted-foreground text-xs">第二階抽成金額</Label>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-muted-foreground">$</span>
-                                  <Input
-                                    type="number"
-                                    value={inlineCommission.tier2_commission_amount}
-                                    onChange={(e) => {
-                                      setInlineCommission(prev => ({ ...prev, tier2_commission_amount: e.target.value }));
-                                      setCommissionChanged(true);
-                                    }}
-                                    placeholder="7500"
-                                    className="h-8"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-3 gap-4 text-sm">
-                              <div className="space-y-1">
-                                <Label className="text-muted-foreground text-xs">其他業績抽成 (%)</Label>
-                                <Input
-                                  type="number"
-                                  value={inlineCommission.other_revenue_rate}
-                                  onChange={(e) => {
-                                    setInlineCommission(prev => ({ ...prev, other_revenue_rate: e.target.value }));
-                                    setCommissionChanged(true);
-                                  }}
-                                  placeholder="8"
-                                  className="h-8"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      {commissionChanged && (
-                        <div className="flex justify-end mt-3">
-                          <Button
-                            size="sm"
-                            onClick={handleSaveInlineCommission}
-                            disabled={savingCommission}
-                          >
-                            {savingCommission ? (
-                              <Loader2Icon className="h-4 w-4 mr-1 animate-spin" />
-                            ) : (
-                              <Save className="h-4 w-4 mr-1" />
+                          <div className="flex items-center gap-2">
+                            {viewingEmployee.identities.find(i => i.identity_type === 'teacher' && i.is_active)?.is_primary && (
+                              <Badge className="bg-purple-100 text-purple-700 border-purple-200">主要身份</Badge>
                             )}
-                            儲存
-                          </Button>
+                            {!viewingEmployee.identities.find(i => i.identity_type === 'teacher' && i.is_active)?.is_primary && (
+                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">次要身份</Badge>
+                            )}
+                            {commissionChanged && (
+                              <Button
+                                size="sm"
+                                onClick={handleSaveInlineCommission}
+                                disabled={savingCommission}
+                              >
+                                {savingCommission ? (
+                                  <Loader2Icon className="h-3 w-3 mr-1 animate-spin" />
+                                ) : (
+                                  <Save className="h-3 w-3 mr-1" />
+                                )}
+                                儲存
+                              </Button>
+                            )}
+                          </div>
                         </div>
-                      )}
-                    </>
-                  ) : (
-                    <p className="text-sm text-muted-foreground py-4 text-center">
-                      尚未設定抽成（請先在薪資資訊中設定底薪）
+                        <div className="p-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            {/* 被成交 - 其他諮詢師幫老師成交 */}
+                            <div className="bg-slate-50 rounded-lg p-4">
+                              <div className="flex items-center justify-between mb-3">
+                                <span className="text-sm font-medium">被成交</span>
+                                <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-200 text-xs">固定比例</Badge>
+                              </div>
+                              <p className="text-xs text-muted-foreground mb-2">其他諮詢師幫老師成交</p>
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="border-b">
+                                    <th className="text-left py-2 text-muted-foreground font-medium">業績類型</th>
+                                    <th className="text-right py-2 text-muted-foreground font-medium">抽成比例</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr className="border-b">
+                                    <td className="py-2">一般業績</td>
+                                    <td className="py-2 text-right">
+                                      <div className="flex items-center justify-end gap-1">
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          value={inlineCommission.commission_rate}
+                                          onChange={(e) => {
+                                            setInlineCommission(prev => ({ ...prev, commission_rate: e.target.value }));
+                                            setCommissionChanged(true);
+                                          }}
+                                          placeholder="18"
+                                          className="h-7 w-20 text-right text-sm"
+                                        />
+                                        <span className="text-muted-foreground">%</span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                  <tr>
+                                    <td className="py-2">其他業績</td>
+                                    <td className="py-2 text-right">
+                                      <div className="flex items-center justify-end gap-1">
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          value={inlineCommission.other_revenue_rate}
+                                          onChange={(e) => {
+                                            setInlineCommission(prev => ({ ...prev, other_revenue_rate: e.target.value }));
+                                            setCommissionChanged(true);
+                                          }}
+                                          placeholder="8"
+                                          className="h-7 w-20 text-right text-sm"
+                                        />
+                                        <span className="text-muted-foreground">%</span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+
+                            {/* 自己成交 - 老師自己當諮詢師 - 根據 commission_type 動態顯示 */}
+                            <div className="bg-slate-50 rounded-lg p-4">
+                              <div className="flex items-center justify-between mb-3">
+                                <span className="text-sm font-medium">自己成交</span>
+                                <select
+                                  value={selfClosingCommission.commission_type === 'tiered' ? 'tiered' : 'fixed_rate'}
+                                  onChange={(e) => {
+                                    setSelfClosingCommission(prev => ({
+                                      ...prev,
+                                      commission_type: e.target.value as 'fixed_rate' | 'tiered'
+                                    }));
+                                    setSelfClosingChanged(true);
+                                  }}
+                                  className="text-xs px-2 py-1 rounded border bg-white"
+                                >
+                                  <option value="fixed_rate">固定比例</option>
+                                  <option value="tiered">階梯式</option>
+                                </select>
+                              </div>
+                              <p className="text-xs text-muted-foreground mb-2">老師自己當諮詢師成交</p>
+
+                              {/* 固定比例模式 */}
+                              {(selfClosingCommission.commission_type !== 'tiered') && (
+                                <table className="w-full text-sm">
+                                  <thead>
+                                    <tr className="border-b">
+                                      <th className="text-left py-2 text-muted-foreground font-medium">業績類型</th>
+                                      <th className="text-right py-2 text-muted-foreground font-medium">抽成比例</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <tr className="border-b">
+                                      <td className="py-2">一般業績</td>
+                                      <td className="py-2 text-right">
+                                        <div className="flex items-center justify-end gap-1">
+                                          <Input
+                                            type="number"
+                                            step="0.01"
+                                            value={selfClosingCommission.commission_rate}
+                                            onChange={(e) => {
+                                              setSelfClosingCommission(prev => ({ ...prev, commission_rate: e.target.value }));
+                                              setSelfClosingChanged(true);
+                                            }}
+                                            placeholder="18"
+                                            className="h-7 w-20 text-right text-sm"
+                                          />
+                                          <span className="text-muted-foreground">%</span>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                    <tr>
+                                      <td className="py-2">其他業績</td>
+                                      <td className="py-2 text-right">
+                                        <div className="flex items-center justify-end gap-1">
+                                          <Input
+                                            type="number"
+                                            step="0.01"
+                                            value={selfClosingCommission.other_revenue_rate}
+                                            onChange={(e) => {
+                                              setSelfClosingCommission(prev => ({ ...prev, other_revenue_rate: e.target.value }));
+                                              setSelfClosingChanged(true);
+                                            }}
+                                            placeholder="8"
+                                            className="h-7 w-20 text-right text-sm"
+                                          />
+                                          <span className="text-muted-foreground">%</span>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              )}
+
+                              {/* 階梯式模式 */}
+                              {selfClosingCommission.commission_type === 'tiered' && (
+                                <table className="w-full text-sm">
+                                  <thead>
+                                    <tr className="border-b">
+                                      <th className="text-left py-2 text-muted-foreground font-medium">業績區間</th>
+                                      <th className="text-right py-2 text-muted-foreground font-medium">抽成金額</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <tr className="border-b">
+                                      <td className="py-2">
+                                        <div className="flex items-center gap-1">
+                                          <span>0 ~</span>
+                                          <Input
+                                            type="number"
+                                            value={selfClosingCommission.tier1_max_revenue}
+                                            onChange={(e) => {
+                                              setSelfClosingCommission(prev => ({ ...prev, tier1_max_revenue: e.target.value }));
+                                              setSelfClosingChanged(true);
+                                            }}
+                                            placeholder="105000"
+                                            className="h-7 w-24 text-sm"
+                                          />
+                                        </div>
+                                      </td>
+                                      <td className="py-2 text-right">
+                                        <div className="flex items-center justify-end gap-1">
+                                          <span className="text-muted-foreground">$</span>
+                                          <Input
+                                            type="number"
+                                            value={selfClosingCommission.tier1_commission_amount}
+                                            onChange={(e) => {
+                                              setSelfClosingCommission(prev => ({ ...prev, tier1_commission_amount: e.target.value }));
+                                              setSelfClosingChanged(true);
+                                            }}
+                                            placeholder="33000"
+                                            className="h-7 w-20 text-right text-sm"
+                                          />
+                                        </div>
+                                      </td>
+                                    </tr>
+                                    <tr className="border-b">
+                                      <td className="py-2">
+                                        <div className="flex items-center gap-1">
+                                          <span>{Number(selfClosingCommission.tier1_max_revenue || 105000).toLocaleString()} ~</span>
+                                          <Input
+                                            type="number"
+                                            value={selfClosingCommission.tier2_max_revenue}
+                                            onChange={(e) => {
+                                              setSelfClosingCommission(prev => ({ ...prev, tier2_max_revenue: e.target.value }));
+                                              setSelfClosingChanged(true);
+                                            }}
+                                            placeholder="150000"
+                                            className="h-7 w-24 text-sm"
+                                          />
+                                        </div>
+                                      </td>
+                                      <td className="py-2 text-right">
+                                        <div className="flex items-center justify-end gap-1">
+                                          <span className="text-muted-foreground">$</span>
+                                          <Input
+                                            type="number"
+                                            value={selfClosingCommission.tier2_commission_amount}
+                                            onChange={(e) => {
+                                              setSelfClosingCommission(prev => ({ ...prev, tier2_commission_amount: e.target.value }));
+                                              setSelfClosingChanged(true);
+                                            }}
+                                            placeholder="7500"
+                                            className="h-7 w-20 text-right text-sm"
+                                          />
+                                        </div>
+                                      </td>
+                                    </tr>
+                                    <tr>
+                                      <td className="py-2">其他業績</td>
+                                      <td className="py-2 text-right">
+                                        <div className="flex items-center justify-end gap-1">
+                                          <Input
+                                            type="number"
+                                            step="0.01"
+                                            value={selfClosingCommission.other_revenue_rate}
+                                            onChange={(e) => {
+                                              setSelfClosingCommission(prev => ({ ...prev, other_revenue_rate: e.target.value }));
+                                              setSelfClosingChanged(true);
+                                            }}
+                                            placeholder="8"
+                                            className="h-7 w-20 text-right text-sm"
+                                          />
+                                          <span className="text-muted-foreground">%</span>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* 諮詢師抽成區塊 */}
+                    {viewingEmployee.identities.some(i => i.identity_type === 'consultant' && i.is_active) && (
+                      <Card className="overflow-hidden">
+                        <div className="bg-slate-50 px-4 py-3 border-b flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">💼</span>
+                            <span className="font-medium text-sm">諮詢師抽成</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {viewingEmployee.identities.find(i => i.identity_type === 'consultant' && i.is_active)?.is_primary ? (
+                              <Badge className="bg-purple-100 text-purple-700 border-purple-200">主要身份</Badge>
+                            ) : (
+                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">次要身份</Badge>
+                            )}
+                            {consultantChanged && (
+                              <Button
+                                size="sm"
+                                onClick={handleSaveConsultantCommission}
+                                disabled={savingConsultant}
+                              >
+                                {savingConsultant ? <Loader2Icon className="h-3 w-3 mr-1 animate-spin" /> : <Save className="h-3 w-3 mr-1" />}
+                                儲存
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="p-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            {/* 成交 - 固定比例 */}
+                            <div className="bg-slate-50 rounded-lg p-4">
+                              <div className="flex items-center justify-between mb-3">
+                                <span className="text-sm font-medium">成交</span>
+                                <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-200 text-xs">固定比例</Badge>
+                              </div>
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="border-b">
+                                    <th className="text-left py-2 text-muted-foreground font-medium">業績類型</th>
+                                    <th className="text-right py-2 text-muted-foreground font-medium">抽成比例</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr className="border-b">
+                                    <td className="py-2">一般業績</td>
+                                    <td className="py-2 text-right">
+                                      <div className="flex items-center justify-end gap-1">
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          value={consultantCommission.commission_rate}
+                                          onChange={(e) => {
+                                            setConsultantCommission(prev => ({ ...prev, commission_rate: e.target.value }));
+                                            setConsultantChanged(true);
+                                          }}
+                                          placeholder="15"
+                                          className="h-7 w-20 text-right text-sm"
+                                        />
+                                        <span className="text-muted-foreground">%</span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                  <tr>
+                                    <td className="py-2">其他業績</td>
+                                    <td className="py-2 text-right">
+                                      <div className="flex items-center justify-end gap-1">
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          value={consultantCommission.other_revenue_rate}
+                                          onChange={(e) => {
+                                            setConsultantCommission(prev => ({ ...prev, other_revenue_rate: e.target.value }));
+                                            setConsultantChanged(true);
+                                          }}
+                                          placeholder="8"
+                                          className="h-7 w-20 text-right text-sm"
+                                        />
+                                        <span className="text-muted-foreground">%</span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* 電訪人員抽成區塊 */}
+                    {viewingEmployee.identities.some(i => i.identity_type === 'setter' && i.is_active) && (
+                      <Card className="overflow-hidden">
+                        <div className="bg-slate-50 px-4 py-3 border-b flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">📞</span>
+                            <span className="font-medium text-sm">電訪人員抽成</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {viewingEmployee.identities.find(i => i.identity_type === 'setter' && i.is_active)?.is_primary ? (
+                              <Badge className="bg-purple-100 text-purple-700 border-purple-200">主要身份</Badge>
+                            ) : (
+                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">次要身份</Badge>
+                            )}
+                            {setterChanged && (
+                              <Button
+                                size="sm"
+                                onClick={handleSaveSetterCommission}
+                                disabled={savingSetter}
+                              >
+                                {savingSetter ? <Loader2Icon className="h-3 w-3 mr-1 animate-spin" /> : <Save className="h-3 w-3 mr-1" />}
+                                儲存
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="p-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            {/* 成交 - 固定比例 */}
+                            <div className="bg-slate-50 rounded-lg p-4">
+                              <div className="flex items-center justify-between mb-3">
+                                <span className="text-sm font-medium">成交</span>
+                                <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-200 text-xs">固定比例</Badge>
+                              </div>
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="border-b">
+                                    <th className="text-left py-2 text-muted-foreground font-medium">業績類型</th>
+                                    <th className="text-right py-2 text-muted-foreground font-medium">抽成比例</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr className="border-b">
+                                    <td className="py-2">一般業績</td>
+                                    <td className="py-2 text-right">
+                                      <div className="flex items-center justify-end gap-1">
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          value={setterCommission.commission_rate}
+                                          onChange={(e) => {
+                                            setSetterCommission(prev => ({ ...prev, commission_rate: e.target.value }));
+                                            setSetterChanged(true);
+                                          }}
+                                          placeholder="10"
+                                          className="h-7 w-20 text-right text-sm"
+                                        />
+                                        <span className="text-muted-foreground">%</span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                  <tr>
+                                    <td className="py-2">其他業績</td>
+                                    <td className="py-2 text-right">
+                                      <div className="flex items-center justify-end gap-1">
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          value={setterCommission.other_revenue_rate}
+                                          onChange={(e) => {
+                                            setSetterCommission(prev => ({ ...prev, other_revenue_rate: e.target.value }));
+                                            setSetterChanged(true);
+                                          }}
+                                          placeholder="8"
+                                          className="h-7 w-20 text-right text-sm"
+                                        />
+                                        <span className="text-muted-foreground">%</span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    )}
+                  </>
+                ) : (
+                  <Card className="p-6">
+                    <p className="text-sm text-muted-foreground text-center">
+                      尚未設定角色身份，請先在「員工資訊」分頁中新增角色
                     </p>
-                  )}
+                  </Card>
+                )}
+
+                {/* 未來抽成規則區塊 */}
+                <div className="relative">
+                  <Separator className="my-4" />
+                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background px-3 text-xs text-muted-foreground">
+                    ▼ 未來抽成規則 ▼
+                  </span>
+                </div>
+
+                <Card className="border-2 border-dashed border-amber-300 bg-amber-50/50 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">🚀</span>
+                      <span className="font-medium text-sm text-amber-800">新制抽成規則</span>
+                      <Badge variant="outline" className="bg-orange-100 text-orange-700 border-orange-300">預備中</Badge>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox id="enable-new-rule" disabled />
+                      <Label htmlFor="enable-new-rule" className="text-xs text-muted-foreground">啟用新制</Label>
+                    </div>
+                  </div>
+                  <div className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center">
+                    <p className="text-sm text-muted-foreground">新制抽成規則將在此顯示</p>
+                    <p className="text-xs text-muted-foreground mt-1">可設定上線日期，届時自動切換</p>
+                  </div>
                 </Card>
 
                 {/* 勞健保資訊區塊 */}
-                <Card className="p-4">
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold flex items-center gap-2">
-                      <Shield className="h-4 w-4" />
-                      勞健保資訊
-                    </h3>
-                    <Button size="sm" onClick={() => setShowInsuranceDialog(true)}>
-                      <Plus className="h-4 w-4 mr-1" />
-                      設定勞健保
-                    </Button>
-                  </div>
+                <div className="flex items-center gap-2 mt-6">
+                  <Shield className="h-4 w-4" />
+                  <span className="font-semibold text-sm">勞健保資訊</span>
+                </div>
 
+                <Card className="p-4">
                   {viewingEmployee.latest_insurance ? (
                     <>
-                      <div className="grid grid-cols-3 gap-4 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">勞保級距：</span>
-                          <span>{viewingEmployee.latest_insurance.labor_insurance_grade || '-'}</span>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
+                          <span className="text-xs text-muted-foreground">勞保級距</span>
+                          <span className="font-medium">{viewingEmployee.latest_insurance.labor_insurance_grade || '-'}</span>
                         </div>
-                        <div>
-                          <span className="text-muted-foreground">勞保金額：</span>
-                          <span>{formatCurrency(viewingEmployee.latest_insurance.labor_insurance_amount)}</span>
+                        <div className="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
+                          <span className="text-xs text-muted-foreground">勞保金額</span>
+                          <span className="font-medium">{formatCurrency(viewingEmployee.latest_insurance.labor_insurance_amount)}</span>
                         </div>
-                        <div>
-                          <span className="text-muted-foreground">健保級距：</span>
-                          <span>{viewingEmployee.latest_insurance.health_insurance_grade || '-'}</span>
+                        <div className="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
+                          <span className="text-xs text-muted-foreground">健保級距</span>
+                          <span className="font-medium">{viewingEmployee.latest_insurance.health_insurance_grade || '-'}</span>
                         </div>
-                        <div>
-                          <span className="text-muted-foreground">健保金額：</span>
-                          <span>{formatCurrency(viewingEmployee.latest_insurance.health_insurance_amount)}</span>
+                        <div className="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
+                          <span className="text-xs text-muted-foreground">健保金額</span>
+                          <span className="font-medium">{formatCurrency(viewingEmployee.latest_insurance.health_insurance_amount)}</span>
                         </div>
-                        <div>
-                          <span className="text-muted-foreground">退休金（雇主）：</span>
-                          <span>{formatCurrency(viewingEmployee.latest_insurance.pension_employer_amount)}</span>
+                        <div className="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
+                          <span className="text-xs text-muted-foreground">退休金(雇主)</span>
+                          <span className="font-medium">{formatCurrency(viewingEmployee.latest_insurance.pension_employer_amount)}</span>
                         </div>
-                        <div>
-                          <span className="text-muted-foreground">退休金（員工）：</span>
-                          <span>{formatCurrency(viewingEmployee.latest_insurance.pension_employee_amount)}</span>
+                        <div className="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
+                          <span className="text-xs text-muted-foreground">退休金(員工)</span>
+                          <span className="font-medium">{formatCurrency(viewingEmployee.latest_insurance.pension_employee_amount)}</span>
                         </div>
                       </div>
-                      <div className="mt-3">
+                      <div className="mt-3 flex justify-end">
                         <Button
                           variant="outline"
                           size="sm"
@@ -1972,9 +2409,13 @@ export default function EmployeesPage() {
                       </div>
                     </>
                   ) : (
-                    <p className="text-sm text-muted-foreground py-4 text-center">
-                      尚未設定勞健保
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground">尚未設定勞健保</p>
+                      <Button size="sm" onClick={() => setShowInsuranceDialog(true)}>
+                        <Plus className="h-4 w-4 mr-1" />
+                        設定勞健保
+                      </Button>
+                    </div>
                   )}
                 </Card>
               </TabsContent>

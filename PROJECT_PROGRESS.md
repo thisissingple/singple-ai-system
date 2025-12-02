@@ -2,10 +2,106 @@
 
 > **最後更新**: 2025-12-02
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ 薪資設定 Inline Editing 功能
+> **專案狀態**: ✅ 按角色區分的抽成設定系統
 > **當前階段**: 系統功能完善
-> **今日進度**: 薪資/抽成資訊 Inline Editing + 抽成規則 Migration
+> **今日進度**: 角色抽成設定 + 被成交/自己成交分離
 > **整體進度**: 100% ████████████████████
+
+---
+
+## 📅 2025-12-02 更新日誌（深夜）
+
+### 🎯 按角色區分的抽成設定系統
+
+#### 需求背景
+員工可能有多個角色身份（如老師同時也是諮詢師），每個角色有不同的抽成規則：
+- **教師**：有「被成交」和「自己成交」兩種情況
+- **諮詢師**：固定比例抽成
+- **電訪人員**：固定比例抽成
+
+#### 資料庫變更
+
+**Migration 089** ([`supabase/migrations/089_add_role_commission_settings.sql`](supabase/migrations/089_add_role_commission_settings.sql))
+
+新增 `employee_role_commission` 表：
+```sql
+CREATE TABLE employee_role_commission (
+  id UUID PRIMARY KEY,
+  user_id UUID REFERENCES users(id),
+  role_type VARCHAR(50),           -- 'teacher', 'consultant', 'setter'
+  commission_type VARCHAR(50),      -- 'fixed_rate', 'tiered'
+  commission_rate DECIMAL(5,2),     -- 支援小數點後兩位如 18.50%
+  other_revenue_rate DECIMAL(5,2),  -- 其他業績抽成
+  tier1_max_revenue DECIMAL(15,2),  -- 階梯式第一階上限
+  tier1_commission_amount DECIMAL(15,2),
+  tier2_max_revenue DECIMAL(15,2),
+  tier2_commission_amount DECIMAL(15,2),
+  effective_from DATE,
+  is_active BOOLEAN
+);
+```
+
+#### API 修改
+
+**修復 `/api/employees/:userId` 端點** ([`routes-employee-management.ts:280-351`](server/routes-employee-management.ts#L280-L351))
+
+問題：API 回傳 `role_commissions: null`
+原因：Express 路由註冊順序，`routes-employee-management.ts` 的端點先註冊，覆蓋了 `routes.ts` 的端點
+
+修復：
+```typescript
+// 查詢角色抽成設定
+const roleCommissionsResult = await queryDatabase(`
+  SELECT role_type, commission_type, commission_rate, other_revenue_rate,
+         tier1_max_revenue, tier1_commission_amount, tier2_max_revenue, tier2_commission_amount
+  FROM employee_role_commission
+  WHERE user_id = $1 AND is_active = true
+`, [userId]);
+
+// 轉換為 { teacher: {...}, consultant: {...} } 格式
+const roleCommissions = {};
+for (const rc of roleCommissionsResult.rows) {
+  roleCommissions[rc.role_type] = { ...rc };
+}
+```
+
+#### 前端 UI 改進
+
+**教師抽成區塊分離** ([`employees.tsx`](client/src/pages/settings/employees.tsx))
+
+1. **「被成交」區塊** - 獨立 state `inlineCommission`
+   - 說明：「其他諮詢師幫老師成交」
+   - 固定比例：一般業績 % + 其他業績 %
+
+2. **「自己成交」區塊** - 獨立 state `selfClosingCommission`
+   - 說明：「老師自己當諮詢師成交」
+   - 下拉選單可選「固定比例」或「階梯式」
+   - 根據選擇動態顯示對應輸入欄位
+
+```typescript
+// 被成交（其他諮詢師幫老師成交）
+const [inlineCommission, setInlineCommission] = useState({
+  commission_rate: '',
+  other_revenue_rate: '',
+});
+
+// 自己成交（老師自己當諮詢師）
+const [selfClosingCommission, setSelfClosingCommission] = useState({
+  commission_type: 'fixed_rate' as 'fixed_rate' | 'tiered',
+  commission_rate: '',
+  other_revenue_rate: '',
+  tier1_max_revenue: '',
+  tier1_commission_amount: '',
+  tier2_max_revenue: '',
+  tier2_commission_amount: '',
+});
+```
+
+#### 技術細節
+
+- **State 分離**：被成交和自己成交使用獨立 state，修改不會互相影響
+- **類型處理**：API 可能回傳 `percentage` 或 `fixed_rate`，統一轉換為 `fixed_rate`
+- **動態 UI**：根據 `commission_type` 顯示固定比例或階梯式輸入表單
 
 ---
 

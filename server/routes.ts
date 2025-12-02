@@ -7785,6 +7785,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ success: false, error: '找不到該員工' });
       }
 
+      // 取得按角色區分的抽成設定
+      const roleCommissionsResult = await queryDatabase(`
+        SELECT
+          id,
+          role_type,
+          commission_type,
+          commission_rate,
+          other_revenue_rate,
+          tier1_max_revenue,
+          tier1_commission_amount,
+          tier2_max_revenue,
+          tier2_commission_amount,
+          effective_from,
+          notes,
+          is_active
+        FROM employee_role_commission
+        WHERE user_id = $1 AND is_active = true
+        ORDER BY role_type
+      `, [id]);
+
+      // 轉換為 { teacher: {...}, consultant: {...}, setter: {...} } 格式
+      const roleCommissions: Record<string, any> = {};
+      for (const rc of roleCommissionsResult.rows) {
+        roleCommissions[rc.role_type] = {
+          id: rc.id,
+          commission_type: rc.commission_type,
+          commission_rate: rc.commission_rate,
+          other_revenue_rate: rc.other_revenue_rate,
+          tier1_max_revenue: rc.tier1_max_revenue,
+          tier1_commission_amount: rc.tier1_commission_amount,
+          tier2_max_revenue: rc.tier2_max_revenue,
+          tier2_commission_amount: rc.tier2_commission_amount,
+          effective_from: rc.effective_from,
+          notes: rc.notes,
+        };
+      }
+
       // 轉換資料格式為前端需要的格式
       const row = result.rows[0];
       const employeeData = {
@@ -7828,6 +7865,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } : null,
         // 角色類型（用於判斷是否顯示老師抽成規則）
         salary_role_type: row.salary_role_type,
+        // 新增：按角色區分的抽成設定
+        role_commissions: roleCommissions,
       };
 
       res.json({ success: true, data: employeeData });
@@ -8344,6 +8383,135 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, message: '薪資設定更新成功' });
     } catch (error: any) {
       console.error('更新薪資設定失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // ========================================
+  // 按角色區分的抽成設定 API
+  // ========================================
+
+  // 更新或新增角色抽成設定
+  app.put('/api/employees/:userId/role-commission/:roleType', isAuthenticated, async (req, res) => {
+    try {
+      const { userId, roleType } = req.params;
+      const {
+        commission_type,
+        commission_rate,
+        other_revenue_rate,
+        tier1_max_revenue,
+        tier1_commission_amount,
+        tier2_max_revenue,
+        tier2_commission_amount,
+        notes,
+      } = req.body;
+
+      // 驗證角色類型
+      if (!['teacher', 'consultant', 'setter'].includes(roleType)) {
+        return res.status(400).json({ success: false, message: '無效的角色類型' });
+      }
+
+      // 檢查是否已有該角色的抽成設定
+      const existingResult = await queryDatabase(`
+        SELECT id FROM employee_role_commission
+        WHERE user_id = $1 AND role_type = $2 AND is_active = true
+      `, [userId, roleType]);
+
+      if (existingResult.rows.length > 0) {
+        // 更新現有設定
+        await queryDatabase(`
+          UPDATE employee_role_commission
+          SET
+            commission_type = COALESCE($1, commission_type),
+            commission_rate = $2,
+            other_revenue_rate = $3,
+            tier1_max_revenue = $4,
+            tier1_commission_amount = $5,
+            tier2_max_revenue = $6,
+            tier2_commission_amount = $7,
+            notes = COALESCE($8, notes),
+            updated_at = NOW()
+          WHERE user_id = $9 AND role_type = $10 AND is_active = true
+        `, [
+          commission_type || 'fixed_rate',
+          commission_rate,
+          other_revenue_rate,
+          tier1_max_revenue || null,
+          tier1_commission_amount || null,
+          tier2_max_revenue || null,
+          tier2_commission_amount || null,
+          notes,
+          userId,
+          roleType,
+        ]);
+        console.log(`[角色抽成] 已更新: userId=${userId}, role=${roleType}, rate=${commission_rate}%`);
+      } else {
+        // 新增設定
+        await queryDatabase(`
+          INSERT INTO employee_role_commission (
+            user_id, role_type, commission_type, commission_rate, other_revenue_rate,
+            tier1_max_revenue, tier1_commission_amount, tier2_max_revenue, tier2_commission_amount,
+            notes, effective_from
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_DATE)
+        `, [
+          userId,
+          roleType,
+          commission_type || 'fixed_rate',
+          commission_rate,
+          other_revenue_rate,
+          tier1_max_revenue || null,
+          tier1_commission_amount || null,
+          tier2_max_revenue || null,
+          tier2_commission_amount || null,
+          notes,
+        ]);
+        console.log(`[角色抽成] 已新增: userId=${userId}, role=${roleType}, rate=${commission_rate}%`);
+      }
+
+      // 同步更新 employee_salary_settings（只同步教師角色，因為這是薪資計算器主要使用的）
+      if (roleType === 'teacher') {
+        // 從 users 和 business_identities 取得姓名資訊
+        const userResult = await queryDatabase(`
+          SELECT u.first_name, u.last_name, bi.display_name
+          FROM users u
+          LEFT JOIN business_identities bi ON bi.user_id = u.id AND bi.identity_type = 'teacher' AND bi.is_active = true
+          WHERE u.id = $1
+        `, [userId]);
+        if (userResult.rows.length > 0) {
+          const user = userResult.rows[0];
+          const employeeName = `${user.first_name} ${user.last_name}`.trim();
+          const displayName = user.display_name || '';
+          await queryDatabase(`
+            UPDATE employee_salary_settings
+            SET
+              commission_type = COALESCE($1, commission_type),
+              commission_rate = $2,
+              other_revenue_rate = COALESCE($3, other_revenue_rate),
+              tier1_max_revenue = $4,
+              tier1_commission_amount = $5,
+              tier2_max_revenue = $6,
+              tier2_commission_amount = $7,
+              updated_at = NOW()
+            WHERE employee_name = $8 OR employee_name = $9 OR employee_name ILIKE $10
+          `, [
+            commission_type || 'fixed_rate',
+            commission_rate,
+            other_revenue_rate,
+            tier1_max_revenue || null,
+            tier1_commission_amount || null,
+            tier2_max_revenue || null,
+            tier2_commission_amount || null,
+            employeeName,
+            displayName,
+            `%${displayName}%`,
+          ]);
+          console.log(`[角色抽成] 已同步 employee_salary_settings: ${employeeName} (displayName: ${displayName})`);
+        }
+      }
+
+      res.json({ success: true, message: `${roleType} 角色抽成設定更新成功` });
+    } catch (error: any) {
+      console.error('更新角色抽成設定失敗:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });

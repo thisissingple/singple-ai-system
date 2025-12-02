@@ -277,6 +277,43 @@ export function registerEmployeeManagementRoutes(app: Express) {
         .eq('is_active', true)
         .maybeSingle();
 
+      // 查詢角色抽成設定（從 employee_role_commission 表）
+      const roleCommissionsResult = await queryDatabase(`
+        SELECT
+          id,
+          role_type,
+          commission_type,
+          commission_rate,
+          other_revenue_rate,
+          tier1_max_revenue,
+          tier1_commission_amount,
+          tier2_max_revenue,
+          tier2_commission_amount,
+          effective_from,
+          notes,
+          is_active
+        FROM employee_role_commission
+        WHERE user_id = $1 AND is_active = true
+        ORDER BY role_type
+      `, [userId]);
+
+      // 轉換為 { teacher: {...}, consultant: {...}, setter: {...} } 格式
+      const roleCommissions: Record<string, any> = {};
+      for (const rc of roleCommissionsResult.rows) {
+        roleCommissions[rc.role_type] = {
+          id: rc.id,
+          commission_type: rc.commission_type,
+          commission_rate: rc.commission_rate,
+          other_revenue_rate: rc.other_revenue_rate,
+          tier1_max_revenue: rc.tier1_max_revenue,
+          tier1_commission_amount: rc.tier1_commission_amount,
+          tier2_max_revenue: rc.tier2_max_revenue,
+          tier2_commission_amount: rc.tier2_commission_amount,
+          effective_from: rc.effective_from,
+          notes: rc.notes,
+        };
+      }
+
       // 將 employee_salary_settings 資料轉換為前端期望的 latest_compensation 格式
       const latestCompensation = salarySettingData ? {
         id: salarySettingData.id,
@@ -311,6 +348,7 @@ export function registerEmployeeManagementRoutes(app: Express) {
           latest_compensation: latestCompensation,
           latest_insurance: insuranceResult.data?.[0] || null,
           salary_settings: salarySettingData,
+          role_commissions: roleCommissions,
         },
       });
     } catch (error: any) {
