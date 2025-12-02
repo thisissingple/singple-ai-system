@@ -5,7 +5,7 @@
  */
 
 import { GoogleSheetsAPI } from './google-sheets-api';
-import { insertAndReturn, queryDatabase } from '../pg-client';
+import { insertAndReturn, queryDatabase, getSharedPool } from '../pg-client';
 import { syncAllStudentsToKB } from '../student-knowledge-service';
 
 interface FieldMapping {
@@ -204,8 +204,8 @@ export class SyncService {
 
         syncResult = await this.loadToSupabaseWithUpsert(mapping.target_table, deduplicatedData, mappingId, config);
       } else {
-        // ⚠️ 沒有 UPSERT 配置的表格：使用 DELETE + INSERT
-        console.log(`ℹ️ No UPSERT config for ${mapping.target_table}, using DELETE + INSERT`);
+        // ⚠️ 沒有 UPSERT 配置的表格：使用 Transaction 包裝的 DELETE + INSERT
+        console.log(`ℹ️ No UPSERT config for ${mapping.target_table}, using DELETE + INSERT (with Transaction)`);
         console.log(`   (可在同步設定中配置唯一鍵以啟用 UPSERT)`);
 
         // 沒有 UPSERT 配置時，建立基本的 syncDetails
@@ -217,28 +217,9 @@ export class SyncService {
           skippedDetails: [],
         };
 
-        this.sendProgress({
-          mappingId,
-          stage: 'clearing',
-          current: 0,
-          total: transformedData.length,
-          message: '正在清空目標表格...',
-          percentage: 40,
-        });
-
-        await this.clearTable(mapping.target_table);
-
-        // 6. 寫入 Supabase
-        this.sendProgress({
-          mappingId,
-          stage: 'inserting',
-          current: 0,
-          total: transformedData.length,
-          message: `正在寫入 ${transformedData.length} 筆資料...`,
-          percentage: 50,
-        });
-
-        syncResult = await this.loadToSupabase(mapping.target_table, transformedData, mappingId);
+        // 🔐 使用 Transaction 包裝，確保原子性
+        // 如果 INSERT 失敗，DELETE 也會 ROLLBACK，資料不會丟失
+        syncResult = await this.loadWithTransaction(mapping.target_table, transformedData, mappingId);
       }
 
       // 7. 記錄同步結果（包含成功/失敗數量和詳細資訊）
@@ -737,6 +718,130 @@ export class SyncService {
 
     // ✅ 使用 'session' mode 執行 INSERT（寫入操作）
     await queryDatabase(sql, values, 'session');
+  }
+
+  /**
+   * 🔐 使用 Transaction 執行 DELETE + INSERT（原子操作）
+   *
+   * 解決之前的問題：DELETE 和 INSERT 分開執行，如果 INSERT 失敗資料會丟失
+   * 現在包在 Transaction 裡，失敗會自動 ROLLBACK
+   */
+  private async loadWithTransaction(
+    table: string,
+    data: any[],
+    mappingId: string | undefined
+  ): Promise<{
+    successCount: number;
+    errorCount: number;
+    errors: string[];
+  }> {
+    console.log(`🔐 Starting transactional DELETE + INSERT for ${table}...`);
+
+    if (data.length === 0) {
+      return { successCount: 0, errorCount: 0, errors: [] };
+    }
+
+    const pool = getSharedPool('session');
+    const client = await pool.connect();
+    const BATCH_SIZE = 100;
+    let successCount = 0;
+    let errorCount = 0;
+    const errors: string[] = [];
+    const startTime = Date.now();
+
+    try {
+      // 開始 Transaction
+      await client.query('BEGIN');
+      console.log(`   🔒 Transaction started`);
+
+      // 1. DELETE 所有資料
+      this.sendProgress({
+        mappingId,
+        stage: 'clearing',
+        current: 0,
+        total: data.length,
+        message: '正在清空目標表格（Transaction 保護中）...',
+        percentage: 40,
+      });
+
+      await client.query(`DELETE FROM ${table}`);
+      console.log(`   🗑️  Table ${table} cleared (within transaction)`);
+
+      // 2. INSERT 所有資料（批次）
+      this.sendProgress({
+        mappingId,
+        stage: 'inserting',
+        current: 0,
+        total: data.length,
+        message: `正在寫入 ${data.length} 筆資料（Transaction 保護中）...`,
+        percentage: 50,
+      });
+
+      const columns = Object.keys(data[0]);
+
+      for (let i = 0; i < data.length; i += BATCH_SIZE) {
+        const batch = data.slice(i, i + BATCH_SIZE);
+        const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(data.length / BATCH_SIZE);
+
+        // 建立 VALUES 子句
+        const values: any[] = [];
+        const placeholders: string[] = [];
+
+        batch.forEach((record, index) => {
+          const rowPlaceholders: string[] = [];
+          columns.forEach((col, colIndex) => {
+            const paramIndex = index * columns.length + colIndex + 1;
+            rowPlaceholders.push(`$${paramIndex}`);
+            values.push(record[col]);
+          });
+          placeholders.push(`(${rowPlaceholders.join(', ')})`);
+        });
+
+        const sql = `
+          INSERT INTO ${table} (${columns.join(', ')})
+          VALUES ${placeholders.join(', ')}
+        `;
+
+        await client.query(sql, values);
+        successCount += batch.length;
+
+        // 進度更新
+        const elapsedMs = Date.now() - startTime;
+        const avgTimePerRecord = elapsedMs / successCount;
+        const remainingRecords = data.length - successCount;
+        const estimatedRemainingMs = avgTimePerRecord * remainingRecords;
+        const estimatedMinutes = Math.ceil(estimatedRemainingMs / 60000);
+
+        const percentage = 50 + Math.floor((successCount / data.length) * 45);
+        const timeMessage = estimatedMinutes > 0 ? ` (預估剩餘 ${estimatedMinutes} 分鐘)` : '';
+        this.sendProgress({
+          mappingId,
+          stage: 'inserting',
+          current: successCount,
+          total: data.length,
+          message: `正在寫入資料: ${successCount}/${data.length}${timeMessage}`,
+          percentage,
+        });
+
+        console.log(`   ✅ Batch ${batchNumber}/${totalBatches}: ${successCount}/${data.length} records inserted`);
+      }
+
+      // 3. COMMIT Transaction
+      await client.query('COMMIT');
+      console.log(`   🔓 Transaction committed successfully`);
+
+      return { successCount, errorCount, errors };
+    } catch (error: any) {
+      // ROLLBACK - 資料不會丟失
+      await client.query('ROLLBACK');
+      console.error(`   ❌ Transaction rolled back due to error: ${error.message}`);
+      errors.push(error.message);
+      errorCount = data.length;
+      return { successCount: 0, errorCount, errors };
+    } finally {
+      client.release();
+    }
   }
 
   /**

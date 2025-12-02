@@ -1,11 +1,81 @@
 # 📊 專案進度追蹤文檔
 
-> **最後更新**: 2025-12-01
+> **最後更新**: 2025-12-02
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ 薪資計算器 UI 優化完成
-> **當前階段**: 薪資計算器增強
-> **今日進度**: 姓名顯示格式修正 + 業績分類標籤功能
+> **專案狀態**: ✅ Google Sheets 同步策略優化完成
+> **當前階段**: 資料同步優化
+> **今日進度**: DELETE + INSERT Transaction 包裝 + 唯一索引清理
 > **整體進度**: 100% ████████████████████
+
+---
+
+## 📅 2025-12-02 更新日誌
+
+### 🔄 Google Sheets 同步策略優化
+
+#### 需求背景
+原本使用 UPSERT 策略進行 Google Sheets 同步，但遇到以下問題：
+1. `eods_for_closers`：同一學生有多筆不同 payment_method 的記錄，UPSERT 無法正確處理
+2. `income_expense_records`：Google Sheets 修改的記錄無法覆蓋舊記錄
+3. 原本的 DELETE + INSERT 是分開執行，如果 INSERT 失敗，DELETE 已執行導致資料遺失
+
+#### 解決方案：Transaction 包裝的 DELETE + INSERT
+
+**1. 新增 `loadWithTransaction()` 方法**
+- 檔案：[`server/services/sheets/sync-service.ts`](server/services/sheets/sync-service.ts)
+- 使用 PostgreSQL Transaction 包裝 DELETE + INSERT
+- 如果 INSERT 失敗，自動 ROLLBACK，DELETE 也會回滾，資料不會遺失
+
+```typescript
+private async loadWithTransaction(table: string, data: any[], mappingId: string | undefined) {
+  const pool = getSharedPool('session');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM ${table}`);
+    // Batch INSERT...
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+```
+
+**2. 刪除阻擋 INSERT 的唯一索引**
+- `idx_eods_for_closers_unique` - 4 欄位唯一索引（含 payment_method）
+- `idx_income_expense_unique_key` - 4 欄位唯一索引
+- `idx_trial_purchases_unique_record` - 3 欄位唯一索引
+
+**3. 設定所有表使用 DELETE + INSERT 模式**
+- 將 `sheet_mappings.upsert_config` 設為 `NULL`
+- 受影響表格：`eods_for_closers`, `income_expense_records`, `trial_class_purchases`
+
+**4. 修復 Connection Timeout 問題**
+- 檔案：[`server/services/pg-client.ts`](server/services/pg-client.ts)
+- Session Pool timeout 從 10s 增加到 30s
+- 減少 max connections 從 10 降到 5（避免連線池耗盡）
+
+#### 同步結果驗證
+
+| 表格 | 記錄數 | 狀態 |
+|------|--------|------|
+| `eods_for_closers` | 1,065 | ✅ 成功 |
+| `income_expense_records` | 6,799 | ✅ 成功 |
+| `trial_class_purchases` | 140 | ✅ 成功 |
+
+#### 技術細節
+
+**Transaction 原子性保證**：
+- `BEGIN` → `DELETE` → `INSERT (batch)` → `COMMIT`
+- 任何步驟失敗 → `ROLLBACK`（資料回復到同步前狀態）
+
+**Batch INSERT 效能**：
+- 每批次 100 筆記錄
+- 使用 parameterized query 避免 SQL injection
+- 顯示即時進度（如 "Batch 5/11: 500/1065 records inserted"）
 
 ---
 
