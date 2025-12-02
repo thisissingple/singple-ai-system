@@ -898,13 +898,16 @@ export class SalaryCalculatorService {
 
       switch (roleType) {
         case 'teacher':
-          // 教練：查詢 teacher_name 或 income_item 包含名字（支援完全匹配、暱稱或名字匹配）
+          // 教練業績查詢邏輯：
+          // 1. teacher_name 或 income_item 包含老師名字 → 屬於這位老師的課程
+          // 2. closer 匹配老師名字/暱稱 → 老師自己成交的記錄
           query = `
             SELECT
               transaction_date,
               income_item,
               amount_twd,
               customer_name,
+              customer_email,
               payment_method,
               teacher_name,
               closer,
@@ -916,6 +919,9 @@ export class SalaryCalculatorService {
               OR teacher_name ILIKE $4
               OR income_item ILIKE $4
               OR income_item ILIKE $6
+              OR closer = $1
+              OR closer = $5
+              OR closer ILIKE $4
             )
               AND transaction_date >= $2
               AND transaction_date <= $3
@@ -1266,24 +1272,39 @@ export class SalaryCalculatorService {
           // 計算等效抽成比例（用於顯示）
           commissionRateUsed = selfClosedRevenue > 0 ? selfClosedCommission / selfClosedRevenue : 0;
         } else {
-          // 其他老師：自己成交 22% 或 23.3%（月業績 > 70萬）
-          commissionRateUsed = selfClosedRevenue > 700000 ? 0.233 : 0.22;
-          selfClosedCommission = Math.round(selfClosedRevenue * commissionRateUsed);
+          // 其他老師：
+          // - 一般業績（高階一對一）：自己成交 22% 或 23.3%（月業績 > 70萬）
+          // - 其他業績（體驗課、初學專案等）：固定 8%
+          const regularRate = selfClosedRevenue > 700000 ? 0.233 : 0.22;
+          commissionRateUsed = regularRate;
 
           // 別人成交：固定比例抽成（約 16.13%，即 150000 -> 24200）
           const otherClosedRate = 24200 / 150000; // ≈ 0.1613
-          otherClosedCommission = Math.round(otherClosedRevenue * otherClosedRate);
 
           // 更新每筆記錄的抽成金額（非 Vicky，含計算說明）
-          const ratePercent = (commissionRateUsed * 100).toFixed(1);
+          const regularRatePercent = (regularRate * 100).toFixed(1);
           const otherRatePercent = (otherClosedRate * 100).toFixed(1);
+
+          // 按業績類型分類計算
           records.forEach(record => {
             if (record.is_self_closed === true) {
-              record.commission_amount = Math.round(record.amount * commissionRateUsed);
-              record.commission_formula = `${record.amount.toLocaleString()} × ${ratePercent}% = ${record.commission_amount.toLocaleString()}`;
+              // 自己成交
+              if (record.revenue_type === 'other') {
+                // 其他業績：固定 8%
+                record.commission_amount = Math.round(record.amount * 0.08);
+                record.commission_formula = `其他業績固定 8%: $${record.amount.toLocaleString()} × 8% = $${record.commission_amount.toLocaleString()}`;
+                selfClosedCommission += record.commission_amount;
+              } else {
+                // 一般業績（高階一對一）：22% 或 23.3%
+                record.commission_amount = Math.round(record.amount * regularRate);
+                record.commission_formula = `$${record.amount.toLocaleString()} × ${regularRatePercent}% = $${record.commission_amount.toLocaleString()}`;
+                selfClosedCommission += record.commission_amount;
+              }
             } else if (record.is_self_closed === false) {
+              // 別人成交：固定比例
               record.commission_amount = Math.round(record.amount * otherClosedRate);
-              record.commission_formula = `${record.amount.toLocaleString()} × ${otherRatePercent}% = ${record.commission_amount.toLocaleString()}`;
+              record.commission_formula = `$${record.amount.toLocaleString()} × ${otherRatePercent}% = $${record.commission_amount.toLocaleString()}`;
+              otherClosedCommission += record.commission_amount;
             }
           });
         }
