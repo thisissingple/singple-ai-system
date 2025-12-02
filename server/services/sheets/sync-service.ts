@@ -741,7 +741,7 @@ export class SyncService {
       return { successCount: 0, errorCount: 0, errors: [] };
     }
 
-    const pool = getSharedPool('session');
+    const pool = getSharedPool('sync');  // 使用專用同步連線池
     const client = await pool.connect();
     const BATCH_SIZE = 100;
     let successCount = 0;
@@ -1012,6 +1012,6 @@ export class SyncService {
       logData.skipped_details = JSON.stringify(syncDetails.skippedDetails.slice(0, 50));
     }
 
-    await insertAndReturn('sync_logs', logData);
+    await insertAndReturn('sync_logs', logData, ['*'], 'sync');
   }
 }

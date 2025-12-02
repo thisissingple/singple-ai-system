@@ -10197,6 +10197,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // 獲取學員付款歷史記錄
+  app.get('/api/salary/student-history/:studentName', async (req, res) => {
+    try {
+      const { studentName } = req.params;
+      const decodedName = decodeURIComponent(studentName);
+
+      const { queryDatabase } = await import('./services/pg-client');
+
+      // 從 income_expense_records 查詢該學員的所有付款記錄
+      const result = await queryDatabase(`
+        SELECT
+          transaction_date as date,
+          income_item as item,
+          payment_method,
+          teacher_name,
+          closer,
+          COALESCE(amount_twd, 0) as amount
+        FROM income_expense_records
+        WHERE customer_name = $1
+          AND amount_twd > 0
+        ORDER BY transaction_date DESC
+      `, [decodedName]);
+
+      // 計算總金額
+      const totalAmount = result.rows.reduce((sum, row) => sum + parseFloat(row.amount || 0), 0);
+
+      // 判斷是否為「高階一對一」項目（用於兩階段抽成計算）
+      const isAdvancedTraining = (item: string): boolean => {
+        const itemLower = (item || '').toLowerCase();
+        // 體驗課不算高階一對一
+        if (itemLower.includes('體驗課') || itemLower.includes('體驗')) {
+          return false;
+        }
+        // 只有包含「高階一對一」才算
+        return itemLower.includes('高階一對一');
+      };
+
+      // 計算「高階一對一訓練」累積總額（用於兩階段抽成）
+      const advancedTrainingAmount = result.rows
+        .filter(row => isAdvancedTraining(row.item))
+        .reduce((sum, row) => sum + parseFloat(row.amount || 0), 0);
+
+      res.json({
+        success: true,
+        data: {
+          total_amount: totalAmount,
+          advanced_training_amount: advancedTrainingAmount,  // 高階一對一累積總額
+          records: result.rows.map(row => ({
+            date: row.date,
+            item: row.item,
+            payment_method: row.payment_method,
+            teacher_name: row.teacher_name || row.closer || '-',
+            amount: parseFloat(row.amount),
+            is_advanced_training: isAdvancedTraining(row.item),  // 標記是否為高階一對一
+          })),
+        },
+      });
+    } catch (error: any) {
+      console.error('Failed to fetch student history:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // ============================================================================
   // AI Usage Dashboard API
   // ============================================================================

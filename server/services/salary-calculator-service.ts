@@ -919,55 +919,77 @@ export class SalaryCalculatorService {
         if (isVicky) {
           // Vicky 特殊規則（按學生累積金額，階梯式按比例計算）：
           // 自己成交：
-          //   - 0~105,000：按比例抽 30,000（30,000/105,000 ≈ 28.57%）
-          //   - 105,001~150,000：這部分按比例抽 7,500（7,500/45,000 ≈ 16.67%）
+          //   - 第一階段 0~105,000：按比例抽 30,000（30,000/105,000 ≈ 28.57%）
+          //   - 第二階段 105,001~150,000：這部分按比例抽 7,500（7,500/45,000 ≈ 16.67%）
+          //   - 滿 150,000 後循環：超過 150,000 的部分，重新從第一階段開始計算
           //   - 重點：同一學生的多筆付款需要累積計算，新付款按累積後所在階梯計算
           // 他人成交：固定 24,200
 
           const TIER1_MAX = 105000;      // 第一階梯上限
           const TIER1_COMMISSION = 30000; // 第一階梯抽成
-          const TIER2_MAX = 150000;      // 第二階梯上限
+          const TIER2_MAX = 150000;      // 第二階梯上限（循環點）
           const TIER2_COMMISSION = 7500;  // 第二階梯抽成（105,001~150,000 這段的總抽成）
           const TIER2_RANGE = TIER2_MAX - TIER1_MAX; // 45,000
+          const CYCLE_AMOUNT = TIER2_MAX; // 每 150,000 循環一次
 
-          // 計算單筆金額在特定累積起點的抽成
+          // 計算單筆金額在特定累積起點的抽成（支持循環）
           const calculateCommissionForAmount = (amount: number, cumulativeBefore: number): { commission: number; formula: string } => {
             const cumulativeAfter = cumulativeBefore + amount;
             let commission = 0;
             let formulaParts: string[] = [];
 
-            // 第一階梯：0 ~ 105,000
-            if (cumulativeBefore < TIER1_MAX) {
-              const tier1Start = cumulativeBefore;
-              const tier1End = Math.min(cumulativeAfter, TIER1_MAX);
-              const tier1Amount = tier1End - tier1Start;
-              if (tier1Amount > 0) {
-                const tier1Commission = Math.round((tier1Amount / TIER1_MAX) * TIER1_COMMISSION);
-                commission += tier1Commission;
-                formulaParts.push(`第一階梯: ${tier1Amount.toLocaleString()} ÷ 105,000 × 30,000 = ${tier1Commission.toLocaleString()}`);
-              }
-            }
+            // 將累積金額映射到循環週期內的位置
+            // 例如：$154,000 -> 循環第 1 輪完成，第 2 輪進行中 $4,000
+            const cyclePositionBefore = cumulativeBefore % CYCLE_AMOUNT;
+            let remainingAmount = amount;
+            let currentPosition = cyclePositionBefore;
+            let cycleCount = Math.floor(cumulativeBefore / CYCLE_AMOUNT) + 1;
 
-            // 第二階梯：105,001 ~ 150,000
-            if (cumulativeAfter > TIER1_MAX && cumulativeBefore < TIER2_MAX) {
-              const tier2Start = Math.max(cumulativeBefore, TIER1_MAX);
-              const tier2End = Math.min(cumulativeAfter, TIER2_MAX);
-              const tier2Amount = tier2End - tier2Start;
-              if (tier2Amount > 0) {
-                const tier2Commission = Math.round((tier2Amount / TIER2_RANGE) * TIER2_COMMISSION);
-                commission += tier2Commission;
-                formulaParts.push(`第二階梯: ${tier2Amount.toLocaleString()} ÷ 45,000 × 7,500 = ${tier2Commission.toLocaleString()}`);
-              }
-            }
+            while (remainingAmount > 0) {
+              const cycleStart = currentPosition;
+              const cycleEnd = Math.min(currentPosition + remainingAmount, CYCLE_AMOUNT);
+              const amountInThisCycle = cycleEnd - cycleStart;
 
-            // 超過 150,000：按 25% 計算
-            if (cumulativeAfter > TIER2_MAX) {
-              const tier3Start = Math.max(cumulativeBefore, TIER2_MAX);
-              const tier3Amount = cumulativeAfter - tier3Start;
-              if (tier3Amount > 0) {
-                const tier3Commission = Math.round(tier3Amount * 0.25);
-                commission += tier3Commission;
-                formulaParts.push(`超額: ${tier3Amount.toLocaleString()} × 25% = ${tier3Commission.toLocaleString()}`);
+              // 第一階梯：0 ~ 105,000
+              if (currentPosition < TIER1_MAX) {
+                const tier1Start = currentPosition;
+                const tier1End = Math.min(cycleEnd, TIER1_MAX);
+                const tier1Amount = tier1End - tier1Start;
+                if (tier1Amount > 0) {
+                  const tier1Commission = Math.round((tier1Amount / TIER1_MAX) * TIER1_COMMISSION);
+                  commission += tier1Commission;
+                  if (cycleCount > 1) {
+                    formulaParts.push(`第${cycleCount}輪 第一階梯: ${tier1Amount.toLocaleString()} ÷ 105,000 × 30,000 = ${tier1Commission.toLocaleString()}`);
+                  } else {
+                    formulaParts.push(`第一階梯: ${tier1Amount.toLocaleString()} ÷ 105,000 × 30,000 = ${tier1Commission.toLocaleString()}`);
+                  }
+                }
+              }
+
+              // 第二階梯：105,001 ~ 150,000
+              if (cycleEnd > TIER1_MAX && currentPosition < TIER2_MAX) {
+                const tier2Start = Math.max(currentPosition, TIER1_MAX);
+                const tier2End = Math.min(cycleEnd, TIER2_MAX);
+                const tier2Amount = tier2End - tier2Start;
+                if (tier2Amount > 0) {
+                  const tier2Commission = Math.round((tier2Amount / TIER2_RANGE) * TIER2_COMMISSION);
+                  commission += tier2Commission;
+                  if (cycleCount > 1) {
+                    formulaParts.push(`第${cycleCount}輪 第二階梯: ${tier2Amount.toLocaleString()} ÷ 45,000 × 7,500 = ${tier2Commission.toLocaleString()}`);
+                  } else {
+                    formulaParts.push(`第二階梯: ${tier2Amount.toLocaleString()} ÷ 45,000 × 7,500 = ${tier2Commission.toLocaleString()}`);
+                  }
+                }
+              }
+
+              remainingAmount -= amountInThisCycle;
+
+              // 如果還有剩餘金額，進入下一個循環
+              if (remainingAmount > 0) {
+                currentPosition = 0; // 重置到循環開始
+                cycleCount++;
+              } else {
+                currentPosition = cycleEnd;
               }
             }
 
@@ -979,13 +1001,23 @@ export class SalaryCalculatorService {
           };
 
           // 按學生分組，依時間排序計算累積
+          // ⚠️ 重要：只有「高階一對一」(revenue_type === 'regular') 才使用兩階段累積抽成
+          // 其他業績 (revenue_type === 'other') 使用固定 8% 抽成
           const studentRecords: { [studentName: string]: typeof records } = {};
+          const otherRevenueRecords: typeof records = [];  // 其他業績記錄（非高階一對一）
+
           records.filter(r => r.is_self_closed === true).forEach(record => {
-            const studentName = record.student_name || 'unknown';
-            if (!studentRecords[studentName]) {
-              studentRecords[studentName] = [];
+            if (record.revenue_type === 'regular') {
+              // 高階一對一：按學生分組計算累積抽成
+              const studentName = record.student_name || 'unknown';
+              if (!studentRecords[studentName]) {
+                studentRecords[studentName] = [];
+              }
+              studentRecords[studentName].push(record);
+            } else {
+              // 其他業績：使用固定 8% 抽成
+              otherRevenueRecords.push(record);
             }
-            studentRecords[studentName].push(record);
           });
 
           // 查詢每個學生在 periodStart 之前的歷史累積金額（Vicky 的自己成交記錄）
@@ -994,6 +1026,7 @@ export class SalaryCalculatorService {
 
           if (studentNames.length > 0) {
             // 查詢歷史記錄（periodStart 之前，Vicky 是 closer 的記錄）
+            // ⚠️ 重要：只計算「高階一對一」項目，用於兩階段抽成計算
             const historyQuery = `
               SELECT
                 customer_name,
@@ -1004,6 +1037,8 @@ export class SalaryCalculatorService {
                 AND transaction_category = '收入'
                 AND amount_twd IS NOT NULL
                 AND (closer = $3 OR closer = $4 OR closer ILIKE $5)
+                AND income_item ILIKE '%高階一對一%'
+                AND income_item NOT ILIKE '%體驗%'
               GROUP BY customer_name
             `;
             const historyResult = await queryDatabase(historyQuery, [
@@ -1018,7 +1053,7 @@ export class SalaryCalculatorService {
               historicalAmounts[row.customer_name] = parseFloat(row.total_amount || 0);
             });
 
-            console.log('[Vicky Commission] 歷史累積金額:', historicalAmounts);
+            console.log('[Vicky Commission] 歷史累積金額（高階一對一）:', historicalAmounts);
           }
 
           // 對每個學生的記錄按日期排序並計算累積抽成（包含歷史累積）
@@ -1044,6 +1079,14 @@ export class SalaryCalculatorService {
               selfClosedCommission += commission;
             }
           }
+
+          // 處理其他業績（非高階一對一）的自己成交：固定 8% 抽成
+          otherRevenueRecords.forEach(record => {
+            const commission = Math.round(record.amount * 0.08);
+            record.commission_amount = commission;
+            record.commission_formula = `其他業績固定 8%: $${record.amount.toLocaleString()} × 8% = $${commission.toLocaleString()}`;
+            selfClosedCommission += commission;
+          });
 
           // 處理他人成交
           records.filter(r => r.is_self_closed === false).forEach(record => {

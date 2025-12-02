@@ -30,13 +30,14 @@ import pkg from 'pg';
 const { Pool } = pkg;
 
 // 共享連線池（避免頻繁創建/關閉連線導致 Supabase pooler 超時）
-let sharedTransactionPool: ReturnType<typeof Pool.prototype.constructor> | null = null;
-let sharedSessionPool: ReturnType<typeof Pool.prototype.constructor> | null = null;
+let sharedTransactionPool: InstanceType<typeof Pool> | null = null;
+let sharedSessionPool: InstanceType<typeof Pool> | null = null;
+let sharedSyncPool: InstanceType<typeof Pool> | null = null;  // 專用於 Google Sheets 同步
 
 /**
  * 設置連線池錯誤處理
  */
-function setupPoolErrorHandler(pool: ReturnType<typeof Pool.prototype.constructor>, mode: string) {
+function setupPoolErrorHandler(pool: InstanceType<typeof Pool>, mode: string) {
   pool.on('error', (err: any) => {
     console.error(`❌ [${mode}] Unexpected database connection error:`, err.message);
     console.error('   Error code:', err.code);
@@ -52,9 +53,34 @@ function setupPoolErrorHandler(pool: ReturnType<typeof Pool.prototype.constructo
 
 /**
  * 獲取或創建共享連線池
- * @param mode - 'transaction' for simple queries, 'session' for complex operations
+ * @param mode - 'transaction' for simple queries, 'session' for complex operations, 'sync' for Google Sheets sync
  */
-export function getSharedPool(mode: 'transaction' | 'session' = 'transaction') {
+export function getSharedPool(mode: 'transaction' | 'session' | 'sync' = 'transaction') {
+  // 專用同步連線池 - 完全獨立，避免與其他查詢競爭
+  if (mode === 'sync') {
+    if (!sharedSyncPool) {
+      let dbUrl = process.env.SUPABASE_SESSION_DB_URL || process.env.SESSION_DB_URL || process.env.SUPABASE_DB_URL;
+      if (!dbUrl) {
+        throw new Error('資料庫 URL 未配置 (SUPABASE_DB_URL)');
+      }
+      // 同步專用：使用 Session Pooler
+      if (dbUrl.includes('pooler.supabase.com:5432')) {
+        dbUrl = dbUrl.replace(':5432', ':6543');
+        console.log('🔄 [Sync Pool] Auto-switched to Session Pooler (port 6543)');
+      }
+      sharedSyncPool = new Pool({
+        connectionString: dbUrl,
+        ssl: { rejectUnauthorized: false },
+        max: 5,  // 同步專用，5 個連線足夠
+        idleTimeoutMillis: 60000,
+        connectionTimeoutMillis: 60000,  // 同步可能需要較長時間建立連線
+        query_timeout: 300000,  // 5 分鐘超時，支援大量資料同步
+      });
+      setupPoolErrorHandler(sharedSyncPool, 'sync');
+      console.log('✅ [Sync Pool] Created dedicated pool for Google Sheets sync');
+    }
+    return sharedSyncPool;
+  }
   if (mode === 'session') {
     if (!sharedSessionPool) {
       let dbUrl = process.env.SUPABASE_SESSION_DB_URL || process.env.SESSION_DB_URL || process.env.SUPABASE_DB_URL;
@@ -70,10 +96,10 @@ export function getSharedPool(mode: 'transaction' | 'session' = 'transaction') {
       sharedSessionPool = new Pool({
         connectionString: dbUrl,
         ssl: { rejectUnauthorized: false },
-        max: 5,
+        max: 15,  // 增加連線數以支援併發同步和報表查詢
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 30000,
-        query_timeout: 60000,
+        query_timeout: 120000,  // 增加查詢超時到 2 分鐘
       });
       setupPoolErrorHandler(sharedSessionPool, 'session');
     }
@@ -112,10 +138,10 @@ export function createPool(mode: 'transaction' | 'session' = 'transaction') {
  *
  * @param query SQL 查詢語句
  * @param params 查詢參數
- * @param mode - 'transaction' 用於讀取, 'session' 用於寫入
+ * @param mode - 'transaction' 用於讀取, 'session' 用於寫入, 'sync' 用於同步操作
  * @returns 查詢結果
  */
-export async function queryDatabase(query: string, params?: any[], mode: 'transaction' | 'session' = 'transaction') {
+export async function queryDatabase(query: string, params?: any[], mode: 'transaction' | 'session' | 'sync' = 'transaction') {
   const pool = getSharedPool(mode);
   const result = await pool.query(query, params);
   return result;
@@ -124,11 +150,13 @@ export async function queryDatabase(query: string, params?: any[], mode: 'transa
 
 /**
  * 執行 INSERT 並回傳插入的資料
+ * @param mode - 預設 'session'，同步操作使用 'sync'
  */
 export async function insertAndReturn(
   table: string,
   data: Record<string, any>,
-  returnColumns: string[] = ['*']
+  returnColumns: string[] = ['*'],
+  mode: 'session' | 'sync' = 'session'
 ) {
   const columns = Object.keys(data);
   const values = Object.values(data);
@@ -140,8 +168,8 @@ export async function insertAndReturn(
     RETURNING ${returnColumns.join(', ')}
   `;
 
-  // ✅ 使用 'session' mode 執行 INSERT（寫入操作）
-  const result = await queryDatabase(query, values, 'session');
+  // ✅ 使用指定 mode 執行 INSERT
+  const result = await queryDatabase(query, values, mode);
   return result.rows[0];
 }
 

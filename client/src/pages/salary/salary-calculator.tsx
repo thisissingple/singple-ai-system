@@ -41,6 +41,7 @@ interface StudentHistoryDialogState {
   studentName: string;
   loading: boolean;
   totalAmount: number;
+  advancedTrainingAmount: number;  // 高階一對一訓練累積金額（用於抽成計算）
   records: Array<{
     date: string;
     item: string;
@@ -49,16 +50,29 @@ interface StudentHistoryDialogState {
     teacher_name?: string;
     closer?: string;
     setter?: string;
+    is_advanced_training?: boolean;  // 是否為高階一對一訓練
   }>;
 }
 
 // 表格排序類型
 type SortField = 'date' | 'item' | 'student_name' | 'amount' | 'commission_amount' | 'revenue_type';
+type TrialClassSortField = 'class_date' | 'student_name' | 'course_type' | 'hourly_rate';
 type SortDirection = 'asc' | 'desc';
 
 interface SortConfig {
   field: SortField;
   direction: SortDirection;
+}
+
+interface TrialClassSortConfig {
+  field: TrialClassSortField;
+  direction: SortDirection;
+}
+
+// 體驗課過濾類型
+interface TrialClassFilterConfig {
+  course_type: string;
+  searchText: string;
 }
 
 // 表格過濾類型
@@ -191,6 +205,7 @@ export default function SalaryCalculator() {
   const { toast } = useToast();
   const revenueDetailsRef = useRef<HTMLDivElement>(null);
   const salaryTableRef = useRef<HTMLDivElement>(null);
+  const trialClassDetailsRef = useRef<HTMLDivElement>(null);
   const [employees, setEmployees] = useState<EmployeeSetting[]>([]);
 
   // 計算公式 Dialog 狀態
@@ -206,6 +221,7 @@ export default function SalaryCalculator() {
     studentName: '',
     loading: false,
     totalAmount: 0,
+    advancedTrainingAmount: 0,
     records: [],
   });
 
@@ -219,6 +235,18 @@ export default function SalaryCalculator() {
   const [filterConfig, setFilterConfig] = useState<FilterConfig>({
     revenue_type: 'all',
     is_self_closed: 'all',
+    searchText: '',
+  });
+
+  // 體驗課表格排序狀態
+  const [trialClassSortConfig, setTrialClassSortConfig] = useState<TrialClassSortConfig>({
+    field: 'class_date',
+    direction: 'desc',
+  });
+
+  // 體驗課過濾狀態
+  const [trialClassFilterConfig, setTrialClassFilterConfig] = useState<TrialClassFilterConfig>({
+    course_type: 'all',
     searchText: '',
   });
 
@@ -692,6 +720,7 @@ export default function SalaryCalculator() {
       studentName,
       loading: true,
       totalAmount: 0,
+      advancedTrainingAmount: 0,
       records: [],
     });
 
@@ -705,6 +734,7 @@ export default function SalaryCalculator() {
           studentName,
           loading: false,
           totalAmount: data.data.total_amount,
+          advancedTrainingAmount: data.data.advanced_training_amount || 0,
           records: data.data.records,
         });
       } else {
@@ -786,6 +816,141 @@ export default function SalaryCalculator() {
     if (type === 'regular') return '一般業績';
     if (type === 'other') return '其他業績';
     return '-';
+  };
+
+  // 截圖體驗課明細
+  const captureTrialClassDetails = async () => {
+    if (!trialClassDetailsRef.current) {
+      toast({
+        title: '無法截圖',
+        description: '找不到體驗課明細區塊',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      const canvas = await html2canvas(trialClassDetailsRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+      });
+
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const item = new ClipboardItem({ 'image/png': blob });
+          navigator.clipboard.write([item]).then(() => {
+            toast({
+              title: '截圖成功',
+              description: '體驗課明細已複製到剪貼簿，可直接貼上',
+            });
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Screenshot failed:', error);
+      toast({
+        title: '截圖失敗',
+        description: '請稍後再試',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // 匯出體驗課明細為 Excel
+  const exportTrialClassDetails = () => {
+    if (!displayResult?.trial_class_details?.records || displayResult.trial_class_details.records.length === 0) {
+      toast({
+        title: '無法匯出',
+        description: '沒有體驗課明細可以匯出',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const ws_data = [
+      ['上課日期', '學員姓名', '學員信箱', '課程類型', '鐘點費'],
+      ...getFilteredAndSortedTrialClassRecords().map(record => {
+        const date = new Date(record.class_date);
+        const formattedDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        return [
+          formattedDate,
+          record.student_name || '-',
+          record.student_email || '-',
+          record.course_type || '未知',
+          record.hourly_rate || 300,
+        ];
+      }),
+      [],
+      ['總計', `${displayResult.trial_class_details.total_classes} 堂`, '', '', displayResult.trial_class_details.trial_class_fee],
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(ws_data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '體驗課明細');
+
+    const filename = `體驗課明細_${result?.employee_name}_${periodStart}_${periodEnd}.xlsx`;
+    XLSX.writeFile(wb, filename);
+
+    toast({
+      title: '匯出成功',
+      description: `已匯出 ${displayResult.trial_class_details.total_classes} 堂體驗課記錄`,
+    });
+  };
+
+  // 體驗課排序
+  const handleTrialClassSort = (field: TrialClassSortField) => {
+    setTrialClassSortConfig(prev => ({
+      field,
+      direction: prev.field === field && prev.direction === 'desc' ? 'asc' : 'desc',
+    }));
+  };
+
+  // 獲取體驗課過濾和排序後的記錄
+  const getFilteredAndSortedTrialClassRecords = () => {
+    if (!displayResult?.trial_class_details?.records) return [];
+
+    let records = [...displayResult.trial_class_details.records];
+
+    // 過濾
+    if (trialClassFilterConfig.course_type !== 'all') {
+      records = records.filter(r => r.course_type === trialClassFilterConfig.course_type);
+    }
+    if (trialClassFilterConfig.searchText) {
+      const searchLower = trialClassFilterConfig.searchText.toLowerCase();
+      records = records.filter(r =>
+        (r.student_name || '').toLowerCase().includes(searchLower) ||
+        (r.student_email || '').toLowerCase().includes(searchLower)
+      );
+    }
+
+    // 排序
+    records.sort((a, b) => {
+      let comparison = 0;
+      switch (trialClassSortConfig.field) {
+        case 'class_date':
+          comparison = new Date(a.class_date).getTime() - new Date(b.class_date).getTime();
+          break;
+        case 'student_name':
+          comparison = (a.student_name || '').localeCompare(b.student_name || '');
+          break;
+        case 'course_type':
+          comparison = (a.course_type || '').localeCompare(b.course_type || '');
+          break;
+        case 'hourly_rate':
+          comparison = (a.hourly_rate || 0) - (b.hourly_rate || 0);
+          break;
+      }
+      return trialClassSortConfig.direction === 'asc' ? comparison : -comparison;
+    });
+
+    return records;
+  };
+
+  // 獲取所有課程類型（用於過濾下拉選單）
+  const getUniqueCourseTypes = () => {
+    if (!displayResult?.trial_class_details?.records) return [];
+    const types = new Set(displayResult.trial_class_details.records.map(r => r.course_type || '未知'));
+    return Array.from(types);
   };
 
   return (
@@ -1676,75 +1841,183 @@ export default function SalaryCalculator() {
 
             {/* 體驗課明細（老師專用） */}
             {displayResult?.trial_class_details && (
-              <div className="mt-6">
-                <h3 className="font-semibold mb-3">
-                  🎓 體驗課明細 (共 {displayResult.trial_class_details.total_classes} 堂)
-                </h3>
+              <div className="mt-6" ref={trialClassDetailsRef}>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold">
+                    🎓 體驗課明細 (共 {displayResult.trial_class_details.total_classes} 堂)
+                  </h3>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={captureTrialClassDetails}>
+                      <Camera className="mr-2 h-4 w-4" />
+                      複製截圖
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={exportTrialClassDetails}>
+                      <FileSpreadsheet className="mr-2 h-4 w-4" />
+                      匯出 Excel
+                    </Button>
+                  </div>
+                </div>
+
                 {displayResult.trial_class_details.records.length > 0 ? (
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-purple-50">
-                        <tr>
-                          <th className="p-2 text-left font-medium">上課日期</th>
-                          <th className="p-2 text-left font-medium">學員姓名</th>
-                          <th className="p-2 text-left font-medium">學員信箱</th>
-                          <th className="p-2 text-left font-medium">課程類型</th>
-                          <th className="p-2 text-right font-medium">鐘點費</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {displayResult.trial_class_details.records.map((record, index) => {
-                          const date = new Date(record.class_date);
-                          const formattedDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-                          return (
-                            <tr key={index} className="border-t hover:bg-muted/20">
-                              <td className="p-2">{formattedDate}</td>
-                              <td className="p-2">{record.student_name || '-'}</td>
-                              <td className="p-2 text-muted-foreground text-xs">{record.student_email || '-'}</td>
-                              <td className="p-2">
-                                <span className="text-xs px-2 py-0.5 rounded bg-gray-100">
-                                  {record.course_type || '未知'}
-                                </span>
-                              </td>
-                              <td className="p-2 text-right font-semibold text-purple-600">
-                                {formatCurrency(record.hourly_rate || 300)}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    {/* 體驗課統計 - 按課程類型分類 */}
-                    <div className="border-t bg-purple-50 p-3">
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center text-sm">
-                          <span>總堂數: <strong>{displayResult.trial_class_details.total_classes}</strong></span>
+                  <>
+                    {/* 過濾控制區 */}
+                    <div className="mb-3 p-3 bg-muted/30 rounded-lg border">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <Filter className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm font-medium">過濾：</span>
                         </div>
-                        {/* 按課程類型統計 */}
-                        {displayResult.trial_class_details.by_course_type && Object.keys(displayResult.trial_class_details.by_course_type).length > 0 && (
-                          <div className="border-t pt-2 mt-2">
-                            <div className="text-xs font-semibold text-muted-foreground mb-1">按課程類型統計：</div>
-                            <div className="space-y-1 text-sm">
-                              {Object.entries(displayResult.trial_class_details.by_course_type).map(([courseType, stats]) => (
-                                <div key={courseType} className="flex justify-between items-center">
-                                  <span className="text-muted-foreground">{courseType}</span>
-                                  <span>
-                                    {stats.count} 堂 × {formatCurrency(stats.rate)} = <strong className="text-purple-600">{formatCurrency(stats.subtotal)}</strong>
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
+                        {/* 課程類型過濾 */}
+                        <Select
+                          value={trialClassFilterConfig.course_type}
+                          onValueChange={(v) => setTrialClassFilterConfig(prev => ({ ...prev, course_type: v }))}
+                        >
+                          <SelectTrigger className="w-40 h-8">
+                            <SelectValue placeholder="課程類型" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">全部課程</SelectItem>
+                            {getUniqueCourseTypes().map(type => (
+                              <SelectItem key={type} value={type}>{type}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {/* 搜尋框 */}
+                        <div className="flex-1 min-w-[200px]">
+                          <Input
+                            type="text"
+                            placeholder="搜尋學員名稱或信箱..."
+                            value={trialClassFilterConfig.searchText}
+                            onChange={(e) => setTrialClassFilterConfig(prev => ({ ...prev, searchText: e.target.value }))}
+                            className="h-8"
+                          />
+                        </div>
+                        {/* 清除過濾 */}
+                        {(trialClassFilterConfig.course_type !== 'all' || trialClassFilterConfig.searchText) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setTrialClassFilterConfig({ course_type: 'all', searchText: '' })}
+                            className="h-8"
+                          >
+                            <X className="h-3 w-3 mr-1" />
+                            清除
+                          </Button>
                         )}
-                        <div className="border-t pt-2 flex justify-end">
-                          <span className="text-sm text-muted-foreground mr-2">體驗課鐘點費總計:</span>
-                          <span className="font-bold text-lg text-purple-600">
-                            {formatCurrency(displayResult.trial_class_details.trial_class_fee)}
-                          </span>
+                      </div>
+                      {/* 顯示過濾後筆數 */}
+                      {(trialClassFilterConfig.course_type !== 'all' || trialClassFilterConfig.searchText) && (
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          顯示 {getFilteredAndSortedTrialClassRecords().length} / {displayResult.trial_class_details.total_classes} 堂
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="border rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-purple-50">
+                          <tr>
+                            <th
+                              className="p-2 text-left font-medium cursor-pointer hover:bg-purple-100 transition-colors"
+                              onClick={() => handleTrialClassSort('class_date')}
+                            >
+                              <div className="flex items-center gap-1">
+                                上課日期
+                                {trialClassSortConfig.field === 'class_date' ? (
+                                  trialClassSortConfig.direction === 'desc' ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />
+                                ) : <ArrowUpDown className="h-3 w-3 text-muted-foreground" />}
+                              </div>
+                            </th>
+                            <th
+                              className="p-2 text-left font-medium cursor-pointer hover:bg-purple-100 transition-colors"
+                              onClick={() => handleTrialClassSort('student_name')}
+                            >
+                              <div className="flex items-center gap-1">
+                                學員姓名
+                                {trialClassSortConfig.field === 'student_name' ? (
+                                  trialClassSortConfig.direction === 'desc' ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />
+                                ) : <ArrowUpDown className="h-3 w-3 text-muted-foreground" />}
+                              </div>
+                            </th>
+                            <th className="p-2 text-left font-medium">學員信箱</th>
+                            <th
+                              className="p-2 text-left font-medium cursor-pointer hover:bg-purple-100 transition-colors"
+                              onClick={() => handleTrialClassSort('course_type')}
+                            >
+                              <div className="flex items-center gap-1">
+                                課程類型
+                                {trialClassSortConfig.field === 'course_type' ? (
+                                  trialClassSortConfig.direction === 'desc' ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />
+                                ) : <ArrowUpDown className="h-3 w-3 text-muted-foreground" />}
+                              </div>
+                            </th>
+                            <th
+                              className="p-2 text-right font-medium cursor-pointer hover:bg-purple-100 transition-colors"
+                              onClick={() => handleTrialClassSort('hourly_rate')}
+                            >
+                              <div className="flex items-center justify-end gap-1">
+                                鐘點費
+                                {trialClassSortConfig.field === 'hourly_rate' ? (
+                                  trialClassSortConfig.direction === 'desc' ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />
+                                ) : <ArrowUpDown className="h-3 w-3 text-muted-foreground" />}
+                              </div>
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {getFilteredAndSortedTrialClassRecords().map((record, index) => {
+                            const date = new Date(record.class_date);
+                            const formattedDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                            return (
+                              <tr key={index} className="border-t hover:bg-muted/20">
+                                <td className="p-2">{formattedDate}</td>
+                                <td className="p-2">{record.student_name || '-'}</td>
+                                <td className="p-2 text-muted-foreground text-xs">{record.student_email || '-'}</td>
+                                <td className="p-2">
+                                  <span className="text-xs px-2 py-0.5 rounded bg-gray-100">
+                                    {record.course_type || '未知'}
+                                  </span>
+                                </td>
+                                <td className="p-2 text-right font-semibold text-purple-600">
+                                  {formatCurrency(record.hourly_rate || 300)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      {/* 體驗課統計 - 按課程類型分類 */}
+                      <div className="border-t bg-purple-50 p-3">
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center text-sm">
+                            <span>總堂數: <strong>{displayResult.trial_class_details.total_classes}</strong></span>
+                          </div>
+                          {/* 按課程類型統計 */}
+                          {displayResult.trial_class_details.by_course_type && Object.keys(displayResult.trial_class_details.by_course_type).length > 0 && (
+                            <div className="border-t pt-2 mt-2">
+                              <div className="text-xs font-semibold text-muted-foreground mb-1">按課程類型統計：</div>
+                              <div className="space-y-1 text-sm">
+                                {Object.entries(displayResult.trial_class_details.by_course_type).map(([courseType, stats]) => (
+                                  <div key={courseType} className="flex justify-between items-center">
+                                    <span className="text-muted-foreground">{courseType}</span>
+                                    <span>
+                                      {stats.count} 堂 × {formatCurrency(stats.rate)} = <strong className="text-purple-600">{formatCurrency(stats.subtotal)}</strong>
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          <div className="border-t pt-2 flex justify-end">
+                            <span className="text-sm text-muted-foreground mr-2">體驗課鐘點費總計:</span>
+                            <span className="font-bold text-lg text-purple-600">
+                              {formatCurrency(displayResult.trial_class_details.trial_class_fee)}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </>
                 ) : (
                   <div className="p-4 text-center text-muted-foreground border rounded-lg">
                     此期間無體驗課記錄
@@ -1786,13 +2059,27 @@ export default function SalaryCalculator() {
               ) : (
                 <>
                   {/* 總金額統計 */}
-                  <div className="mb-4 p-4 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border">
-                    <div className="text-sm text-muted-foreground">累計付款總額</div>
-                    <div className="text-2xl font-bold text-green-600">
-                      {formatCurrency(studentHistoryDialog.totalAmount)}
+                  <div className="mb-4 grid grid-cols-2 gap-3">
+                    <div className="p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg border">
+                      <div className="text-sm text-muted-foreground">累計付款總額</div>
+                      <div className="text-2xl font-bold text-gray-600">
+                        {formatCurrency(studentHistoryDialog.totalAmount)}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        共 {studentHistoryDialog.records.length} 筆記錄
+                      </div>
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      共 {studentHistoryDialog.records.length} 筆記錄
+                    <div className="p-4 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border border-green-200">
+                      <div className="text-sm text-muted-foreground flex items-center gap-1">
+                        高階一對一累積
+                        <span className="text-xs text-blue-500">（抽成計算基準）</span>
+                      </div>
+                      <div className="text-2xl font-bold text-green-600">
+                        {formatCurrency(studentHistoryDialog.advancedTrainingAmount)}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        共 {studentHistoryDialog.records.filter(r => r.is_advanced_training).length} 筆記錄
+                      </div>
                     </div>
                   </div>
 
@@ -1813,13 +2100,19 @@ export default function SalaryCalculator() {
                           {studentHistoryDialog.records.map((record, index) => {
                             const date = new Date(record.date);
                             const formattedDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                            const isAdvanced = record.is_advanced_training;
                             return (
-                              <tr key={index} className="border-t hover:bg-muted/20">
+                              <tr key={index} className={`border-t hover:bg-muted/20 ${isAdvanced ? 'bg-green-50/50' : ''}`}>
                                 <td className="p-2">{formattedDate}</td>
-                                <td className="p-2">{record.item}</td>
+                                <td className="p-2">
+                                  <span className="flex items-center gap-1">
+                                    {record.item}
+                                    {isAdvanced && <span className="text-xs text-green-600 font-medium">✓</span>}
+                                  </span>
+                                </td>
                                 <td className="p-2">{record.payment_method || '-'}</td>
                                 <td className="p-2">{record.teacher_name || '-'}</td>
-                                <td className="p-2 text-right font-semibold text-green-600">
+                                <td className={`p-2 text-right font-semibold ${isAdvanced ? 'text-green-600' : 'text-gray-500'}`}>
                                   {formatCurrency(record.amount)}
                                 </td>
                               </tr>
