@@ -1272,10 +1272,10 @@ export class SalaryCalculatorService {
           // 計算等效抽成比例（用於顯示）
           commissionRateUsed = selfClosedRevenue > 0 ? selfClosedCommission / selfClosedRevenue : 0;
         } else {
-          // 其他老師：
-          // - 一般業績（高階一對一）：自己成交 22% 或 23.3%（月業績 > 70萬）
+          // 其他老師（如 Karen）：
+          // - 一般業績（高階一對一）：固定 18%
           // - 其他業績（體驗課、初學專案等）：固定 8%
-          const regularRate = selfClosedRevenue > 700000 ? 0.233 : 0.22;
+          const regularRate = 0.18;
           commissionRateUsed = regularRate;
 
           // 別人成交：固定比例抽成（約 16.13%，即 150000 -> 24200）
