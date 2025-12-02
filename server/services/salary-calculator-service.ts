@@ -8,6 +8,7 @@ import { queryDatabase } from './pg-client';
 export interface EmployeeSalarySetting {
   id: string;
   employee_name: string;
+  nickname?: string;
   role_type: 'teacher' | 'closer' | 'setter';
   employment_type: 'full_time' | 'part_time';
   base_salary: number;
@@ -23,6 +24,14 @@ export interface EmployeeSalarySetting {
   retirement_fund: number;
   service_fee: number;
   has_performance_bonus: boolean;  // 是否有績效獎金資格
+
+  // 老師抽成規則
+  commission_type?: 'fixed_rate' | 'tiered';  // 抽成類型
+  tier1_max_revenue?: number;      // 第一階業績上限
+  tier1_commission_amount?: number; // 第一階抽成金額
+  tier2_max_revenue?: number;      // 第二階業績上限
+  tier2_commission_amount?: number; // 第二階抽成金額
+  other_revenue_rate?: number;     // 其他業績抽成比例
 }
 
 /**
@@ -889,12 +898,24 @@ export class SalaryCalculatorService {
       // 支援部分匹配：先嘗試完全匹配，如果沒結果則使用模糊匹配
       const firstNameOnly = employeeName.split(' ')[0]; // 取得名字部分（如 "Gladys"）
 
-      // 先查詢員工的暱稱（因為 income_expense_records 的名字欄位可能存暱稱）
+      // 先查詢員工的暱稱和抽成規則（因為 income_expense_records 的名字欄位可能存暱稱）
       const settingResult = await queryDatabase(`
-        SELECT nickname FROM employee_salary_settings
+        SELECT nickname, commission_type, commission_rate,
+               tier1_max_revenue, tier1_commission_amount,
+               tier2_max_revenue, tier2_commission_amount,
+               other_revenue_rate
+        FROM employee_salary_settings
         WHERE employee_name = $1 AND is_active = true
       `, [employeeName]);
-      const nickname = settingResult.rows[0]?.nickname || '';
+      const employeeSetting = settingResult.rows[0] || {};
+      const nickname = employeeSetting.nickname || '';
+      const commissionType = employeeSetting.commission_type || 'fixed_rate';
+      const commissionRate = parseFloat(employeeSetting.commission_rate || 18) / 100;  // 預設 18%
+      const tier1MaxRevenue = parseFloat(employeeSetting.tier1_max_revenue || 105000);
+      const tier1CommissionAmount = parseFloat(employeeSetting.tier1_commission_amount || 33000);
+      const tier2MaxRevenue = parseFloat(employeeSetting.tier2_max_revenue || 150000);
+      const tier2CommissionAmount = parseFloat(employeeSetting.tier2_commission_amount || 7500);
+      const otherRevenueRate = parseFloat(employeeSetting.other_revenue_rate || 8) / 100;  // 預設 8%
 
       switch (roleType) {
         case 'teacher':
@@ -1085,24 +1106,26 @@ export class SalaryCalculatorService {
       let commissionRateUsed = 0;
 
       if (roleType === 'teacher') {
-        // 檢查是否為 Vicky（特殊階梯式固定金額抽成）
-        const isVicky = nickname.toLowerCase() === 'vicky' ||
-                        employeeName.includes('微書') ||
-                        employeeName.includes('Vicky');
+        // 根據員工設定的 commission_type 判斷抽成計算方式
+        // - tiered: 階梯式抽成（如 Vicky, Elena）
+        // - fixed_rate: 固定比例抽成（如 Karen）
+        const isTieredCommission = commissionType === 'tiered';
 
-        if (isVicky) {
-          // Vicky 特殊規則（按學生累積金額，階梯式按比例計算）：
+        console.log(`[Teacher Commission] ${employeeName}: commission_type=${commissionType}, tiered=${isTieredCommission}`);
+
+        if (isTieredCommission) {
+          // 階梯式抽成規則（按學生累積金額，階梯式按比例計算）：
           // 自己成交：
-          //   - 第一階段 0~105,000：按比例抽 30,000（30,000/105,000 ≈ 28.57%）
-          //   - 第二階段 105,001~150,000：這部分按比例抽 7,500（7,500/45,000 ≈ 16.67%）
-          //   - 滿 150,000 後循環：超過 150,000 的部分，重新從第一階段開始計算
+          //   - 第一階段 0~TIER1_MAX：按比例抽 TIER1_COMMISSION
+          //   - 第二階段 TIER1_MAX~TIER2_MAX：這部分按比例抽 TIER2_COMMISSION
+          //   - 滿 TIER2_MAX 後循環：超過的部分，重新從第一階段開始計算
           //   - 重點：同一學生的多筆付款需要累積計算，新付款按累積後所在階梯計算
           // 他人成交：固定 24,200
 
-          const TIER1_MAX = 105000;      // 第一階梯上限
-          const TIER1_COMMISSION = 30000; // 第一階梯抽成
-          const TIER2_MAX = 150000;      // 第二階梯上限（循環點）
-          const TIER2_COMMISSION = 7500;  // 第二階梯抽成（105,001~150,000 這段的總抽成）
+          const TIER1_MAX = tier1MaxRevenue;      // 第一階梯上限（從資料庫讀取）
+          const TIER1_COMMISSION = tier1CommissionAmount; // 第一階梯抽成（從資料庫讀取）
+          const TIER2_MAX = tier2MaxRevenue;      // 第二階梯上限（從資料庫讀取）
+          const TIER2_COMMISSION = tier2CommissionAmount;  // 第二階梯抽成（從資料庫讀取）
           const TIER2_RANGE = TIER2_MAX - TIER1_MAX; // 45,000
           const CYCLE_AMOUNT = TIER2_MAX; // 每 150,000 循環一次
 
@@ -1254,11 +1277,12 @@ export class SalaryCalculatorService {
             }
           }
 
-          // 處理其他業績（非高階一對一）的自己成交：固定 8% 抽成
+          // 處理其他業績（非高階一對一）的自己成交：使用資料庫設定的 other_revenue_rate
+          const otherRevenueRatePercent = (otherRevenueRate * 100).toFixed(1);
           otherRevenueRecords.forEach(record => {
-            const commission = Math.round(record.amount * 0.08);
+            const commission = Math.round(record.amount * otherRevenueRate);
             record.commission_amount = commission;
-            record.commission_formula = `其他業績固定 8%: $${record.amount.toLocaleString()} × 8% = $${commission.toLocaleString()}`;
+            record.commission_formula = `其他業績 ${otherRevenueRatePercent}%: $${record.amount.toLocaleString()} × ${otherRevenueRatePercent}% = $${commission.toLocaleString()}`;
             selfClosedCommission += commission;
           });
 
@@ -1272,30 +1296,33 @@ export class SalaryCalculatorService {
           // 計算等效抽成比例（用於顯示）
           commissionRateUsed = selfClosedRevenue > 0 ? selfClosedCommission / selfClosedRevenue : 0;
         } else {
-          // 其他老師（如 Karen）：
-          // - 一般業績（高階一對一）：固定 18%
-          // - 其他業績（體驗課、初學專案等）：固定 8%
-          const regularRate = 0.18;
+          // 固定比例抽成（如 Karen）：
+          // - 一般業績（高階一對一）：使用資料庫設定的 commission_rate（預設 18%）
+          // - 其他業績（體驗課、初學專案等）：使用資料庫設定的 other_revenue_rate（預設 8%）
+          const regularRate = commissionRate;  // 從資料庫讀取
           commissionRateUsed = regularRate;
 
           // 別人成交：固定比例抽成（約 16.13%，即 150000 -> 24200）
           const otherClosedRate = 24200 / 150000; // ≈ 0.1613
 
-          // 更新每筆記錄的抽成金額（非 Vicky，含計算說明）
+          // 更新每筆記錄的抽成金額（含計算說明）
           const regularRatePercent = (regularRate * 100).toFixed(1);
           const otherRatePercent = (otherClosedRate * 100).toFixed(1);
+          const otherRevenueRatePercent = (otherRevenueRate * 100).toFixed(1);
+
+          console.log(`[Teacher Commission] ${employeeName}: fixed_rate=${regularRatePercent}%, other_revenue_rate=${otherRevenueRatePercent}%`);
 
           // 按業績類型分類計算
           records.forEach(record => {
             if (record.is_self_closed === true) {
               // 自己成交
               if (record.revenue_type === 'other') {
-                // 其他業績：固定 8%
-                record.commission_amount = Math.round(record.amount * 0.08);
-                record.commission_formula = `其他業績固定 8%: $${record.amount.toLocaleString()} × 8% = $${record.commission_amount.toLocaleString()}`;
+                // 其他業績：使用資料庫設定的 other_revenue_rate
+                record.commission_amount = Math.round(record.amount * otherRevenueRate);
+                record.commission_formula = `其他業績 ${otherRevenueRatePercent}%: $${record.amount.toLocaleString()} × ${otherRevenueRatePercent}% = $${record.commission_amount.toLocaleString()}`;
                 selfClosedCommission += record.commission_amount;
               } else {
-                // 一般業績（高階一對一）：22% 或 23.3%
+                // 一般業績（高階一對一）：使用資料庫設定的 commission_rate
                 record.commission_amount = Math.round(record.amount * regularRate);
                 record.commission_formula = `$${record.amount.toLocaleString()} × ${regularRatePercent}% = $${record.commission_amount.toLocaleString()}`;
                 selfClosedCommission += record.commission_amount;

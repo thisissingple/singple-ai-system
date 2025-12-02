@@ -55,7 +55,7 @@ export interface EmployeeProfile {
 
 // ==================== Employee Compensation ====================
 
-export type CommissionType = 'percentage' | 'fixed' | 'tiered' | 'none';
+export type CommissionType = 'percentage' | 'fixed' | 'tiered' | 'fixed_rate' | 'none';
 
 export interface CommissionConfig {
   // For percentage type
@@ -189,6 +189,12 @@ export interface EmployeeData {
     base_salary?: number | null;
     commission_type?: CommissionType | null;
     commission_rate?: number | null;
+    // 階梯式抽成欄位
+    tier1_max_revenue?: number | null;
+    tier1_commission_amount?: number | null;
+    tier2_max_revenue?: number | null;
+    tier2_commission_amount?: number | null;
+    other_revenue_rate?: number | null;
     effective_from?: string;
     adjustment_reason?: string | null;
   } | null;

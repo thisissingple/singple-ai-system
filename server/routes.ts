@@ -7626,6 +7626,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           -- 目前薪資（從 employee_salary_settings 讀取）
           ess.base_salary,
           ess.commission_rate,
+          ess.commission_type,
+          ess.tier1_max_revenue,
+          ess.tier1_commission_amount,
+          ess.tier2_max_revenue,
+          ess.tier2_commission_amount,
+          ess.other_revenue_rate,
           ess.role_type as salary_role_type,
           ess.employment_type as salary_employment_type,
           ess.hourly_rate,
@@ -7681,6 +7687,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         latest_compensation: row.base_salary ? {
           base_salary: row.base_salary,
           commission_rate: row.commission_rate,
+          commission_type: row.commission_type || 'fixed_rate',
+          tier1_max_revenue: row.tier1_max_revenue,
+          tier1_commission_amount: row.tier1_commission_amount,
+          tier2_max_revenue: row.tier2_max_revenue,
+          tier2_commission_amount: row.tier2_commission_amount,
+          other_revenue_rate: row.other_revenue_rate,
         } : null,
       }));
 
@@ -7735,6 +7747,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ess.service_fee,
           ess.notes as salary_notes,
           ess.updated_at as salary_updated_at,
+
+          -- 老師抽成規則
+          ess.commission_type as salary_commission_type,
+          ess.tier1_max_revenue,
+          ess.tier1_commission_amount,
+          ess.tier2_max_revenue,
+          ess.tier2_commission_amount,
+          ess.other_revenue_rate,
 
           -- 勞健保歷史
           COALESCE(
@@ -7793,13 +7813,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         identities: row.business_identities || [],
         compensation: [],
         insurance: [],
-        latest_compensation: row.base_salary ? {
+        latest_compensation: row.base_salary || row.salary_commission_type ? {
           id: row.salary_setting_id,
           base_salary: row.base_salary,
-          commission_type: row.commission_type,
+          commission_type: row.salary_commission_type,
           commission_rate: row.commission_rate,
           effective_from: row.effective_from,
+          // 老師抽成規則
+          tier1_max_revenue: row.tier1_max_revenue,
+          tier1_commission_amount: row.tier1_commission_amount,
+          tier2_max_revenue: row.tier2_max_revenue,
+          tier2_commission_amount: row.tier2_commission_amount,
+          other_revenue_rate: row.other_revenue_rate,
         } : null,
+        // 角色類型（用於判斷是否顯示老師抽成規則）
+        salary_role_type: row.salary_role_type,
       };
 
       res.json({ success: true, data: employeeData });
@@ -8225,6 +8253,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, history: result.rows });
     } catch (error: any) {
       console.error('取得薪資歷史失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 編輯員工薪資設定（包含抽成規則）
+  app.put('/api/employees/:userId/compensation/:compensationId', isAuthenticated, async (req, res) => {
+    try {
+      const { userId, compensationId } = req.params;
+      const {
+        base_salary,
+        commission_type,
+        commission_rate,
+        // 階梯式抽成欄位
+        tier1_max_revenue,
+        tier1_commission_amount,
+        tier2_max_revenue,
+        tier2_commission_amount,
+        other_revenue_rate,
+        effective_from,
+        adjustment_reason,
+      } = req.body;
+
+      // 1. 取得員工姓名
+      const userResult = await queryDatabase(`
+        SELECT first_name, last_name, nickname
+        FROM users
+        WHERE id = $1
+      `, [userId]);
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ success: false, message: '找不到員工' });
+      }
+
+      const user = userResult.rows[0];
+      const employeeName = `${user.first_name} ${user.last_name}`.trim();
+      const nickname = user.nickname || '';
+
+      // 2. 更新 employee_compensation 表
+      await queryDatabase(`
+        UPDATE employee_compensation
+        SET
+          base_salary = COALESCE($1, base_salary),
+          commission_type = COALESCE($2, commission_type),
+          effective_from = COALESCE($3, effective_from),
+          updated_at = NOW()
+        WHERE id = $4 AND user_id = $5
+      `, [
+        base_salary,
+        commission_type,
+        effective_from,
+        compensationId,
+        userId,
+      ]);
+
+      // 3. 同步更新 employee_salary_settings 表（薪資計算器用）
+      // 這是最重要的部分，因為薪資計算器使用這張表
+      await queryDatabase(`
+        UPDATE employee_salary_settings
+        SET
+          base_salary = COALESCE($1, base_salary),
+          commission_type = COALESCE($2, commission_type),
+          commission_rate = COALESCE($3, commission_rate),
+          tier1_max_revenue = $4,
+          tier1_commission_amount = $5,
+          tier2_max_revenue = $6,
+          tier2_commission_amount = $7,
+          other_revenue_rate = COALESCE($8, other_revenue_rate),
+          notes = COALESCE($9, notes),
+          updated_at = NOW()
+        WHERE employee_name = $10 OR nickname = $11 OR employee_name ILIKE $12
+      `, [
+        base_salary,
+        commission_type,
+        commission_rate,
+        tier1_max_revenue || null,
+        tier1_commission_amount || null,
+        tier2_max_revenue || null,
+        tier2_commission_amount || null,
+        other_revenue_rate,
+        adjustment_reason || `從員工管理更新 ${new Date().toLocaleDateString('zh-TW')}`,
+        employeeName,
+        nickname,
+        `%${nickname}%`,
+      ]);
+
+      console.log(`[薪資設定] 已更新 employee_salary_settings: ${employeeName} (${nickname})`);
+      console.log(`[薪資設定] commission_type=${commission_type}, commission_rate=${commission_rate}, tier1_max=${tier1_max_revenue}, tier1_amount=${tier1_commission_amount}`);
+
+      res.json({ success: true, message: '薪資設定更新成功' });
+    } catch (error: any) {
+      console.error('更新薪資設定失敗:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });

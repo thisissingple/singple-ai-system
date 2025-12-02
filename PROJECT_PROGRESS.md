@@ -2,10 +2,81 @@
 
 > **最後更新**: 2025-12-02
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ 員工管理系統優化 + 同步防重複機制
+> **專案狀態**: ✅ 薪資設定 Inline Editing 功能
 > **當前階段**: 系統功能完善
-> **今日進度**: 員工管理 UI 重構 + 暱稱編輯功能 + 同步併發鎖
+> **今日進度**: 薪資/抽成資訊 Inline Editing + 抽成規則 Migration
 > **整體進度**: 100% ████████████████████
+
+---
+
+## 📅 2025-12-02 更新日誌（晚上）
+
+### 💰 薪資設定 Inline Editing 功能
+
+#### 需求背景
+原本薪資資訊和抽成資訊的編輯需要打開 popup 對話框，且編輯時可以同時修改薪資和抽成，造成混淆。
+用戶希望：
+1. 薪資資訊和抽成資訊完全分離
+2. 使用 inline editing，直接在頁面上修改
+3. 修改後按「儲存」按鈕，顯示 toast 通知
+
+#### 實作內容
+
+**1. 新增狀態變數** ([`employees.tsx:215-232`](client/src/pages/settings/employees.tsx#L215-L232))
+```typescript
+// Inline editing 狀態 - 薪資
+const [inlineSalary, setInlineSalary] = useState({ base_salary: '' });
+const [salaryChanged, setSalaryChanged] = useState(false);
+const [savingSalary, setSavingSalary] = useState(false);
+
+// Inline editing 狀態 - 抽成
+const [inlineCommission, setInlineCommission] = useState({
+  commission_type: 'fixed_rate' as 'fixed_rate' | 'tiered',
+  commission_rate: '',
+  other_revenue_rate: '',
+  tier1_max_revenue: '',
+  tier1_commission_amount: '',
+  tier2_max_revenue: '',
+  tier2_commission_amount: '',
+});
+const [commissionChanged, setCommissionChanged] = useState(false);
+const [savingCommission, setSavingCommission] = useState(false);
+```
+
+**2. useEffect 初始化** ([`employees.tsx:234-253`](client/src/pages/settings/employees.tsx#L234-L253))
+- 當選擇員工時，自動載入薪資和抽成設定到 inline editing 狀態
+
+**3. Inline 儲存函數** ([`employees.tsx:1052-1163`](client/src/pages/settings/employees.tsx#L1052-L1163))
+- `handleSaveInlineSalary()`: 只更新底薪，保持其他欄位不變
+- `handleSaveInlineCommission()`: 只更新抽成欄位，保持底薪不變
+
+**4. 薪資資訊區塊 UI** ([`employees.tsx:1664-1729`](client/src/pages/settings/employees.tsx#L1664-L1729))
+- 改用 Input 元件顯示底薪，可直接編輯
+- 當有變更時顯示「儲存」按鈕
+- 儲存成功後顯示 toast 通知
+
+**5. 抽成資訊區塊 UI** ([`employees.tsx:1731-1906`](client/src/pages/settings/employees.tsx#L1731-L1906))
+- 使用 Select 選擇抽成類型（固定比例/階梯式）
+- 根據抽成類型動態顯示對應欄位：
+  - **固定比例**: 一般業績抽成%、其他業績抽成%
+  - **階梯式**: 第一階/第二階上限與抽成金額、其他業績抽成%
+- 當有變更時顯示「儲存」按鈕
+
+### 🗄️ 老師抽成規則 Migration
+
+**Migration 088** ([`supabase/migrations/088_add_teacher_commission_rules.sql`](supabase/migrations/088_add_teacher_commission_rules.sql))
+
+新增欄位：
+- `commission_type`: 抽成類型 ('fixed_rate' 或 'tiered')
+- `tier1_max_revenue`: 第一階業績上限
+- `tier1_commission_amount`: 第一階抽成金額
+- `tier2_max_revenue`: 第二階業績上限
+- `tier2_commission_amount`: 第二階抽成金額
+- `other_revenue_rate`: 其他業績抽成比例
+
+設定現有老師：
+- **Vicky, Elena**: 階梯式抽成 (105K→33K, 105K~150K→7500)
+- **Karen, Orange**: 固定比例 18%
 
 ---
 

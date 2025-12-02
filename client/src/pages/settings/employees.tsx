@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Plus, Search, Eye, UserPlus, Briefcase, FileText, Shield, Calendar, Key, Copy, Pencil, ArrowUpDown, ArrowUp, ArrowDown, Trash2, Save, CheckCircle2, Loader2 as Loader2Icon, AlertCircle, Shield as ShieldIcon, LogIn } from 'lucide-react';
+import { Plus, Search, Eye, UserPlus, Briefcase, FileText, Shield, Calendar, Key, Copy, Pencil, ArrowUpDown, ArrowUp, ArrowDown, Trash2, Save, CheckCircle2, Loader2 as Loader2Icon, AlertCircle, Shield as ShieldIcon, LogIn, TrendingUp } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/dashboard-layout';
 import { sidebarConfig } from '@/config/sidebar-config';
 import { Button } from '@/components/ui/button';
@@ -186,6 +186,12 @@ export default function EmployeesPage() {
     base_salary: '',
     commission_type: 'none' as CommissionType,
     commission_rate: '',
+    // 階梯式抽成欄位
+    tier1_max_revenue: '',
+    tier1_commission_amount: '',
+    tier2_max_revenue: '',
+    tier2_commission_amount: '',
+    other_revenue_rate: '',
     effective_from: '',
     adjustment_reason: '',
   });
@@ -204,6 +210,47 @@ export default function EmployeesPage() {
     effective_from: '',
     notes: '',
   });
+
+  // Inline editing 狀態 - 薪資
+  const [inlineSalary, setInlineSalary] = useState({
+    base_salary: '',
+  });
+  const [salaryChanged, setSalaryChanged] = useState(false);
+  const [savingSalary, setSavingSalary] = useState(false);
+
+  // Inline editing 狀態 - 抽成
+  const [inlineCommission, setInlineCommission] = useState({
+    commission_type: 'fixed_rate' as 'fixed_rate' | 'tiered',
+    commission_rate: '',
+    other_revenue_rate: '',
+    tier1_max_revenue: '',
+    tier1_commission_amount: '',
+    tier2_max_revenue: '',
+    tier2_commission_amount: '',
+  });
+  const [commissionChanged, setCommissionChanged] = useState(false);
+  const [savingCommission, setSavingCommission] = useState(false);
+
+  // 初始化 inline editing 狀態
+  useEffect(() => {
+    if (viewingEmployee?.latest_compensation) {
+      const comp = viewingEmployee.latest_compensation;
+      setInlineSalary({
+        base_salary: comp.base_salary?.toString() || '',
+      });
+      setInlineCommission({
+        commission_type: (comp.commission_type as 'fixed_rate' | 'tiered') || 'fixed_rate',
+        commission_rate: comp.commission_rate?.toString() || '',
+        other_revenue_rate: comp.other_revenue_rate?.toString() || '',
+        tier1_max_revenue: comp.tier1_max_revenue?.toString() || '',
+        tier1_commission_amount: comp.tier1_commission_amount?.toString() || '',
+        tier2_max_revenue: comp.tier2_max_revenue?.toString() || '',
+        tier2_commission_amount: comp.tier2_commission_amount?.toString() || '',
+      });
+      setSalaryChanged(false);
+      setCommissionChanged(false);
+    }
+  }, [viewingEmployee?.latest_compensation]);
 
   // 權限管理相關狀態
   const { toast } = useToast();
@@ -958,6 +1005,12 @@ export default function EmployeesPage() {
             base_salary: editCompensationData.base_salary ? parseFloat(editCompensationData.base_salary) : null,
             commission_type: editCompensationData.commission_type,
             commission_rate: editCompensationData.commission_rate ? parseFloat(editCompensationData.commission_rate) : null,
+            // 階梯式抽成欄位
+            tier1_max_revenue: editCompensationData.tier1_max_revenue ? parseFloat(editCompensationData.tier1_max_revenue) : null,
+            tier1_commission_amount: editCompensationData.tier1_commission_amount ? parseFloat(editCompensationData.tier1_commission_amount) : null,
+            tier2_max_revenue: editCompensationData.tier2_max_revenue ? parseFloat(editCompensationData.tier2_max_revenue) : null,
+            tier2_commission_amount: editCompensationData.tier2_commission_amount ? parseFloat(editCompensationData.tier2_commission_amount) : null,
+            other_revenue_rate: editCompensationData.other_revenue_rate ? parseFloat(editCompensationData.other_revenue_rate) : null,
             effective_from: editCompensationData.effective_from,
             adjustment_reason: editCompensationData.adjustment_reason,
           }),
@@ -975,6 +1028,11 @@ export default function EmployeesPage() {
           base_salary: '',
           commission_type: 'none',
           commission_rate: '',
+          tier1_max_revenue: '',
+          tier1_commission_amount: '',
+          tier2_max_revenue: '',
+          tier2_commission_amount: '',
+          other_revenue_rate: '',
           effective_from: '',
           adjustment_reason: '',
         });
@@ -988,6 +1046,119 @@ export default function EmployeesPage() {
     } catch (error) {
       console.error('更新薪資記錄失敗:', error);
       alert('更新失敗');
+    }
+  };
+
+  // Inline 儲存薪資資訊 (只更新底薪)
+  const handleSaveInlineSalary = async () => {
+    if (!viewingEmployee?.latest_compensation) return;
+
+    setSavingSalary(true);
+    try {
+      const comp = viewingEmployee.latest_compensation;
+      const response = await fetch(
+        `/api/employees/${viewingEmployee.user.id}/compensation/${comp.id}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            base_salary: inlineSalary.base_salary ? parseFloat(inlineSalary.base_salary) : null,
+            // 保持其他欄位不變
+            commission_type: comp.commission_type,
+            commission_rate: comp.commission_rate,
+            tier1_max_revenue: comp.tier1_max_revenue,
+            tier1_commission_amount: comp.tier1_commission_amount,
+            tier2_max_revenue: comp.tier2_max_revenue,
+            tier2_commission_amount: comp.tier2_commission_amount,
+            other_revenue_rate: comp.other_revenue_rate,
+            effective_from: comp.effective_from,
+            adjustment_reason: comp.adjustment_reason,
+          }),
+        }
+      );
+
+      const data = await response.json();
+      if (data.success) {
+        toast({
+          title: '已儲存',
+          description: '底薪已更新成功',
+        });
+        setSalaryChanged(false);
+        // 重新載入員工詳情
+        handleViewDetail(viewingEmployee);
+      } else {
+        toast({
+          title: '儲存失敗',
+          description: data.message || '更新失敗',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('更新底薪失敗:', error);
+      toast({
+        title: '儲存失敗',
+        description: '更新失敗',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingSalary(false);
+    }
+  };
+
+  // Inline 儲存抽成資訊
+  const handleSaveInlineCommission = async () => {
+    if (!viewingEmployee?.latest_compensation) return;
+
+    setSavingCommission(true);
+    try {
+      const comp = viewingEmployee.latest_compensation;
+      const response = await fetch(
+        `/api/employees/${viewingEmployee.user.id}/compensation/${comp.id}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            // 保持底薪不變
+            base_salary: comp.base_salary,
+            // 更新抽成欄位
+            commission_type: inlineCommission.commission_type,
+            commission_rate: inlineCommission.commission_rate ? parseFloat(inlineCommission.commission_rate) : null,
+            tier1_max_revenue: inlineCommission.tier1_max_revenue ? parseFloat(inlineCommission.tier1_max_revenue) : null,
+            tier1_commission_amount: inlineCommission.tier1_commission_amount ? parseFloat(inlineCommission.tier1_commission_amount) : null,
+            tier2_max_revenue: inlineCommission.tier2_max_revenue ? parseFloat(inlineCommission.tier2_max_revenue) : null,
+            tier2_commission_amount: inlineCommission.tier2_commission_amount ? parseFloat(inlineCommission.tier2_commission_amount) : null,
+            other_revenue_rate: inlineCommission.other_revenue_rate ? parseFloat(inlineCommission.other_revenue_rate) : null,
+            effective_from: comp.effective_from,
+            adjustment_reason: comp.adjustment_reason,
+          }),
+        }
+      );
+
+      const data = await response.json();
+      if (data.success) {
+        toast({
+          title: '已儲存',
+          description: '抽成設定已更新成功',
+        });
+        setCommissionChanged(false);
+        // 重新載入員工詳情
+        handleViewDetail(viewingEmployee);
+      } else {
+        toast({
+          title: '儲存失敗',
+          description: data.message || '更新失敗',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('更新抽成設定失敗:', error);
+      toast({
+        title: '儲存失敗',
+        description: '更新失敗',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingCommission(false);
     }
   };
 
@@ -1276,8 +1447,9 @@ export default function EmployeesPage() {
 
           {viewingEmployee && (
             <Tabs defaultValue="info" className="mt-4">
-              <TabsList className="grid w-full grid-cols-2">
+              <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="info">員工資訊</TabsTrigger>
+                <TabsTrigger value="salary">薪資設定</TabsTrigger>
                 <TabsTrigger value="permissions">權限管理</TabsTrigger>
               </TabsList>
 
@@ -1485,65 +1657,61 @@ export default function EmployeesPage() {
                     </p>
                   )}
                 </Card>
+              </TabsContent>
 
-                {/* 薪資資訊區塊 */}
+              {/* 薪資設定分頁 */}
+              <TabsContent value="salary" className="space-y-4">
+                {/* 薪資資訊區塊 - Inline Editing */}
                 <Card className="p-4">
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="font-semibold flex items-center gap-2">
                       <FileText className="h-4 w-4" />
                       薪資資訊
                     </h3>
-                    <Button size="sm" onClick={() => setShowCompensationDialog(true)}>
-                      <Plus className="h-4 w-4 mr-1" />
-                      設定薪資
-                    </Button>
+                    {!viewingEmployee.latest_compensation && (
+                      <Button size="sm" onClick={() => setShowCompensationDialog(true)}>
+                        <Plus className="h-4 w-4 mr-1" />
+                        設定薪資
+                      </Button>
+                    )}
                   </div>
 
                   {viewingEmployee.latest_compensation ? (
                     <>
                       <div className="grid grid-cols-3 gap-4 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">底薪：</span>
-                          <span className="font-medium">
-                            {formatCurrency(viewingEmployee.latest_compensation.base_salary)}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">抽成類型：</span>
-                          <span>
-                            {viewingEmployee.latest_compensation.commission_type
-                              ? getCommissionTypeLabel(viewingEmployee.latest_compensation.commission_type)
-                              : '-'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">生效日期：</span>
-                          <span>
-                            {new Date(viewingEmployee.latest_compensation.effective_from).toLocaleDateString('zh-TW')}
-                          </span>
+                        <div className="space-y-1">
+                          <Label className="text-muted-foreground text-xs">底薪</Label>
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground">$</span>
+                            <Input
+                              type="number"
+                              value={inlineSalary.base_salary}
+                              onChange={(e) => {
+                                setInlineSalary({ base_salary: e.target.value });
+                                setSalaryChanged(true);
+                              }}
+                              placeholder="0"
+                              className="h-8"
+                            />
+                          </div>
                         </div>
                       </div>
-                      <div className="mt-3">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setEditCompensationData({
-                              compensationId: viewingEmployee.latest_compensation!.id,
-                              userId: viewingEmployee.user.id,
-                              base_salary: viewingEmployee.latest_compensation!.base_salary?.toString() || '',
-                              commission_type: viewingEmployee.latest_compensation!.commission_type || 'none',
-                              commission_rate: viewingEmployee.latest_compensation!.commission_rate?.toString() || '',
-                              effective_from: viewingEmployee.latest_compensation!.effective_from,
-                              adjustment_reason: viewingEmployee.latest_compensation!.adjustment_reason || '',
-                            });
-                            setShowEditCompensationDialog(true);
-                          }}
-                        >
-                          <Pencil className="h-3 w-3 mr-1" />
-                          編輯薪資
-                        </Button>
-                      </div>
+                      {salaryChanged && (
+                        <div className="flex justify-end mt-3">
+                          <Button
+                            size="sm"
+                            onClick={handleSaveInlineSalary}
+                            disabled={savingSalary}
+                          >
+                            {savingSalary ? (
+                              <Loader2Icon className="h-4 w-4 mr-1 animate-spin" />
+                            ) : (
+                              <Save className="h-4 w-4 mr-1" />
+                            )}
+                            儲存
+                          </Button>
+                        </div>
+                      )}
                     </>
                   ) : (
                     <p className="text-sm text-muted-foreground py-4 text-center">
@@ -1557,6 +1725,183 @@ export default function EmployeesPage() {
                         歷史薪資記錄（共 {viewingEmployee.compensation.length} 筆）
                       </p>
                     </div>
+                  )}
+                </Card>
+
+                {/* 抽成資訊區塊 - Inline Editing */}
+                <Card className="p-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4" />
+                      抽成資訊
+                    </h3>
+                  </div>
+
+                  {viewingEmployee.latest_compensation ? (
+                    <>
+                      <div className="space-y-4">
+                        {/* 抽成類型選擇 */}
+                        <div className="space-y-1">
+                          <Label className="text-muted-foreground text-xs">抽成類型</Label>
+                          <Select
+                            value={inlineCommission.commission_type}
+                            onValueChange={(value: 'fixed_rate' | 'tiered') => {
+                              setInlineCommission(prev => ({ ...prev, commission_type: value }));
+                              setCommissionChanged(true);
+                            }}
+                          >
+                            <SelectTrigger className="h-8 w-40">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="fixed_rate">固定比例</SelectItem>
+                              <SelectItem value="tiered">階梯式</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* 固定比例模式 */}
+                        {inlineCommission.commission_type === 'fixed_rate' && (
+                          <div className="grid grid-cols-3 gap-4 text-sm">
+                            <div className="space-y-1">
+                              <Label className="text-muted-foreground text-xs">一般業績抽成 (%)</Label>
+                              <Input
+                                type="number"
+                                value={inlineCommission.commission_rate}
+                                onChange={(e) => {
+                                  setInlineCommission(prev => ({ ...prev, commission_rate: e.target.value }));
+                                  setCommissionChanged(true);
+                                }}
+                                placeholder="0"
+                                className="h-8"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-muted-foreground text-xs">其他業績抽成 (%)</Label>
+                              <Input
+                                type="number"
+                                value={inlineCommission.other_revenue_rate}
+                                onChange={(e) => {
+                                  setInlineCommission(prev => ({ ...prev, other_revenue_rate: e.target.value }));
+                                  setCommissionChanged(true);
+                                }}
+                                placeholder="8"
+                                className="h-8"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 階梯式模式 */}
+                        {inlineCommission.commission_type === 'tiered' && (
+                          <div className="space-y-4">
+                            <div className="grid grid-cols-3 gap-4 text-sm">
+                              <div className="space-y-1">
+                                <Label className="text-muted-foreground text-xs">第一階上限</Label>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground">$</span>
+                                  <Input
+                                    type="number"
+                                    value={inlineCommission.tier1_max_revenue}
+                                    onChange={(e) => {
+                                      setInlineCommission(prev => ({ ...prev, tier1_max_revenue: e.target.value }));
+                                      setCommissionChanged(true);
+                                    }}
+                                    placeholder="105000"
+                                    className="h-8"
+                                  />
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-muted-foreground text-xs">第一階抽成金額</Label>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground">$</span>
+                                  <Input
+                                    type="number"
+                                    value={inlineCommission.tier1_commission_amount}
+                                    onChange={(e) => {
+                                      setInlineCommission(prev => ({ ...prev, tier1_commission_amount: e.target.value }));
+                                      setCommissionChanged(true);
+                                    }}
+                                    placeholder="33000"
+                                    className="h-8"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-4 text-sm">
+                              <div className="space-y-1">
+                                <Label className="text-muted-foreground text-xs">第二階上限</Label>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground">$</span>
+                                  <Input
+                                    type="number"
+                                    value={inlineCommission.tier2_max_revenue}
+                                    onChange={(e) => {
+                                      setInlineCommission(prev => ({ ...prev, tier2_max_revenue: e.target.value }));
+                                      setCommissionChanged(true);
+                                    }}
+                                    placeholder="150000"
+                                    className="h-8"
+                                  />
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-muted-foreground text-xs">第二階抽成金額</Label>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground">$</span>
+                                  <Input
+                                    type="number"
+                                    value={inlineCommission.tier2_commission_amount}
+                                    onChange={(e) => {
+                                      setInlineCommission(prev => ({ ...prev, tier2_commission_amount: e.target.value }));
+                                      setCommissionChanged(true);
+                                    }}
+                                    placeholder="7500"
+                                    className="h-8"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-4 text-sm">
+                              <div className="space-y-1">
+                                <Label className="text-muted-foreground text-xs">其他業績抽成 (%)</Label>
+                                <Input
+                                  type="number"
+                                  value={inlineCommission.other_revenue_rate}
+                                  onChange={(e) => {
+                                    setInlineCommission(prev => ({ ...prev, other_revenue_rate: e.target.value }));
+                                    setCommissionChanged(true);
+                                  }}
+                                  placeholder="8"
+                                  className="h-8"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      {commissionChanged && (
+                        <div className="flex justify-end mt-3">
+                          <Button
+                            size="sm"
+                            onClick={handleSaveInlineCommission}
+                            disabled={savingCommission}
+                          >
+                            {savingCommission ? (
+                              <Loader2Icon className="h-4 w-4 mr-1 animate-spin" />
+                            ) : (
+                              <Save className="h-4 w-4 mr-1" />
+                            )}
+                            儲存
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground py-4 text-center">
+                      尚未設定抽成（請先在薪資資訊中設定底薪）
+                    </p>
                   )}
                 </Card>
 
@@ -2400,44 +2745,117 @@ export default function EmployeesPage() {
               />
             </div>
 
-            <div>
-              <Label>抽成類型</Label>
-              <Select
-                value={editCompensationData.commission_type}
-                onValueChange={(value: CommissionType) =>
-                  setEditCompensationData({ ...editCompensationData, commission_type: value })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">無抽成</SelectItem>
-                  <SelectItem value="percentage">百分比抽成</SelectItem>
-                  <SelectItem value="fixed">固定金額</SelectItem>
-                  <SelectItem value="tiered">階梯式抽成</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {editCompensationData.commission_type !== 'none' && (
-              <div>
-                <Label>抽成比例/金額</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={editCompensationData.commission_rate}
-                  onChange={(e) =>
-                    setEditCompensationData({ ...editCompensationData, commission_rate: e.target.value })
+            {/* 抽成設定區 */}
+            <div className="space-y-4 p-4 bg-muted/30 rounded-lg">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">抽成設定</p>
+                <Select
+                  value={editCompensationData.commission_type}
+                  onValueChange={(value: CommissionType) =>
+                    setEditCompensationData({ ...editCompensationData, commission_type: value })
                   }
-                  placeholder={
-                    editCompensationData.commission_type === 'percentage'
-                      ? '例如：0.1 (10%)'
-                      : '例如：1000'
-                  }
-                />
+                >
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">無抽成</SelectItem>
+                    <SelectItem value="fixed_rate">固定比例</SelectItem>
+                    <SelectItem value="tiered">階梯式</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-            )}
+
+              <Separator />
+
+              {/* 固定比例區 */}
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2">固定比例抽成</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-xs">一般業績 (%)</Label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      value={editCompensationData.commission_rate}
+                      onChange={(e) =>
+                        setEditCompensationData({ ...editCompensationData, commission_rate: e.target.value })
+                      }
+                      placeholder="18"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">其他業績 (%)</Label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      value={editCompensationData.other_revenue_rate}
+                      onChange={(e) =>
+                        setEditCompensationData({ ...editCompensationData, other_revenue_rate: e.target.value })
+                      }
+                      placeholder="8"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* 階梯式區 */}
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2">階梯式抽成（自己成交）</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-xs">第一階上限 (NTD)</Label>
+                    <Input
+                      type="number"
+                      value={editCompensationData.tier1_max_revenue}
+                      onChange={(e) =>
+                        setEditCompensationData({ ...editCompensationData, tier1_max_revenue: e.target.value })
+                      }
+                      placeholder="105000"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">第一階抽成 (NTD)</Label>
+                    <Input
+                      type="number"
+                      value={editCompensationData.tier1_commission_amount}
+                      onChange={(e) =>
+                        setEditCompensationData({ ...editCompensationData, tier1_commission_amount: e.target.value })
+                      }
+                      placeholder="33000"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">第二階上限 (NTD)</Label>
+                    <Input
+                      type="number"
+                      value={editCompensationData.tier2_max_revenue}
+                      onChange={(e) =>
+                        setEditCompensationData({ ...editCompensationData, tier2_max_revenue: e.target.value })
+                      }
+                      placeholder="150000"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">第二階抽成 (NTD)</Label>
+                    <Input
+                      type="number"
+                      value={editCompensationData.tier2_commission_amount}
+                      onChange={(e) =>
+                        setEditCompensationData({ ...editCompensationData, tier2_commission_amount: e.target.value })
+                      }
+                      placeholder="7500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                系統會根據「抽成類型」決定使用哪種計算方式
+              </p>
+            </div>
 
             <div>
               <Label>生效日期</Label>
