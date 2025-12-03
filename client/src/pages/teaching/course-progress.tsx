@@ -40,7 +40,6 @@ import {
 } from '@/components/ui/dialog';
 import {
   RefreshCw,
-  X,
   Search,
   CheckCircle2,
   Circle,
@@ -52,6 +51,7 @@ import {
   Wind,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Calendar,
   TrendingUp,
   LayoutGrid,
@@ -60,38 +60,57 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
-// Helper: 計算週數（週四~週三為一週）
+// Helper: 計算 ISO 週數
 function getWeekNumber(date: Date): number {
-  // 調整到週四開始的週期
   const d = new Date(date);
-  // 週四=4, 週五=5, 週六=6, 週日=0, 週一=1, 週二=2, 週三=3
-  const dayOfWeek = d.getDay();
-  // 如果是週四之前（週日0~週三3），算上一週
-  const daysToSubtract = dayOfWeek < 4 ? dayOfWeek + 3 : dayOfWeek - 4;
-  d.setDate(d.getDate() - daysToSubtract);
-  // 計算是當年第幾週
-  const startOfYear = new Date(d.getFullYear(), 0, 1);
-  const diff = d.getTime() - startOfYear.getTime();
-  const oneWeek = 1000 * 60 * 60 * 24 * 7;
-  return Math.floor(diff / oneWeek) + 1;
+  d.setHours(0, 0, 0, 0);
+  // 調整到週四（ISO週的中間）
+  d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+  // 1月4日一定在第1週
+  const week1 = new Date(d.getFullYear(), 0, 4);
+  return 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
 }
 
-// Helper: 取得指定週的日期範圍（週四~週三）
-function getWeekDateRange(weekNumber: number, year?: number): { start: Date; end: Date } {
-  const currentYear = year || new Date().getFullYear();
-  const startOfYear = new Date(currentYear, 0, 1);
-  // 找到第一個週四
-  const firstThursday = new Date(startOfYear);
-  const dayOfWeek = firstThursday.getDay();
-  const daysToThursday = dayOfWeek <= 4 ? 4 - dayOfWeek : 11 - dayOfWeek;
-  firstThursday.setDate(firstThursday.getDate() + daysToThursday);
-  // 計算指定週的週四
-  const targetThursday = new Date(firstThursday);
-  targetThursday.setDate(targetThursday.getDate() + (weekNumber - 1) * 7);
+// Helper: 取得當前週的日期範圍（週四~週三）
+function getCurrentWeekRange(): { start: Date; end: Date } {
+  const today = new Date();
+  const dayOfWeek = today.getDay();
+
+  // 找到這週的週四
+  let thursday: Date;
+  if (dayOfWeek >= 4) {
+    // 週四到週六
+    thursday = new Date(today);
+    thursday.setDate(today.getDate() - (dayOfWeek - 4));
+  } else {
+    // 週日到週三
+    thursday = new Date(today);
+    thursday.setDate(today.getDate() - (dayOfWeek + 3));
+  }
+  thursday.setHours(0, 0, 0, 0);
+
   // 週三結束
-  const targetWednesday = new Date(targetThursday);
-  targetWednesday.setDate(targetWednesday.getDate() + 6);
-  return { start: targetThursday, end: targetWednesday };
+  const wednesday = new Date(thursday);
+  wednesday.setDate(thursday.getDate() + 6);
+  wednesday.setHours(23, 59, 59, 999);
+
+  return { start: thursday, end: wednesday };
+}
+
+// Helper: 取得上週的日期範圍（週四~週三）
+function getLastWeekRange(): { start: Date; end: Date } {
+  const currentWeek = getCurrentWeekRange();
+  const lastThursday = new Date(currentWeek.start);
+  lastThursday.setDate(lastThursday.getDate() - 7);
+  const lastWednesday = new Date(currentWeek.start);
+  lastWednesday.setDate(lastWednesday.getDate() - 1);
+  lastWednesday.setHours(23, 59, 59, 999);
+  return { start: lastThursday, end: lastWednesday };
+}
+
+// Helper: 格式化日期為 MM/DD
+function formatDateShort(date: Date): string {
+  return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 // Helper: 格式化日期為 YYYY-MM-DD
@@ -275,14 +294,21 @@ export default function CourseProgressPage() {
   const [savingNotes, setSavingNotes] = useState(false);
 
   // 學員進度狀況 - 時間區間過濾
-  type PeriodFilter = 'yesterday' | 'today' | 'thisWeek' | 'lastWeek' | 'custom' | 'all';
-  const [progressPeriod, setProgressPeriod] = useState<PeriodFilter>('all');
+  type PeriodFilter = 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'all' | 'custom';
+  const [progressPeriod, setProgressPeriod] = useState<PeriodFilter>('thisMonth');
   const [customDateRange, setCustomDateRange] = useState<{ start: string; end: string }>({
     start: '',
     end: ''
   });
   const [progressSummary, setProgressSummary] = useState<any[]>([]);
   const [loadingProgressSummary, setLoadingProgressSummary] = useState(false);
+
+  // 學員進度狀況 - 表格排序
+  type ProgressSortField = 'teacher_name' | 'total_students' | 'total_cards_completed' | 'cardChange' | 'studentChange' | 'track' | 'pivot' | 'breath' | 'other';
+  const [progressSort, setProgressSort] = useState<{ field: ProgressSortField; direction: 'asc' | 'desc' }>({
+    field: 'total_students',
+    direction: 'desc'
+  });
 
   // 學員進度狀況 - Popup 彈窗狀態
   interface ProgressPopupState {
@@ -587,6 +613,10 @@ export default function CourseProgressPage() {
       const today = new Date();
 
       switch (progressPeriod) {
+        case 'today':
+          startDate = formatDateToString(today);
+          endDate = formatDateToString(today);
+          break;
         case 'yesterday': {
           const yesterday = new Date(today);
           yesterday.setDate(yesterday.getDate() - 1);
@@ -594,20 +624,17 @@ export default function CourseProgressPage() {
           endDate = formatDateToString(yesterday);
           break;
         }
-        case 'today':
-          startDate = formatDateToString(today);
+        case 'last7days': {
+          const sevenDaysAgo = new Date(today);
+          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+          startDate = formatDateToString(sevenDaysAgo);
           endDate = formatDateToString(today);
           break;
-        case 'thisWeek': {
-          const weekRange = getWeekDateRange(getWeekNumber(today));
-          startDate = formatDateToString(weekRange.start);
-          endDate = formatDateToString(weekRange.end);
-          break;
         }
-        case 'lastWeek': {
-          const weekRange = getWeekDateRange(getWeekNumber(today) - 1);
-          startDate = formatDateToString(weekRange.start);
-          endDate = formatDateToString(weekRange.end);
+        case 'thisMonth': {
+          const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+          startDate = formatDateToString(firstOfMonth);
+          endDate = formatDateToString(today);
           break;
         }
         case 'custom':
@@ -1328,30 +1355,49 @@ export default function CourseProgressPage() {
                       <TrendingUp className="w-5 h-5" />
                       學員進度狀況
                     </CardTitle>
-                    {/* 時間區間過濾器 */}
+                    {/* 時間區間過濾器 - 按鈕式 */}
                     <div className="flex items-center gap-2">
-                      <Select value={progressPeriod} onValueChange={(v) => setProgressPeriod(v as PeriodFilter)}>
-                        <SelectTrigger className="w-[140px] h-8">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="yesterday">昨日</SelectItem>
-                          <SelectItem value="today">今日</SelectItem>
-                          <SelectItem value="thisWeek">第{getWeekNumber(new Date())}週（本週）</SelectItem>
-                          <SelectItem value="lastWeek">第{getWeekNumber(new Date()) - 1}週（上週）</SelectItem>
-                          <SelectItem value="custom">自訂區間</SelectItem>
-                          <SelectItem value="all">全部</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <div className="flex items-center border rounded-lg overflow-hidden">
+                        {[
+                          { value: 'today', label: '今天' },
+                          { value: 'yesterday', label: '昨天' },
+                          { value: 'last7days', label: '過去七天' },
+                          { value: 'thisMonth', label: '本月' },
+                          { value: 'all', label: '全部' },
+                        ].map((option) => (
+                          <button
+                            key={option.value}
+                            onClick={() => setProgressPeriod(option.value as PeriodFilter)}
+                            className={`px-3 py-1.5 text-sm transition-colors ${
+                              progressPeriod === option.value
+                                ? 'bg-primary text-primary-foreground'
+                                : 'bg-background hover:bg-muted'
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => setProgressPeriod('custom')}
+                        className={`flex items-center gap-1 px-3 py-1.5 text-sm border rounded-lg transition-colors ${
+                          progressPeriod === 'custom'
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'bg-background hover:bg-muted'
+                        }`}
+                      >
+                        <Calendar className="w-4 h-4" />
+                        自訂日期
+                      </button>
                       {progressPeriod === 'custom' && (
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
                           <Input
                             type="date"
                             value={customDateRange.start}
                             onChange={(e) => setCustomDateRange(prev => ({ ...prev, start: e.target.value }))}
                             className="w-[130px] h-8"
                           />
-                          <span className="text-muted-foreground">~</span>
+                          <span>~</span>
                           <Input
                             type="date"
                             value={customDateRange.end}
@@ -1359,6 +1405,33 @@ export default function CourseProgressPage() {
                             className="w-[130px] h-8"
                           />
                         </div>
+                      )}
+                      {progressPeriod !== 'custom' && progressPeriod !== 'all' && (
+                        <span className="text-sm text-muted-foreground">
+                          {(() => {
+                            const today = new Date();
+                            switch (progressPeriod) {
+                              case 'today':
+                                return formatDateToString(today);
+                              case 'yesterday': {
+                                const y = new Date(today);
+                                y.setDate(y.getDate() - 1);
+                                return formatDateToString(y);
+                              }
+                              case 'last7days': {
+                                const start = new Date(today);
+                                start.setDate(start.getDate() - 6);
+                                return `${formatDateToString(start)} ~ ${formatDateToString(today)}`;
+                              }
+                              case 'thisMonth': {
+                                const first = new Date(today.getFullYear(), today.getMonth(), 1);
+                                return `${formatDateToString(first)} ~ ${formatDateToString(today)}`;
+                              }
+                              default:
+                                return '';
+                            }
+                          })()}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -1368,35 +1441,71 @@ export default function CourseProgressPage() {
                     <Table>
                       <TableHeader>
                         <TableRow className="bg-muted/50">
-                          <TableHead className="w-24">老師</TableHead>
-                          <TableHead className="w-20 text-center">學員數</TableHead>
-                          <TableHead className="w-20 text-center">卡片數</TableHead>
-                          <TableHead className="w-24 text-center">卡片週變化</TableHead>
-                          <TableHead className="w-24 text-center">學員變化</TableHead>
-                          <TableHead className="w-16 text-center">軌道</TableHead>
-                          <TableHead className="w-16 text-center">支點</TableHead>
-                          <TableHead className="w-16 text-center">氣息</TableHead>
-                          <TableHead className="w-16 text-center">其他</TableHead>
+                          {[
+                            { field: 'teacher_name', label: '老師', width: 'w-24', align: '' },
+                            { field: 'total_students', label: '學員數', width: 'w-20', align: 'text-center' },
+                            { field: 'total_cards_completed', label: '卡片數', width: 'w-20', align: 'text-center' },
+                            { field: 'cardChange', label: '卡片週變化', width: 'w-24', align: 'text-center' },
+                            { field: 'studentChange', label: '學員變化', width: 'w-24', align: 'text-center' },
+                            { field: 'track', label: '軌道', width: 'w-16', align: 'text-center' },
+                            { field: 'pivot', label: '支點', width: 'w-16', align: 'text-center' },
+                            { field: 'breath', label: '氣息', width: 'w-16', align: 'text-center' },
+                            { field: 'other', label: '其他', width: 'w-16', align: 'text-center' },
+                          ].map((col) => (
+                            <TableHead
+                              key={col.field}
+                              className={`${col.width} ${col.align} cursor-pointer hover:bg-muted/80 select-none`}
+                              onClick={() => {
+                                setProgressSort(prev => ({
+                                  field: col.field as ProgressSortField,
+                                  direction: prev.field === col.field && prev.direction === 'desc' ? 'asc' : 'desc'
+                                }));
+                              }}
+                            >
+                              <div className={`flex items-center gap-1 ${col.align === 'text-center' ? 'justify-center' : ''}`}>
+                                {col.label}
+                                {progressSort.field === col.field && (
+                                  progressSort.direction === 'desc'
+                                    ? <ChevronDown className="w-3 h-3" />
+                                    : <ChevronUp className="w-3 h-3" />
+                                )}
+                              </div>
+                            </TableHead>
+                          ))}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {teacherSummary.map((teacher) => {
-                          const teacherWeeks = groupedWeeklyProgress[teacher.teacher_name] || [];
-                          // 計算本週卡片數
-                          const thisWeekCards = teacherWeeks.length > 0 ? Number(teacherWeeks[0]?.cards_completed || 0) : 0;
-                          const lastWeekCards = teacherWeeks.length > 1 ? Number(teacherWeeks[1]?.cards_completed || 0) : 0;
-                          const cardWeekChange = thisWeekCards - lastWeekCards;
-                          // 計算本週學員數變化
-                          const thisWeekStudents = teacherWeeks.length > 0 ? Number(teacherWeeks[0]?.students_active || 0) : 0;
-                          const lastWeekStudents = teacherWeeks.length > 1 ? Number(teacherWeeks[1]?.students_active || 0) : 0;
-                          const studentWeekChange = thisWeekStudents - lastWeekStudents;
-                          // 計算「其他」
-                          const estimatedMainCards =
-                            (teacher.track_completed_count || 0) * 11 +
-                            (teacher.pivot_completed_count || 0) * 15 +
-                            (teacher.breath_completed_count || 0) * 11;
-                          const otherCards = Math.max(0, (teacher.total_cards_completed || 0) - estimatedMainCards);
-
+                        {/* 計算每位老師的附加欄位並排序 */}
+                        {teacherSummary
+                          .map((teacher) => {
+                            const teacherWeeks = groupedWeeklyProgress[teacher.teacher_name] || [];
+                            const thisWeekCards = teacherWeeks.length > 0 ? Number(teacherWeeks[0]?.cards_completed || 0) : 0;
+                            const lastWeekCards = teacherWeeks.length > 1 ? Number(teacherWeeks[1]?.cards_completed || 0) : 0;
+                            const cardChange = thisWeekCards - lastWeekCards;
+                            const thisWeekStudents = teacherWeeks.length > 0 ? Number(teacherWeeks[0]?.students_active || 0) : 0;
+                            const lastWeekStudents = teacherWeeks.length > 1 ? Number(teacherWeeks[1]?.students_active || 0) : 0;
+                            const studentChange = thisWeekStudents - lastWeekStudents;
+                            const estimatedMainCards =
+                              (teacher.track_completed_count || 0) * 11 +
+                              (teacher.pivot_completed_count || 0) * 15 +
+                              (teacher.breath_completed_count || 0) * 11;
+                            const other = Math.max(0, (teacher.total_cards_completed || 0) - estimatedMainCards);
+                            return { ...teacher, cardChange, studentChange, other };
+                          })
+                          .sort((a, b) => {
+                            const dir = progressSort.direction === 'desc' ? -1 : 1;
+                            const field = progressSort.field;
+                            if (field === 'teacher_name') {
+                              return dir * a.teacher_name.localeCompare(b.teacher_name);
+                            }
+                            if (field === 'track') return dir * ((a.track_completed_count || 0) - (b.track_completed_count || 0));
+                            if (field === 'pivot') return dir * ((a.pivot_completed_count || 0) - (b.pivot_completed_count || 0));
+                            if (field === 'breath') return dir * ((a.breath_completed_count || 0) - (b.breath_completed_count || 0));
+                            const aVal = (a as any)[field] ?? 0;
+                            const bVal = (b as any)[field] ?? 0;
+                            return dir * (aVal - bVal);
+                          })
+                          .map((teacher) => {
                           // 點擊數字彈出詳細資訊
                           const handleCellClick = (type: ProgressPopupState['type']) => {
                             setProgressPopup({
@@ -1406,7 +1515,6 @@ export default function CourseProgressPage() {
                               teacherName: teacher.teacher_name,
                               data: []
                             });
-                            // 載入對應資料（後續實作 API）
                             loadPopupData(type, teacher.teacher_id, teacher.teacher_name);
                           };
 
@@ -1430,24 +1538,24 @@ export default function CourseProgressPage() {
                                 </button>
                               </TableCell>
                               <TableCell className="text-center">
-                                {cardWeekChange !== 0 ? (
+                                {teacher.cardChange !== 0 ? (
                                   <button
                                     onClick={() => handleCellClick('cardChange')}
-                                    className={`hover:bg-blue-100 px-2 py-1 rounded cursor-pointer transition-colors ${cardWeekChange > 0 ? 'text-green-600' : 'text-orange-600'}`}
+                                    className={`hover:bg-blue-100 px-2 py-1 rounded cursor-pointer transition-colors ${teacher.cardChange > 0 ? 'text-green-600' : 'text-orange-600'}`}
                                   >
-                                    {cardWeekChange > 0 ? '+' : ''}{cardWeekChange}
+                                    {teacher.cardChange > 0 ? '+' : ''}{teacher.cardChange}
                                   </button>
                                 ) : (
                                   <span className="text-gray-400">-</span>
                                 )}
                               </TableCell>
                               <TableCell className="text-center">
-                                {studentWeekChange !== 0 ? (
+                                {teacher.studentChange !== 0 ? (
                                   <button
                                     onClick={() => handleCellClick('studentChange')}
-                                    className={`hover:bg-blue-100 px-2 py-1 rounded cursor-pointer transition-colors ${studentWeekChange > 0 ? 'text-green-600' : 'text-orange-600'}`}
+                                    className={`hover:bg-blue-100 px-2 py-1 rounded cursor-pointer transition-colors ${teacher.studentChange > 0 ? 'text-green-600' : 'text-orange-600'}`}
                                   >
-                                    {studentWeekChange > 0 ? '+' : ''}{studentWeekChange}
+                                    {teacher.studentChange > 0 ? '+' : ''}{teacher.studentChange}
                                   </button>
                                 ) : (
                                   <span className="text-gray-400">-</span>
@@ -1477,7 +1585,7 @@ export default function CourseProgressPage() {
                               <TableCell className="text-center">
                                 <button onClick={() => handleCellClick('other')}>
                                   <Badge variant="outline" className="bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100 cursor-pointer">
-                                    {otherCards}
+                                    {teacher.other}
                                   </Badge>
                                 </button>
                               </TableCell>
