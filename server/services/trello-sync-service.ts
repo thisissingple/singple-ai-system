@@ -45,6 +45,7 @@ interface SyncResult {
   boardsProcessed: number;
   cardsCompleted: number;
   errors: string[];
+  durationSeconds?: number; // 同步花費時間（秒）
 }
 
 /**
@@ -69,21 +70,79 @@ async function trelloRequest<T>(endpoint: string, params: Record<string, string>
 }
 
 /**
- * 取得所有學員看板
- * 篩選條件：看板名稱包含「一對一」或以 (老師名稱) 開頭
+ * 取得所有看板（原始資料，用於顯示）
  */
-export async function getStudentBoards(): Promise<TrelloBoard[]> {
-  const boards = await trelloRequest<TrelloBoard[]>('/members/me/boards', {
+export async function getAllBoards(): Promise<TrelloBoard[]> {
+  return trelloRequest<TrelloBoard[]>('/members/me/boards', {
     fields: 'name,url',
   });
+}
 
-  // 篩選學員看板（包含老師名稱的）
-  const teacherPatterns = ['ELENA', 'KAREN', 'VICKY', 'ORANGE', '一對一'];
+/**
+ * 取得所有學員看板
+ * 篩選條件（精準匹配）：
+ * 1. 包含 (K) 或 （K） → Karen
+ * 2. 包含 (V) 或 （V） → Vicky
+ * 3. 包含 (O) 或 （O） → Orange
+ * 4. 包含 ELENA 或 ELANA → Elena
+ *
+ * 注意：其他縮寫如 (A), (B), (C), (T), (F), (E) 等不匹配
+ */
+export async function getStudentBoards(): Promise<TrelloBoard[]> {
+  const boards = await getAllBoards();
 
   return boards.filter(board => {
-    const name = board.name.toUpperCase();
-    return teacherPatterns.some(pattern => name.includes(pattern.toUpperCase()));
+    // 統一為半形括號進行比對
+    const normalizedName = board.name
+      .replace(/（/g, '(')
+      .replace(/）/g, ')');
+    const upperName = normalizedName.toUpperCase();
+
+    // 條件 1: 包含 (K) → Karen
+    if (normalizedName.includes('(K)')) return true;
+
+    // 條件 2: 包含 (V) → Vicky
+    if (normalizedName.includes('(V)')) return true;
+
+    // 條件 3: 包含 (O) → Orange
+    if (normalizedName.includes('(O)')) return true;
+
+    // 條件 4: 包含 ELENA 或 ELANA → Elena
+    if (upperName.includes('ELENA') || upperName.includes('ELANA')) return true;
+
+    return false;
   });
+}
+
+/**
+ * 取得看板分類狀態（用於前端顯示）
+ */
+export async function getBoardsWithSyncStatus(): Promise<{
+  syncedBoards: Array<TrelloBoard & { teacherName: string | null; studentName: string | null; isMatched: boolean }>;
+  unmatchedBoards: TrelloBoard[];
+  totalBoards: number;
+}> {
+  const allBoards = await getAllBoards();
+  const studentBoards = await getStudentBoards();
+  const studentBoardIds = new Set(studentBoards.map(b => b.id));
+
+  const syncedBoards = studentBoards.map(board => {
+    const parsed = parseBoardName(board.name);
+    return {
+      ...board,
+      teacherName: parsed.teacherName,
+      studentName: parsed.studentName,
+      isMatched: !!parsed.studentName,
+    };
+  });
+
+  const unmatchedBoards = allBoards.filter(board => !studentBoardIds.has(board.id));
+
+  return {
+    syncedBoards,
+    unmatchedBoards,
+    totalBoards: allBoards.length,
+  };
 }
 
 /**
@@ -103,24 +162,58 @@ export async function getListCards(listId: string): Promise<TrelloCard[]> {
 }
 
 /**
+ * 老師名稱縮寫對照表（精準匹配）
+ * (K) → Karen
+ * (V) → Vicky
+ * (O) → Orange
+ */
+const TEACHER_ABBREVIATIONS: Record<string, string> = {
+  'K': 'Karen',
+  'V': 'Vicky',
+  'O': 'Orange',
+};
+
+/**
+ * 老師名稱正規化對照表（處理大小寫和拼寫差異）
+ */
+const TEACHER_NAME_NORMALIZATION: Record<string, string> = {
+  'ELENA': 'Elena',
+  'ELANA': 'Elena',  // 拼寫錯誤修正
+};
+
+/**
  * 從看板名稱解析老師和學員資訊
- * 格式範例：(ELENA一對一) Kelly、(C) 韋辰
+ * 格式範例：(ELENA一對一) Kelly、(C) 韋辰、(V) 學員名、（K）Hsepherd
  */
 function parseBoardName(boardName: string): { teacherName: string | null; studentName: string | null } {
+  // 統一全形括號為半形括號
+  const normalizedName = boardName
+    .replace(/（/g, '(')
+    .replace(/）/g, ')');
+
   // 嘗試匹配 (老師一對一) 學員名 或 (字母) 學員名
-  const match = boardName.match(/^\(([^)]+)\)\s*(.+)$/);
+  const match = normalizedName.match(/^\(([^)]+)\)\s*(.+)$/);
 
   if (match) {
     let teacherPart = match[1];
     const studentName = match[2].trim();
 
-    // 提取老師名稱
-    let teacherName = teacherPart.replace(/一對一/g, '').trim();
+    // 提取老師名稱（移除「一對一」、「初階」、「高階」、「教練」等後綴）
+    let teacherName = teacherPart
+      .replace(/一對一/g, '')
+      .replace(/初階/g, '')
+      .replace(/高階/g, '')
+      .replace(/教練/g, '')
+      .trim();
 
-    // 處理單字母縮寫（如 C, A, B 可能代表不同老師或分類）
+    // 處理單字母縮寫（如 V=Vicky, K=Karen）
     if (teacherName.length === 1) {
-      // 這些可能是分類標記，不是老師名稱
-      teacherName = null;
+      const upperChar = teacherName.toUpperCase();
+      teacherName = TEACHER_ABBREVIATIONS[upperChar] || null;
+    } else if (teacherName.length <= 5) {
+      // 處理短名稱的正規化（如 ELENA → Elena, VJ → Vicky）
+      const upperName = teacherName.toUpperCase();
+      teacherName = TEACHER_NAME_NORMALIZATION[upperName] || teacherName;
     }
 
     return { teacherName, studentName };
@@ -197,9 +290,27 @@ export async function updateCourseProgress(
   let progressId: string;
   let teacherId: string | null = null;
 
+  // 查找老師的 user_id（用於新建和更新）
+  if (teacherName) {
+    const teacherResult = await queryDatabase(
+      `SELECT u.id FROM users u
+       LEFT JOIN business_identities bi ON u.id = bi.user_id
+       WHERE bi.display_name ILIKE $1 OR u.first_name ILIKE $1
+       LIMIT 1`,
+      [`%${teacherName}%`]
+    );
+    if (teacherResult.rows.length > 0) {
+      teacherId = teacherResult.rows[0].id;
+    }
+  }
+
   if (existing.rows.length > 0) {
     progressId = existing.rows[0].id;
-    teacherId = existing.rows[0].teacher_id;
+    const existingTeacherId = existing.rows[0].teacher_id;
+
+    // 如果現有記錄沒有 teacher_id 但我們找到了，則更新它
+    const shouldUpdateTeacher = !existingTeacherId && teacherId;
+
     // 更新現有記錄
     await queryDatabase(
       `UPDATE teacher_course_progress SET
@@ -210,27 +321,17 @@ export async function updateCourseProgress(
         pivot_completed_at = CASE WHEN $3 AND pivot_completed = false THEN NOW() ELSE pivot_completed_at END,
         breath_completed = $4,
         breath_completed_at = CASE WHEN $4 AND breath_completed = false THEN NOW() ELSE breath_completed_at END,
+        teacher_id = CASE WHEN $6::uuid IS NOT NULL THEN $6::uuid ELSE teacher_id END,
         last_synced_at = NOW(),
         updated_at = NOW()
       WHERE trello_board_id = $5`,
-      [cardsCompleted, trackCompleted, pivotCompleted, breathCompleted, boardId]
+      [cardsCompleted, trackCompleted, pivotCompleted, breathCompleted, boardId, teacherId]
     );
-  } else {
-    // 嘗試找到老師的 user_id (使用 business_identities.display_name 或 users.first_name)
-    if (teacherName) {
-      const teacherResult = await queryDatabase(
-        `SELECT u.id FROM users u
-         LEFT JOIN business_identities bi ON u.id = bi.user_id
-         WHERE bi.display_name ILIKE $1 OR u.first_name ILIKE $1
-         LIMIT 1`,
-        [`%${teacherName}%`]
-      );
-      if (teacherResult.rows.length > 0) {
-        teacherId = teacherResult.rows[0].id;
-      }
-    }
 
-    // 建立新記錄
+    // 使用找到的 teacher_id 或現有的
+    teacherId = teacherId || existingTeacherId;
+  } else {
+    // 建立新記錄（teacherId 已在開頭查詢）
     const insertResult = await queryDatabase(
       `INSERT INTO teacher_course_progress (
         student_email, trello_board_id, teacher_id,
@@ -304,9 +405,55 @@ async function syncCardCompletions(
 }
 
 /**
- * 執行完整同步
+ * 處理單個看板的同步（用於並行處理）
+ */
+async function processSingleBoard(board: TrelloBoard): Promise<{
+  success: boolean;
+  cardsCompleted: number;
+  boardName: string;
+  error?: string;
+}> {
+  try {
+    const progress = await syncBoardProgress(board);
+
+    if (progress.studentName) {
+      // 使用看板名稱作為臨時 email（之後可以關聯到實際學員）
+      const tempEmail = `${progress.studentName.toLowerCase().replace(/\s+/g, '.')}@trello.sync`;
+
+      await updateCourseProgress(
+        tempEmail,
+        board.id,
+        progress.cardsCompleted,
+        progress.teacherName,
+        progress.completedCards
+      );
+
+      return {
+        success: true,
+        cardsCompleted: progress.cardsCompleted,
+        boardName: board.name,
+      };
+    }
+
+    return { success: false, cardsCompleted: 0, boardName: board.name };
+  } catch (err: any) {
+    return {
+      success: false,
+      cardsCompleted: 0,
+      boardName: board.name,
+      error: err.message,
+    };
+  }
+}
+
+/**
+ * 執行完整同步（並行處理版本）
+ * 使用批次並行處理以加速同步，同時避免觸發 Trello API rate limit
  */
 export async function syncAllBoards(): Promise<SyncResult> {
+  const BATCH_SIZE = 5; // 每批並行處理 5 個看板（保守設定，避免 429）
+  const BATCH_DELAY_MS = 2000; // 每批之間延遲 2 秒，確保不觸發 rate limit
+
   const result: SyncResult = {
     success: true,
     boardsProcessed: 0,
@@ -315,40 +462,52 @@ export async function syncAllBoards(): Promise<SyncResult> {
   };
 
   try {
-    console.log('🔄 開始 Trello 同步...');
+    const startTime = Date.now();
+    console.log('🔄 開始 Trello 同步（並行模式）...');
 
     // 取得所有學員看板
     const boards = await getStudentBoards();
-    console.log(`📋 找到 ${boards.length} 個學員看板`);
+    console.log(`📋 找到 ${boards.length} 個學員看板，批次大小: ${BATCH_SIZE}`);
 
-    for (const board of boards) {
-      try {
-        const progress = await syncBoardProgress(board);
+    // 分批並行處理
+    for (let i = 0; i < boards.length; i += BATCH_SIZE) {
+      const batch = boards.slice(i, i + BATCH_SIZE);
+      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(boards.length / BATCH_SIZE);
 
-        if (progress.studentName) {
-          // 使用看板名稱作為臨時 email（之後可以關聯到實際學員）
-          const tempEmail = `${progress.studentName.toLowerCase().replace(/\s+/g, '.')}@trello.sync`;
+      console.log(`  📦 處理批次 ${batchNumber}/${totalBatches}（${batch.length} 個看板）...`);
 
-          await updateCourseProgress(
-            tempEmail,
-            board.id,
-            progress.cardsCompleted,
-            progress.teacherName,
-            progress.completedCards
-          );
+      // 並行處理這批看板
+      const batchResults = await Promise.all(
+        batch.map(board => processSingleBoard(board))
+      );
 
+      // 統計結果
+      for (const res of batchResults) {
+        if (res.success) {
           result.boardsProcessed++;
-          result.cardsCompleted += progress.cardsCompleted;
-
-          console.log(`  ✅ ${board.name}: ${progress.cardsCompleted} 張卡片完成`);
+          result.cardsCompleted += res.cardsCompleted;
+          console.log(`    ✅ ${res.boardName}: ${res.cardsCompleted} 張卡片完成`);
+        } else if (res.error) {
+          result.errors.push(`${res.boardName}: ${res.error}`);
+          console.error(`    ❌ ${res.boardName}: ${res.error}`);
         }
-      } catch (err: any) {
-        result.errors.push(`${board.name}: ${err.message}`);
-        console.error(`  ❌ ${board.name}: ${err.message}`);
+      }
+
+      // 批次之間延遲，避免 rate limit
+      if (i + BATCH_SIZE < boards.length) {
+        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
       }
     }
 
+    const durationSeconds = (Date.now() - startTime) / 1000;
+    result.durationSeconds = Math.round(durationSeconds * 10) / 10; // 四捨五入到小數第一位
+
     console.log(`\n✅ 同步完成！處理 ${result.boardsProcessed} 個看板，${result.cardsCompleted} 張卡片`);
+    console.log(`⏱️ 總耗時: ${result.durationSeconds} 秒`);
+
+    // 保存同步耗時到資料庫
+    await saveSyncDuration(result.durationSeconds);
 
   } catch (err: any) {
     result.success = false;
@@ -360,26 +519,79 @@ export async function syncAllBoards(): Promise<SyncResult> {
 }
 
 /**
- * 取得同步狀態
+ * 保存同步耗時
+ */
+async function saveSyncDuration(durationSeconds: number): Promise<void> {
+  try {
+    // 更新最後同步時間記錄（使用 upsert）
+    await queryDatabase(
+      `INSERT INTO system_settings (key, value, updated_at)
+       VALUES ('trello_last_sync_duration', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+      [durationSeconds.toString()]
+    );
+  } catch (err) {
+    console.error('保存同步耗時失敗:', err);
+  }
+}
+
+/**
+ * 取得同步狀態（包含耗時和完整統計）
  */
 export async function getSyncStatus(): Promise<{
   lastSyncAt: Date | null;
+  lastSyncDurationSeconds: number | null;
   totalBoards: number;
   totalCardsCompleted: number;
+  stats: {
+    total: number;
+    completed: number;
+    inProgress: number;
+    notStarted: number;
+    trackCompleted: number;
+    pivotCompleted: number;
+    breathCompleted: number;
+  };
 }> {
-  const result = await queryDatabase(
-    `SELECT
-      MAX(last_synced_at) as last_sync_at,
-      COUNT(*) as total_boards,
-      SUM(cards_completed) as total_cards
-    FROM teacher_course_progress`,
-    []
-  );
+  // 同時查詢同步狀態和完整統計
+  const [statusResult, durationResult] = await Promise.all([
+    queryDatabase(
+      `SELECT
+        MAX(last_synced_at) as last_sync_at,
+        COUNT(*) as total_boards,
+        SUM(cards_completed) as total_cards,
+        SUM(CASE WHEN breath_completed THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN cards_completed > 0 AND NOT breath_completed THEN 1 ELSE 0 END) as in_progress,
+        SUM(CASE WHEN cards_completed = 0 THEN 1 ELSE 0 END) as not_started,
+        SUM(CASE WHEN track_completed THEN 1 ELSE 0 END) as track_completed,
+        SUM(CASE WHEN pivot_completed THEN 1 ELSE 0 END) as pivot_completed,
+        SUM(CASE WHEN breath_completed THEN 1 ELSE 0 END) as breath_completed
+      FROM teacher_course_progress`,
+      []
+    ),
+    queryDatabase(
+      `SELECT value FROM system_settings WHERE key = 'trello_last_sync_duration'`,
+      []
+    ),
+  ]);
+
+  const row = statusResult.rows[0] || {};
+  const durationValue = durationResult.rows[0]?.value;
 
   return {
-    lastSyncAt: result.rows[0]?.last_sync_at || null,
-    totalBoards: parseInt(result.rows[0]?.total_boards || '0'),
-    totalCardsCompleted: parseInt(result.rows[0]?.total_cards || '0'),
+    lastSyncAt: row.last_sync_at || null,
+    lastSyncDurationSeconds: durationValue ? parseFloat(durationValue) : null,
+    totalBoards: parseInt(row.total_boards || '0'),
+    totalCardsCompleted: parseInt(row.total_cards || '0'),
+    stats: {
+      total: parseInt(row.total_boards || '0'),
+      completed: parseInt(row.completed || '0'),
+      inProgress: parseInt(row.in_progress || '0'),
+      notStarted: parseInt(row.not_started || '0'),
+      trackCompleted: parseInt(row.track_completed || '0'),
+      pivotCompleted: parseInt(row.pivot_completed || '0'),
+      breathCompleted: parseInt(row.breath_completed || '0'),
+    },
   };
 }
 
@@ -396,8 +608,7 @@ export async function getStudentProgressList(options: {
   let query = `
     SELECT
       tcp.*,
-      bi.display_name as teacher_nickname,
-      CONCAT(u.first_name, ' ', u.last_name) as teacher_name
+      COALESCE(bi.display_name, u.first_name, '未分配') as teacher_name
     FROM teacher_course_progress tcp
     LEFT JOIN users u ON tcp.teacher_id = u.id
     LEFT JOIN business_identities bi ON u.id = bi.user_id AND bi.identity_type = 'teacher' AND bi.is_active = true
@@ -435,6 +646,7 @@ export async function getStudentCardCompletions(progressId: string): Promise<any
 
 /**
  * 取得老師週進度統計
+ * 週期定義：週四為第一天，週三為最後一天
  */
 export async function getTeacherWeeklyProgress(options: {
   startDate?: string;
@@ -442,19 +654,34 @@ export async function getTeacherWeeklyProgress(options: {
 }): Promise<any[]> {
   const { startDate, endDate } = options;
 
-  // 預設取最近 8 週的資料
+  // 預設取最近 26 週（半年）的資料
   const defaultStart = new Date();
-  defaultStart.setDate(defaultStart.getDate() - 56); // 8 週
+  defaultStart.setDate(defaultStart.getDate() - 182); // 26 週 = 182 天
 
   const start = startDate || defaultStart.toISOString().split('T')[0];
   const end = endDate || new Date().toISOString().split('T')[0];
 
+  // 使用自定義週次計算（週四開始）
+  // PostgreSQL DOW: 0=週日, 1=週一, 2=週二, 3=週三, 4=週四, 5=週五, 6=週六
+  // 我們要把週四當作一週開始，所以需要調整日期
+  // 週四=4, 我們要減掉 4 來得到週四的開始日期
+  // 但是週日~週三要算作上一週，所以要減掉更多天
   const result = await queryDatabase(
     `WITH weekly_data AS (
       SELECT
         tcp.teacher_id,
         COALESCE(bi.display_name, u.first_name, '未分配') as teacher_name,
-        DATE_TRUNC('week', tcc.completed_at) as week_start,
+        -- 計算週四開始的週次
+        -- 把日期調整到週四開始：如果是週日(0)~週三(3)，要減到上週四
+        -- EXTRACT(DOW) 值：0=日,1=一,2=二,3=三,4=四,5=五,6=六
+        -- 週四~週六(4,5,6): 減去 (DOW - 4) 天
+        -- 週日~週三(0,1,2,3): 減去 (DOW + 3) 天 (加 7 再減 4)
+        DATE(tcc.completed_at) -
+          CASE
+            WHEN EXTRACT(DOW FROM tcc.completed_at) >= 4
+            THEN (EXTRACT(DOW FROM tcc.completed_at) - 4)::int
+            ELSE (EXTRACT(DOW FROM tcc.completed_at) + 3)::int
+          END as week_start,
         COUNT(tcc.id) as cards_completed,
         COUNT(DISTINCT tcp.id) as students_active
       FROM teacher_card_completions tcc
@@ -463,7 +690,13 @@ export async function getTeacherWeeklyProgress(options: {
       LEFT JOIN business_identities bi ON u.id = bi.user_id
         AND bi.identity_type = 'teacher' AND bi.is_active = true
       WHERE tcc.completed_at >= $1 AND tcc.completed_at <= $2
-      GROUP BY tcp.teacher_id, teacher_name, DATE_TRUNC('week', tcc.completed_at)
+      GROUP BY tcp.teacher_id, teacher_name,
+        DATE(tcc.completed_at) -
+          CASE
+            WHEN EXTRACT(DOW FROM tcc.completed_at) >= 4
+            THEN (EXTRACT(DOW FROM tcc.completed_at) - 4)::int
+            ELSE (EXTRACT(DOW FROM tcc.completed_at) + 3)::int
+          END
     )
     SELECT
       teacher_id,
@@ -474,6 +707,96 @@ export async function getTeacherWeeklyProgress(options: {
     FROM weekly_data
     ORDER BY teacher_name, week_start DESC`,
     [start, end]
+  );
+
+  return result.rows;
+}
+
+/**
+ * 取得老師某週的卡片完成明細
+ * 用於點擊週進度數字展開詳細資訊
+ */
+export async function getWeeklyCardDetails(options: {
+  teacherId: string;
+  weekStart: string;  // 週四日期 (YYYY-MM-DD)
+}): Promise<any[]> {
+  const { teacherId, weekStart } = options;
+
+  // 計算週結束日期（週三 = 週四 + 6 天）
+  const weekStartDate = new Date(weekStart);
+  const weekEndDate = new Date(weekStartDate);
+  weekEndDate.setDate(weekEndDate.getDate() + 6);
+  weekEndDate.setHours(23, 59, 59, 999);
+
+  const result = await queryDatabase(
+    `SELECT
+      tcc.id,
+      tcc.card_number,
+      tcc.card_name,
+      tcc.module_name,
+      tcc.completed_at,
+      tcc.is_paid,
+      tcp.student_email,
+      COALESCE(bi.display_name, u.first_name, '未分配') as teacher_name
+    FROM teacher_card_completions tcc
+    JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
+    LEFT JOIN users u ON tcp.teacher_id = u.id
+    LEFT JOIN business_identities bi ON u.id = bi.user_id
+      AND bi.identity_type = 'teacher' AND bi.is_active = true
+    WHERE tcp.teacher_id = $1
+      AND tcc.completed_at >= $2
+      AND tcc.completed_at <= $3
+    ORDER BY tcc.completed_at DESC`,
+    [teacherId, weekStart, weekEndDate.toISOString()]
+  );
+
+  return result.rows;
+}
+
+/**
+ * 取得老師的學員進度列表（按學員分組）
+ */
+export async function getTeacherStudentProgress(teacherId: string): Promise<any[]> {
+  const result = await queryDatabase(
+    `SELECT
+      tcp.id,
+      tcp.student_email,
+      tcp.cards_completed,
+      tcp.total_cards,
+      tcp.track_completed,
+      tcp.track_completed_at,
+      tcp.pivot_completed,
+      tcp.pivot_completed_at,
+      tcp.breath_completed,
+      tcp.breath_completed_at,
+      tcp.status,
+      tcp.last_synced_at,
+      tcp.created_at,
+      -- 計算最近一週完成的卡片數
+      (
+        SELECT COUNT(*)
+        FROM teacher_card_completions tcc
+        WHERE tcc.progress_id = tcp.id
+          AND tcc.completed_at >= NOW() - INTERVAL '7 days'
+      ) as cards_this_week,
+      -- 計算上一週完成的卡片數
+      (
+        SELECT COUNT(*)
+        FROM teacher_card_completions tcc
+        WHERE tcc.progress_id = tcp.id
+          AND tcc.completed_at >= NOW() - INTERVAL '14 days'
+          AND tcc.completed_at < NOW() - INTERVAL '7 days'
+      ) as cards_last_week,
+      -- 最後完成卡片時間
+      (
+        SELECT MAX(completed_at)
+        FROM teacher_card_completions tcc
+        WHERE tcc.progress_id = tcp.id
+      ) as last_card_completed_at
+    FROM teacher_course_progress tcp
+    WHERE tcp.teacher_id = $1
+    ORDER BY tcp.cards_completed DESC, tcp.student_email ASC`,
+    [teacherId]
   );
 
   return result.rows;
@@ -533,7 +856,9 @@ export function stopPeriodicSync(): void {
 }
 
 export default {
+  getAllBoards,
   getStudentBoards,
+  getBoardsWithSyncStatus,
   syncBoardProgress,
   syncAllBoards,
   getSyncStatus,
@@ -541,6 +866,8 @@ export default {
   getStudentCardCompletions,
   getTeacherWeeklyProgress,
   getTeacherProgressSummary,
+  getWeeklyCardDetails,
+  getTeacherStudentProgress,
   startPeriodicSync,
   stopPeriodicSync,
 };

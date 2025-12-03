@@ -10694,7 +10694,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // GET - 取得所有學員看板
+  // GET - 取得所有學員看板（篩選後）
   app.get('/api/trello/boards', isAuthenticated, async (req, res) => {
     try {
       const trelloSyncService = await import('./services/trello-sync-service');
@@ -10707,6 +10707,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error('取得 Trello 看板失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // GET - 取得所有看板及同步狀態（包含未匹配的看板）
+  app.get('/api/trello/boards/all', isAuthenticated, async (req, res) => {
+    try {
+      const trelloSyncService = await import('./services/trello-sync-service');
+      const boardStatus = await trelloSyncService.getBoardsWithSyncStatus();
+
+      res.json({
+        success: true,
+        data: boardStatus,
+      });
+    } catch (error: any) {
+      console.error('取得 Trello 看板狀態失敗:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });
@@ -10820,6 +10836,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error('取得老師進度總覽失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // GET - 取得老師某週的卡片完成明細
+  app.get('/api/trello/weekly-cards/:teacherId', isAuthenticated, async (req, res) => {
+    try {
+      const trelloSyncService = await import('./services/trello-sync-service');
+      const { teacherId } = req.params;
+      const { weekStart } = req.query;
+
+      if (!weekStart) {
+        return res.status(400).json({ success: false, error: '缺少 weekStart 參數' });
+      }
+
+      const cards = await trelloSyncService.getWeeklyCardDetails({
+        teacherId,
+        weekStart: weekStart as string,
+      });
+
+      res.json({
+        success: true,
+        data: cards,
+      });
+    } catch (error: any) {
+      console.error('取得週卡片明細失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // GET - 取得老師的學員進度列表
+  app.get('/api/trello/teacher/:teacherId/students', isAuthenticated, async (req, res) => {
+    try {
+      const trelloSyncService = await import('./services/trello-sync-service');
+      const { teacherId } = req.params;
+
+      const students = await trelloSyncService.getTeacherStudentProgress(teacherId);
+
+      res.json({
+        success: true,
+        data: students,
+      });
+    } catch (error: any) {
+      console.error('取得老師學員進度失敗:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });

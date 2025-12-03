@@ -141,7 +141,7 @@ export function createPool(mode: 'transaction' | 'session' = 'transaction') {
  * @param mode - 'transaction' 用於讀取, 'session' 用於寫入, 'sync' 用於同步操作
  * @returns 查詢結果
  */
-export async function queryDatabase(query: string, params?: any[], mode: 'transaction' | 'session' | 'sync' = 'transaction') {
+export async function queryDatabase(query: string, params?: any[], mode: 'transaction' | 'session' | 'sync' = 'session') {
   const pool = getSharedPool(mode);
   const result = await pool.query(query, params);
   return result;
