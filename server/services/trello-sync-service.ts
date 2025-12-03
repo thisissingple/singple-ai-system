@@ -755,6 +755,7 @@ export async function getWeeklyCardDetails(options: {
 
 /**
  * 取得老師的學員進度列表（按學員分組）
+ * 包含方案類型、完課狀態、新學員標記等資訊
  */
 export async function getTeacherStudentProgress(teacherId: string): Promise<any[]> {
   const result = await queryDatabase(
@@ -763,6 +764,7 @@ export async function getTeacherStudentProgress(teacherId: string): Promise<any[
       tcp.student_email,
       tcp.cards_completed,
       tcp.total_cards,
+      tcp.course_type,
       tcp.track_completed,
       tcp.track_completed_at,
       tcp.pivot_completed,
@@ -772,6 +774,29 @@ export async function getTeacherStudentProgress(teacherId: string): Promise<any[
       tcp.status,
       tcp.last_synced_at,
       tcp.created_at,
+      -- 判斷是否為新學員（最早完成卡片在兩週內）
+      CASE
+        WHEN (
+          SELECT MIN(completed_at)
+          FROM teacher_card_completions tcc
+          WHERE tcc.progress_id = tcp.id
+        ) >= NOW() - INTERVAL '14 days' THEN true
+        ELSE false
+      END as is_new_student,
+      -- 計算完課狀態
+      CASE
+        WHEN tcp.course_type = 'full' AND tcp.breath_completed THEN 'completed'
+        WHEN tcp.course_type = '2/3' AND tcp.pivot_completed THEN 'completed'
+        WHEN tcp.course_type = '1/3' AND tcp.track_completed THEN 'completed'
+        WHEN tcp.cards_completed > 0 THEN 'in_progress'
+        ELSE 'not_started'
+      END as completion_status,
+      -- 計算該方案應完成的卡片數
+      CASE
+        WHEN tcp.course_type = '1/3' THEN 9
+        WHEN tcp.course_type = '2/3' THEN 20
+        ELSE 37
+      END as target_cards,
       -- 計算最近一週完成的卡片數
       (
         SELECT COUNT(*)
@@ -795,7 +820,19 @@ export async function getTeacherStudentProgress(teacherId: string): Promise<any[
       ) as last_card_completed_at
     FROM teacher_course_progress tcp
     WHERE tcp.teacher_id = $1
-    ORDER BY tcp.cards_completed DESC, tcp.student_email ASC`,
+    ORDER BY
+      -- 新學員優先（根據最早完成卡片時間）
+      CASE
+        WHEN (
+          SELECT MIN(completed_at)
+          FROM teacher_card_completions tcc
+          WHERE tcc.progress_id = tcp.id
+        ) >= NOW() - INTERVAL '14 days' THEN 0
+        ELSE 1
+      END,
+      -- 然後按進度排序
+      tcp.cards_completed DESC,
+      tcp.student_email ASC`,
     [teacherId]
   );
 

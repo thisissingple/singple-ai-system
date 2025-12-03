@@ -143,6 +143,8 @@ interface TeacherStudentProgress {
   student_email: string;
   cards_completed: number;
   total_cards: number;
+  course_type: 'full' | '2/3' | '1/3';  // 方案類型
+  target_cards: number;  // 該方案應完成的卡片數
   track_completed: boolean;
   track_completed_at: string | null;
   pivot_completed: boolean;
@@ -150,6 +152,8 @@ interface TeacherStudentProgress {
   breath_completed: boolean;
   breath_completed_at: string | null;
   status: string;
+  completion_status: 'completed' | 'in_progress' | 'not_started';  // 完課狀態
+  is_new_student: boolean;  // 新學員（兩週內加入）
   last_synced_at: string;
   created_at: string;
   cards_this_week: number;
@@ -226,6 +230,12 @@ export default function CourseProgressPage() {
   const [searchText, setSearchText] = useState('');
   const [selectedTeacher, setSelectedTeacher] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  // 學員篩選（按老師）
+  const [teacherStudentFilter, setTeacherStudentFilter] = useState<Record<string, {
+    courseType: 'all' | 'full' | '2/3' | '1/3';
+    completionStatus: 'all' | 'completed' | 'in_progress' | 'not_started';
+    newOnly: boolean;
+  }>>({});
 
   // 載入資料
   useEffect(() => {
@@ -525,16 +535,37 @@ export default function CourseProgressPage() {
     let students = [...(teacherStudents[teacherId] || [])];
     const search = (teacherStudentSearch[teacherId] || '').toLowerCase();
     const sort = teacherStudentSort[teacherId] || { field: 'cards_completed', direction: 'desc' };
+    const filter = teacherStudentFilter[teacherId] || { courseType: 'all', completionStatus: 'all', newOnly: false };
 
-    // 過濾
+    // 過濾 - 搜尋
     if (search) {
       students = students.filter(s =>
         s.student_email.replace('@trello.sync', '').toLowerCase().includes(search)
       );
     }
 
+    // 過濾 - 方案類型
+    if (filter.courseType !== 'all') {
+      students = students.filter(s => s.course_type === filter.courseType);
+    }
+
+    // 過濾 - 完課狀態
+    if (filter.completionStatus !== 'all') {
+      students = students.filter(s => s.completion_status === filter.completionStatus);
+    }
+
+    // 過濾 - 只顯示新學員
+    if (filter.newOnly) {
+      students = students.filter(s => s.is_new_student);
+    }
+
     // 排序
     students.sort((a, b) => {
+      // 新學員優先
+      if (a.is_new_student !== b.is_new_student) {
+        return a.is_new_student ? -1 : 1;
+      }
+
       let aVal: number | string = 0;
       let bVal: number | string = 0;
 
@@ -567,6 +598,21 @@ export default function CourseProgressPage() {
     });
 
     return students;
+  };
+
+  // 取得篩選後的學員統計
+  const getStudentFilterStats = (teacherId: string) => {
+    const students = teacherStudents[teacherId] || [];
+    return {
+      total: students.length,
+      newStudents: students.filter(s => s.is_new_student).length,
+      completed: students.filter(s => s.completion_status === 'completed').length,
+      inProgress: students.filter(s => s.completion_status === 'in_progress').length,
+      notStarted: students.filter(s => s.completion_status === 'not_started').length,
+      fullCourse: students.filter(s => s.course_type === 'full' || !s.course_type).length,
+      twoThirds: students.filter(s => s.course_type === '2/3').length,
+      oneThird: students.filter(s => s.course_type === '1/3').length,
+    };
   };
 
   // 切換學員明細排序
@@ -1339,16 +1385,129 @@ export default function CourseProgressPage() {
                               <div className="text-center py-4 text-muted-foreground">載入學員資料中...</div>
                             ) : teacherStudents[teacherId]?.length ? (
                               <div className="space-y-3">
-                                {/* 搜尋框 */}
-                                <div className="relative">
-                                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                                  <Input
-                                    placeholder="搜尋學員..."
-                                    value={teacherStudentSearch[teacherId] || ''}
-                                    onChange={(e) => setTeacherStudentSearch(prev => ({ ...prev, [teacherId]: e.target.value }))}
-                                    className="pl-10 h-9"
-                                  />
-                                </div>
+                                {/* 篩選列 */}
+                                {(() => {
+                                  const stats = getStudentFilterStats(teacherId);
+                                  const filter = teacherStudentFilter[teacherId] || { courseType: 'all', completionStatus: 'all', newOnly: false };
+                                  const filteredCount = getFilteredTeacherStudents(teacherId).length;
+                                  return (
+                                    <div className="space-y-2">
+                                      {/* 統計標籤 */}
+                                      <div className="flex flex-wrap gap-2 text-xs">
+                                        <Badge variant="outline" className="bg-blue-50">
+                                          全部 {stats.total}
+                                        </Badge>
+                                        {stats.newStudents > 0 && (
+                                          <Badge
+                                            variant={filter.newOnly ? 'default' : 'outline'}
+                                            className={filter.newOnly ? 'bg-pink-500' : 'bg-pink-50 cursor-pointer hover:bg-pink-100'}
+                                            onClick={() => setTeacherStudentFilter(prev => ({
+                                              ...prev,
+                                              [teacherId]: { ...filter, newOnly: !filter.newOnly }
+                                            }))}
+                                          >
+                                            🆕 新學員 {stats.newStudents}
+                                          </Badge>
+                                        )}
+                                        <Badge
+                                          variant={filter.completionStatus === 'completed' ? 'default' : 'outline'}
+                                          className={filter.completionStatus === 'completed' ? 'bg-green-500' : 'bg-green-50 cursor-pointer hover:bg-green-100'}
+                                          onClick={() => setTeacherStudentFilter(prev => ({
+                                            ...prev,
+                                            [teacherId]: { ...filter, completionStatus: filter.completionStatus === 'completed' ? 'all' : 'completed' }
+                                          }))}
+                                        >
+                                          ✓ 已完課 {stats.completed}
+                                        </Badge>
+                                        <Badge
+                                          variant={filter.completionStatus === 'in_progress' ? 'default' : 'outline'}
+                                          className={filter.completionStatus === 'in_progress' ? 'bg-blue-500' : 'bg-blue-50 cursor-pointer hover:bg-blue-100'}
+                                          onClick={() => setTeacherStudentFilter(prev => ({
+                                            ...prev,
+                                            [teacherId]: { ...filter, completionStatus: filter.completionStatus === 'in_progress' ? 'all' : 'in_progress' }
+                                          }))}
+                                        >
+                                          進行中 {stats.inProgress}
+                                        </Badge>
+                                        {stats.notStarted > 0 && (
+                                          <Badge
+                                            variant={filter.completionStatus === 'not_started' ? 'default' : 'outline'}
+                                            className={filter.completionStatus === 'not_started' ? 'bg-gray-500' : 'bg-gray-50 cursor-pointer hover:bg-gray-100'}
+                                            onClick={() => setTeacherStudentFilter(prev => ({
+                                              ...prev,
+                                              [teacherId]: { ...filter, completionStatus: filter.completionStatus === 'not_started' ? 'all' : 'not_started' }
+                                            }))}
+                                          >
+                                            未開始 {stats.notStarted}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      {/* 方案類型篩選 */}
+                                      <div className="flex flex-wrap gap-2 text-xs">
+                                        <span className="text-muted-foreground self-center">方案:</span>
+                                        <Badge
+                                          variant={filter.courseType === 'all' ? 'default' : 'outline'}
+                                          className="cursor-pointer"
+                                          onClick={() => setTeacherStudentFilter(prev => ({
+                                            ...prev,
+                                            [teacherId]: { ...filter, courseType: 'all' }
+                                          }))}
+                                        >
+                                          全部
+                                        </Badge>
+                                        <Badge
+                                          variant={filter.courseType === 'full' ? 'default' : 'outline'}
+                                          className={filter.courseType === 'full' ? 'bg-indigo-500' : 'bg-indigo-50 cursor-pointer hover:bg-indigo-100'}
+                                          onClick={() => setTeacherStudentFilter(prev => ({
+                                            ...prev,
+                                            [teacherId]: { ...filter, courseType: filter.courseType === 'full' ? 'all' : 'full' }
+                                          }))}
+                                        >
+                                          完整(37) {stats.fullCourse}
+                                        </Badge>
+                                        {stats.twoThirds > 0 && (
+                                          <Badge
+                                            variant={filter.courseType === '2/3' ? 'default' : 'outline'}
+                                            className={filter.courseType === '2/3' ? 'bg-amber-500' : 'bg-amber-50 cursor-pointer hover:bg-amber-100'}
+                                            onClick={() => setTeacherStudentFilter(prev => ({
+                                              ...prev,
+                                              [teacherId]: { ...filter, courseType: filter.courseType === '2/3' ? 'all' : '2/3' }
+                                            }))}
+                                          >
+                                            2/3(20) {stats.twoThirds}
+                                          </Badge>
+                                        )}
+                                        {stats.oneThird > 0 && (
+                                          <Badge
+                                            variant={filter.courseType === '1/3' ? 'default' : 'outline'}
+                                            className={filter.courseType === '1/3' ? 'bg-orange-500' : 'bg-orange-50 cursor-pointer hover:bg-orange-100'}
+                                            onClick={() => setTeacherStudentFilter(prev => ({
+                                              ...prev,
+                                              [teacherId]: { ...filter, courseType: filter.courseType === '1/3' ? 'all' : '1/3' }
+                                            }))}
+                                          >
+                                            1/3(9) {stats.oneThird}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      {/* 搜尋框 + 結果數量 */}
+                                      <div className="flex items-center gap-2">
+                                        <div className="relative flex-1">
+                                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                                          <Input
+                                            placeholder="搜尋學員..."
+                                            value={teacherStudentSearch[teacherId] || ''}
+                                            onChange={(e) => setTeacherStudentSearch(prev => ({ ...prev, [teacherId]: e.target.value }))}
+                                            className="pl-10 h-9"
+                                          />
+                                        </div>
+                                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                          顯示 {filteredCount}/{stats.total}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                                 {/* 學員表格 */}
                                 <div className="max-h-96 overflow-y-auto border rounded-lg">
                                   <Table>
@@ -1360,6 +1519,7 @@ export default function CourseProgressPage() {
                                         >
                                           學員 {(teacherStudentSort[teacherId]?.field === 'name') && (teacherStudentSort[teacherId]?.direction === 'asc' ? '↑' : '↓')}
                                         </TableHead>
+                                        <TableHead className="w-16 text-center">方案</TableHead>
                                         <TableHead
                                           className="cursor-pointer hover:bg-muted/50 w-24 text-center"
                                           onClick={() => toggleStudentSort(teacherId, 'cards_completed')}
@@ -1367,14 +1527,14 @@ export default function CourseProgressPage() {
                                           進度 {(teacherStudentSort[teacherId]?.field === 'cards_completed' || !teacherStudentSort[teacherId]) && (teacherStudentSort[teacherId]?.direction === 'asc' ? '↑' : '↓')}
                                         </TableHead>
                                         <TableHead
-                                          className="cursor-pointer hover:bg-muted/50 w-20 text-center"
+                                          className="cursor-pointer hover:bg-muted/50 w-16 text-center"
                                           onClick={() => toggleStudentSort(teacherId, 'cards_this_week')}
                                         >
                                           本週 {(teacherStudentSort[teacherId]?.field === 'cards_this_week') && (teacherStudentSort[teacherId]?.direction === 'asc' ? '↑' : '↓')}
                                         </TableHead>
-                                        <TableHead className="w-32">模組</TableHead>
+                                        <TableHead className="w-24">狀態</TableHead>
                                         <TableHead
-                                          className="cursor-pointer hover:bg-muted/50 w-28"
+                                          className="cursor-pointer hover:bg-muted/50 w-24"
                                           onClick={() => toggleStudentSort(teacherId, 'last_completed')}
                                         >
                                           最後完成 {(teacherStudentSort[teacherId]?.field === 'last_completed') && (teacherStudentSort[teacherId]?.direction === 'asc' ? '↑' : '↓')}
@@ -1385,18 +1545,35 @@ export default function CourseProgressPage() {
                                       {getFilteredTeacherStudents(teacherId).map((student) => {
                                         const weekDiff = Number(student.cards_this_week) - Number(student.cards_last_week);
                                         const daysSinceLastCard = getDaysSinceLastCard(student.last_card_completed_at);
+                                        const targetCards = student.target_cards || student.total_cards;
+                                        const progressPercent = Math.round((student.cards_completed / targetCards) * 100);
                                         return (
-                                          <TableRow key={student.id}>
+                                          <TableRow key={student.id} className={student.is_new_student ? 'bg-pink-50/50' : ''}>
                                             <TableCell className="font-medium">
-                                              <button
-                                                onClick={() => openStudentHistory(teacherId, student)}
-                                                className="text-left hover:text-primary hover:underline transition-colors"
-                                              >
-                                                {student.student_email.replace('@trello.sync', '')}
-                                              </button>
+                                              <div className="flex items-center gap-1">
+                                                {student.is_new_student && <span className="text-pink-500" title="新學員（兩週內加入）">🆕</span>}
+                                                <button
+                                                  onClick={() => openStudentHistory(teacherId, student)}
+                                                  className="text-left hover:text-primary hover:underline transition-colors"
+                                                >
+                                                  {student.student_email.replace('@trello.sync', '')}
+                                                </button>
+                                              </div>
                                             </TableCell>
                                             <TableCell className="text-center">
-                                              <span className="font-mono">{student.cards_completed}/{student.total_cards}</span>
+                                              {student.course_type === '1/3' ? (
+                                                <Badge variant="outline" className="bg-orange-50 text-orange-700 text-[10px]">1/3</Badge>
+                                              ) : student.course_type === '2/3' ? (
+                                                <Badge variant="outline" className="bg-amber-50 text-amber-700 text-[10px]">2/3</Badge>
+                                              ) : (
+                                                <Badge variant="outline" className="bg-indigo-50 text-indigo-700 text-[10px]">完整</Badge>
+                                              )}
+                                            </TableCell>
+                                            <TableCell className="text-center">
+                                              <div className="flex flex-col items-center">
+                                                <span className="font-mono text-sm">{student.cards_completed}/{targetCards}</span>
+                                                <Progress value={progressPercent} className="h-1 w-12 mt-1" />
+                                              </div>
                                             </TableCell>
                                             <TableCell className="text-center">
                                               {Number(student.cards_this_week) > 0 ? (
@@ -1413,17 +1590,25 @@ export default function CourseProgressPage() {
                                               )}
                                             </TableCell>
                                             <TableCell>
-                                              <div className="flex gap-1">
-                                                {student.track_completed && <Badge variant="outline" className="bg-purple-100 text-[10px] px-1">軌道</Badge>}
-                                                {student.pivot_completed && <Badge variant="outline" className="bg-yellow-100 text-[10px] px-1">支點</Badge>}
-                                                {student.breath_completed && <Badge variant="outline" className="bg-green-100 text-[10px] px-1">氣息</Badge>}
-                                              </div>
+                                              {student.completion_status === 'completed' ? (
+                                                <Badge className="bg-green-500 text-[10px]">已完課</Badge>
+                                              ) : student.completion_status === 'in_progress' ? (
+                                                <div className="flex gap-1 flex-wrap">
+                                                  {student.track_completed && <Badge variant="outline" className="bg-purple-100 text-[10px] px-1">軌道✓</Badge>}
+                                                  {student.pivot_completed && <Badge variant="outline" className="bg-yellow-100 text-[10px] px-1">支點✓</Badge>}
+                                                  {!student.track_completed && !student.pivot_completed && (
+                                                    <Badge variant="outline" className="text-[10px]">進行中</Badge>
+                                                  )}
+                                                </div>
+                                              ) : (
+                                                <Badge variant="outline" className="bg-gray-100 text-[10px]">未開始</Badge>
+                                              )}
                                             </TableCell>
                                             <TableCell className="text-muted-foreground text-sm">
                                               <div className="flex flex-col">
                                                 <span>
                                                   {student.last_card_completed_at
-                                                    ? new Date(student.last_card_completed_at).toLocaleDateString('zh-TW')
+                                                    ? new Date(student.last_card_completed_at).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
                                                     : '-'}
                                                 </span>
                                                 {daysSinceLastCard !== null && daysSinceLastCard > 0 && (
