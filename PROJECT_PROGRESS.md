@@ -55,11 +55,11 @@ const daysFromThursday = (dayOfWeek + 3) % 7;
 const thisWeekThursday = new Date(today);
 thisWeekThursday.setDate(today.getDate() - daysFromThursday);
 
-// 卡片分類 regex 模式
-track: '^1[a-zA-Z]'      // 軌道卡片
-pivot: '^[234][a-zA-Z]'  // 支點卡片
-breath: '^[56][a-zA-Z]'  // 氣息卡片
-other: '!~ ^[1-6][a-zA-Z]' // 其他卡片
+// 卡片分類 regex 模式（正確定義）
+track: '^(1[a-zA-Z]|2[a-eA-E])'           // 軌道卡片：1a ~ 2e
+pivot: '^(2[d-zD-Z]|3[a-zA-Z]|4[a-fA-F])' // 支點卡片：2d ~ 4f
+breath: '^(5[a-zA-Z]|6[a-zA-Z]|7[a-gA-G])' // 氣息卡片：5a ~ 7g
+other: 不符合以上規則的卡片
 ```
 
 ---

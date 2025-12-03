@@ -863,10 +863,10 @@ export async function getTeacherProgressSummary(startDate?: string, endDate?: st
         COALESCE(bi.display_name, u.first_name, '未分配') as teacher_name,
         COUNT(DISTINCT tcp.id) as total_students,
         COUNT(tcc.id) as total_cards_completed,
-        COUNT(CASE WHEN tcc.card_name ~ '^1[a-zA-Z]' THEN 1 END) as track_count,
-        COUNT(CASE WHEN tcc.card_name ~ '^[234][a-zA-Z]' THEN 1 END) as pivot_count,
-        COUNT(CASE WHEN tcc.card_name ~ '^[56][a-zA-Z]' THEN 1 END) as breath_count,
-        COUNT(CASE WHEN tcc.card_name !~ '^[1-6][a-zA-Z]' THEN 1 END) as other_count,
+        COUNT(CASE WHEN tcc.card_name ~ '^(1[a-zA-Z]|2[a-eA-E])' THEN 1 END) as track_count,
+        COUNT(CASE WHEN tcc.card_name ~ '^(2[d-zD-Z]|3[a-zA-Z]|4[a-fA-F])' THEN 1 END) as pivot_count,
+        COUNT(CASE WHEN tcc.card_name ~ '^(5[a-zA-Z]|6[a-zA-Z]|7[a-gA-G])' THEN 1 END) as breath_count,
+        COUNT(CASE WHEN tcc.card_name !~ '^(1[a-zA-Z]|2[a-zA-Z]|3[a-zA-Z]|4[a-fA-F]|5[a-zA-Z]|6[a-zA-Z]|7[a-gA-G])' THEN 1 END) as other_count,
         SUM(CASE WHEN tcp.track_completed THEN 1 ELSE 0 END) as track_completed_count,
         SUM(CASE WHEN tcp.pivot_completed THEN 1 ELSE 0 END) as pivot_completed_count,
         SUM(CASE WHEN tcp.breath_completed THEN 1 ELSE 0 END) as breath_completed_count,
@@ -892,10 +892,10 @@ export async function getTeacherProgressSummary(startDate?: string, endDate?: st
         COALESCE(bi.display_name, u.first_name, '未分配') as teacher_name,
         COUNT(DISTINCT tcp.id) as total_students,
         COUNT(tcc.id) as total_cards_completed,
-        COUNT(CASE WHEN tcc.card_name ~ '^1[a-zA-Z]' THEN 1 END) as track_count,
-        COUNT(CASE WHEN tcc.card_name ~ '^[234][a-zA-Z]' THEN 1 END) as pivot_count,
-        COUNT(CASE WHEN tcc.card_name ~ '^[56][a-zA-Z]' THEN 1 END) as breath_count,
-        COUNT(CASE WHEN tcc.card_name !~ '^[1-6][a-zA-Z]' THEN 1 END) as other_count
+        COUNT(CASE WHEN tcc.card_name ~ '^(1[a-zA-Z]|2[a-eA-E])' THEN 1 END) as track_count,
+        COUNT(CASE WHEN tcc.card_name ~ '^(2[d-zD-Z]|3[a-zA-Z]|4[a-fA-F])' THEN 1 END) as pivot_count,
+        COUNT(CASE WHEN tcc.card_name ~ '^(5[a-zA-Z]|6[a-zA-Z]|7[a-gA-G])' THEN 1 END) as breath_count,
+        COUNT(CASE WHEN tcc.card_name !~ '^(1[a-zA-Z]|2[a-zA-Z]|3[a-zA-Z]|4[a-fA-F]|5[a-zA-Z]|6[a-zA-Z]|7[a-gA-G])' THEN 1 END) as other_count
       FROM teacher_card_completions tcc
       JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
       LEFT JOIN users u ON tcp.teacher_id = u.id
@@ -1095,44 +1095,44 @@ export async function getProgressDetails(
     }
 
     case 'track': {
-      // 軌道卡片：卡片名稱以 '1' 開頭（1a, 1b, 1c, 1d）
+      // 軌道卡片：1a ~ 2e
       const query = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at
         FROM teacher_card_completions tcc
         INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
-        WHERE tcc.card_name ~ '^1[a-zA-Z]' ${teacherFilter} ${dateFilter}
+        WHERE tcc.card_name ~ '^(1[a-zA-Z]|2[a-eA-E])' ${teacherFilter} ${dateFilter}
         ORDER BY tcc.completed_at DESC`;
       const result = await queryDatabase(query, []);
       return result.rows;
     }
 
     case 'pivot': {
-      // 支點卡片：卡片名稱以 '2', '3', '4' 開頭
+      // 支點卡片：2d ~ 4f
       const query = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at
         FROM teacher_card_completions tcc
         INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
-        WHERE tcc.card_name ~ '^[234][a-zA-Z]' ${teacherFilter} ${dateFilter}
+        WHERE tcc.card_name ~ '^(2[d-zD-Z]|3[a-zA-Z]|4[a-fA-F])' ${teacherFilter} ${dateFilter}
         ORDER BY tcc.completed_at DESC`;
       const result = await queryDatabase(query, []);
       return result.rows;
     }
 
     case 'breath': {
-      // 氣息卡片：卡片名稱以 '5', '6' 開頭
+      // 氣息卡片：5a ~ 7g
       const query = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at
         FROM teacher_card_completions tcc
         INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
-        WHERE tcc.card_name ~ '^[56][a-zA-Z]' ${teacherFilter} ${dateFilter}
+        WHERE tcc.card_name ~ '^(5[a-zA-Z]|6[a-zA-Z]|7[a-gA-G])' ${teacherFilter} ${dateFilter}
         ORDER BY tcc.completed_at DESC`;
       const result = await queryDatabase(query, []);
       return result.rows;
     }
 
     case 'other': {
-      // 其他卡片：不符合 1-6 開頭的規則
+      // 其他卡片：不符合 1a~2e, 2d~4f, 5a~7g 的規則
       const query = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at
         FROM teacher_card_completions tcc
         INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
-        WHERE tcc.card_name !~ '^[1-6][a-zA-Z]' ${teacherFilter} ${dateFilter}
+        WHERE tcc.card_name !~ '^(1[a-zA-Z]|2[a-zA-Z]|3[a-zA-Z]|4[a-fA-F]|5[a-zA-Z]|6[a-zA-Z]|7[a-gA-G])' ${teacherFilter} ${dateFilter}
         ORDER BY tcc.completed_at DESC`;
       const result = await queryDatabase(query, []);
       return result.rows;
