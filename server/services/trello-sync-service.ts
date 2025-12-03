@@ -755,7 +755,7 @@ export async function getWeeklyCardDetails(options: {
 
 /**
  * 取得老師的學員進度列表（按學員分組）
- * 包含方案類型、完課狀態、新學員標記等資訊
+ * 包含備註、階段狀態、新學員標記等資訊
  */
 export async function getTeacherStudentProgress(teacherId: string): Promise<any[]> {
   const result = await queryDatabase(
@@ -764,7 +764,7 @@ export async function getTeacherStudentProgress(teacherId: string): Promise<any[
       tcp.student_email,
       tcp.cards_completed,
       tcp.total_cards,
-      tcp.course_type,
+      tcp.notes,
       tcp.track_completed,
       tcp.track_completed_at,
       tcp.pivot_completed,
@@ -783,20 +783,14 @@ export async function getTeacherStudentProgress(teacherId: string): Promise<any[
         ) >= NOW() - INTERVAL '14 days' THEN true
         ELSE false
       END as is_new_student,
-      -- 計算完課狀態
+      -- 計算當前階段（軌道1-10張, 支點11-20張, 氣息21-37張）
       CASE
-        WHEN tcp.course_type = 'full' AND tcp.breath_completed THEN 'completed'
-        WHEN tcp.course_type = '2/3' AND tcp.pivot_completed THEN 'completed'
-        WHEN tcp.course_type = '1/3' AND tcp.track_completed THEN 'completed'
-        WHEN tcp.cards_completed > 0 THEN 'in_progress'
+        WHEN tcp.breath_completed THEN 'completed'
+        WHEN tcp.pivot_completed THEN 'breath'
+        WHEN tcp.track_completed THEN 'pivot'
+        WHEN tcp.cards_completed > 0 THEN 'track'
         ELSE 'not_started'
-      END as completion_status,
-      -- 計算該方案應完成的卡片數
-      CASE
-        WHEN tcp.course_type = '1/3' THEN 9
-        WHEN tcp.course_type = '2/3' THEN 20
-        ELSE 37
-      END as target_cards,
+      END as current_stage,
       -- 計算最近一週完成的卡片數
       (
         SELECT COUNT(*)
@@ -837,6 +831,16 @@ export async function getTeacherStudentProgress(teacherId: string): Promise<any[
   );
 
   return result.rows;
+}
+
+/**
+ * 更新學員備註
+ */
+export async function updateStudentNotes(progressId: string, notes: string): Promise<void> {
+  await queryDatabase(
+    `UPDATE teacher_course_progress SET notes = $1, updated_at = NOW() WHERE id = $2`,
+    [notes || null, progressId]
+  );
 }
 
 /**

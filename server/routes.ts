@@ -10884,5 +10884,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // PUT - 更新學員備註
+  app.put('/api/trello/progress/:progressId/notes', isAuthenticated, async (req, res) => {
+    try {
+      const trelloSyncService = await import('./services/trello-sync-service');
+      const { progressId } = req.params;
+      const { notes } = req.body;
+
+      await trelloSyncService.updateStudentNotes(progressId, notes);
+
+      res.json({
+        success: true,
+        message: '備註已更新',
+      });
+    } catch (error: any) {
+      console.error('更新學員備註失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   return httpServer;
 }
