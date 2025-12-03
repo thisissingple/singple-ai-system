@@ -845,25 +845,81 @@ export async function updateStudentNotes(progressId: string, notes: string): Pro
 
 /**
  * 取得老師進度總覽（彙總）
+ * @param startDate 開始日期（可選）
+ * @param endDate 結束日期（可選）
  */
-export async function getTeacherProgressSummary(): Promise<any[]> {
+export async function getTeacherProgressSummary(startDate?: string, endDate?: string): Promise<any[]> {
+  // 卡片分類規則：
+  // 軌道 (track): 卡片名稱以 '1' 開頭（1a, 1b, 1c, 1d）
+  // 支點 (pivot): 卡片名稱以 '2', '3', '4' 開頭
+  // 氣息 (breath): 卡片名稱以 '5', '6' 開頭
+  // 其他 (other): 不符合上述規則的卡片
+
+  // 如果沒有日期參數，返回全部累計數據（從所有卡片完成記錄中計算）
+  if (!startDate || !endDate) {
+    const result = await queryDatabase(
+      `SELECT
+        tcp.teacher_id,
+        COALESCE(bi.display_name, u.first_name, '未分配') as teacher_name,
+        COUNT(DISTINCT tcp.id) as total_students,
+        COUNT(tcc.id) as total_cards_completed,
+        COUNT(CASE WHEN tcc.card_name ~ '^1[a-zA-Z]' THEN 1 END) as track_count,
+        COUNT(CASE WHEN tcc.card_name ~ '^[234][a-zA-Z]' THEN 1 END) as pivot_count,
+        COUNT(CASE WHEN tcc.card_name ~ '^[56][a-zA-Z]' THEN 1 END) as breath_count,
+        COUNT(CASE WHEN tcc.card_name !~ '^[1-6][a-zA-Z]' THEN 1 END) as other_count,
+        SUM(CASE WHEN tcp.track_completed THEN 1 ELSE 0 END) as track_completed_count,
+        SUM(CASE WHEN tcp.pivot_completed THEN 1 ELSE 0 END) as pivot_completed_count,
+        SUM(CASE WHEN tcp.breath_completed THEN 1 ELSE 0 END) as breath_completed_count,
+        SUM(CASE WHEN tcp.breath_completed THEN 0 ELSE 1 END) as in_progress_count
+      FROM teacher_course_progress tcp
+      LEFT JOIN teacher_card_completions tcc ON tcc.progress_id = tcp.id
+      LEFT JOIN users u ON tcp.teacher_id = u.id
+      LEFT JOIN business_identities bi ON u.id = bi.user_id
+        AND bi.identity_type = 'teacher' AND bi.is_active = true
+      GROUP BY tcp.teacher_id, teacher_name
+      ORDER BY total_students DESC`,
+      []
+    );
+    return result.rows;
+  }
+
+  // 有日期參數，根據指定期間計算數據
+  // 計算該期間內有交作業的學員數和卡片數
   const result = await queryDatabase(
-    `SELECT
-      tcp.teacher_id,
-      COALESCE(bi.display_name, u.first_name, '未分配') as teacher_name,
-      COUNT(tcp.id) as total_students,
-      SUM(tcp.cards_completed) as total_cards_completed,
-      SUM(CASE WHEN tcp.track_completed THEN 1 ELSE 0 END) as track_completed_count,
-      SUM(CASE WHEN tcp.pivot_completed THEN 1 ELSE 0 END) as pivot_completed_count,
-      SUM(CASE WHEN tcp.breath_completed THEN 1 ELSE 0 END) as breath_completed_count,
-      SUM(CASE WHEN tcp.breath_completed THEN 0 ELSE 1 END) as in_progress_count
-    FROM teacher_course_progress tcp
-    LEFT JOIN users u ON tcp.teacher_id = u.id
-    LEFT JOIN business_identities bi ON u.id = bi.user_id
-      AND bi.identity_type = 'teacher' AND bi.is_active = true
-    GROUP BY tcp.teacher_id, teacher_name
+    `WITH period_stats AS (
+      SELECT
+        tcp.teacher_id,
+        COALESCE(bi.display_name, u.first_name, '未分配') as teacher_name,
+        COUNT(DISTINCT tcp.id) as total_students,
+        COUNT(tcc.id) as total_cards_completed,
+        COUNT(CASE WHEN tcc.card_name ~ '^1[a-zA-Z]' THEN 1 END) as track_count,
+        COUNT(CASE WHEN tcc.card_name ~ '^[234][a-zA-Z]' THEN 1 END) as pivot_count,
+        COUNT(CASE WHEN tcc.card_name ~ '^[56][a-zA-Z]' THEN 1 END) as breath_count,
+        COUNT(CASE WHEN tcc.card_name !~ '^[1-6][a-zA-Z]' THEN 1 END) as other_count
+      FROM teacher_card_completions tcc
+      JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
+      LEFT JOIN users u ON tcp.teacher_id = u.id
+      LEFT JOIN business_identities bi ON u.id = bi.user_id
+        AND bi.identity_type = 'teacher' AND bi.is_active = true
+      WHERE tcc.completed_at >= $1 AND tcc.completed_at < $2::date + INTERVAL '1 day'
+      GROUP BY tcp.teacher_id, teacher_name
+    )
+    SELECT
+      teacher_id,
+      teacher_name,
+      total_students,
+      total_cards_completed,
+      track_count,
+      pivot_count,
+      breath_count,
+      other_count,
+      0 as track_completed_count,
+      0 as pivot_completed_count,
+      0 as breath_completed_count,
+      total_students as in_progress_count
+    FROM period_stats
     ORDER BY total_students DESC`,
-    []
+    [startDate, endDate]
   );
 
   return result.rows;
@@ -919,78 +975,164 @@ export async function getProgressDetails(
     }
 
     case 'cardChange': {
-      // 卡片週變化：本週新完成的卡片
-      // 使用週四~週三的週期
+      // 卡片週變化：顯示本週和上週的卡片對比
+      // 計算本週和上週的日期範圍（週四~週三）
+      const today = new Date();
+      const dayOfWeek = today.getDay(); // 0=週日, 1=週一, ...
+      // 計算距離上一個週四的天數
+      const daysFromThursday = (dayOfWeek + 3) % 7; // 週四=0, 週五=1, ..., 週三=6
+
+      // 本週週四
+      const thisWeekThursday = new Date(today);
+      thisWeekThursday.setDate(today.getDate() - daysFromThursday);
+      thisWeekThursday.setHours(0, 0, 0, 0);
+
+      // 本週週三（週四+6天）
+      const thisWeekWednesday = new Date(thisWeekThursday);
+      thisWeekWednesday.setDate(thisWeekThursday.getDate() + 6);
+
+      // 上週週四和週三
+      const lastWeekThursday = new Date(thisWeekThursday);
+      lastWeekThursday.setDate(thisWeekThursday.getDate() - 7);
+      const lastWeekWednesday = new Date(lastWeekThursday);
+      lastWeekWednesday.setDate(lastWeekThursday.getDate() + 6);
+
+      const formatDate = (d: Date) => d.toISOString().split('T')[0];
+
+      // 查詢本週卡片
+      const thisWeekQuery = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at, 'thisWeek' as period
+        FROM teacher_card_completions tcc
+        INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
+        WHERE tcc.completed_at >= '${formatDate(thisWeekThursday)}'
+          AND tcc.completed_at < '${formatDate(thisWeekWednesday)}'::date + INTERVAL '1 day'
+          ${teacherFilter}
+        ORDER BY tcc.completed_at DESC`;
+
+      // 查詢上週卡片
+      const lastWeekQuery = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at, 'lastWeek' as period
+        FROM teacher_card_completions tcc
+        INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
+        WHERE tcc.completed_at >= '${formatDate(lastWeekThursday)}'
+          AND tcc.completed_at < '${formatDate(lastWeekWednesday)}'::date + INTERVAL '1 day'
+          ${teacherFilter}
+        ORDER BY tcc.completed_at DESC`;
+
+      const [thisWeekResult, lastWeekResult] = await Promise.all([
+        queryDatabase(thisWeekQuery, []),
+        queryDatabase(lastWeekQuery, [])
+      ]);
+
+      // 合併結果，本週在前，上週在後
+      return [
+        ...thisWeekResult.rows.map((r: any) => ({ ...r, period: 'thisWeek', periodLabel: '本週' })),
+        ...lastWeekResult.rows.map((r: any) => ({ ...r, period: 'lastWeek', periodLabel: '上週' }))
+      ];
+    }
+
+    case 'studentChange': {
+      // 學員變化：顯示本週和上週的學員對比
+      const today = new Date();
+      const dayOfWeek = today.getDay();
+      const daysFromThursday = (dayOfWeek + 3) % 7;
+
+      const thisWeekThursday = new Date(today);
+      thisWeekThursday.setDate(today.getDate() - daysFromThursday);
+      thisWeekThursday.setHours(0, 0, 0, 0);
+
+      const thisWeekWednesday = new Date(thisWeekThursday);
+      thisWeekWednesday.setDate(thisWeekThursday.getDate() + 6);
+
+      const lastWeekThursday = new Date(thisWeekThursday);
+      lastWeekThursday.setDate(thisWeekThursday.getDate() - 7);
+      const lastWeekWednesday = new Date(lastWeekThursday);
+      lastWeekWednesday.setDate(lastWeekThursday.getDate() + 6);
+
+      const formatDate = (d: Date) => d.toISOString().split('T')[0];
+
+      // 查詢本週活躍學員
+      const thisWeekQuery = `SELECT DISTINCT tcp.student_email,
+          COUNT(tcc.id) as cards_this_period
+        FROM teacher_course_progress tcp
+        INNER JOIN teacher_card_completions tcc ON tcc.progress_id = tcp.id
+        WHERE tcc.completed_at >= '${formatDate(thisWeekThursday)}'
+          AND tcc.completed_at < '${formatDate(thisWeekWednesday)}'::date + INTERVAL '1 day'
+          ${teacherFilter}
+        GROUP BY tcp.student_email`;
+
+      // 查詢上週活躍學員
+      const lastWeekQuery = `SELECT DISTINCT tcp.student_email,
+          COUNT(tcc.id) as cards_this_period
+        FROM teacher_course_progress tcp
+        INNER JOIN teacher_card_completions tcc ON tcc.progress_id = tcp.id
+        WHERE tcc.completed_at >= '${formatDate(lastWeekThursday)}'
+          AND tcc.completed_at < '${formatDate(lastWeekWednesday)}'::date + INTERVAL '1 day'
+          ${teacherFilter}
+        GROUP BY tcp.student_email`;
+
+      const [thisWeekResult, lastWeekResult] = await Promise.all([
+        queryDatabase(thisWeekQuery, []),
+        queryDatabase(lastWeekQuery, [])
+      ]);
+
+      const thisWeekStudents = new Set(thisWeekResult.rows.map((r: any) => r.student_email));
+      const lastWeekStudents = new Set(lastWeekResult.rows.map((r: any) => r.student_email));
+
+      // 合併結果
+      return [
+        ...thisWeekResult.rows.map((r: any) => ({
+          ...r,
+          period: 'thisWeek',
+          periodLabel: '本週',
+          status: lastWeekStudents.has(r.student_email) ? '持續' : '新增'
+        })),
+        ...lastWeekResult.rows.map((r: any) => ({
+          ...r,
+          period: 'lastWeek',
+          periodLabel: '上週',
+          status: thisWeekStudents.has(r.student_email) ? '持續' : '減少'
+        }))
+      ];
+    }
+
+    case 'track': {
+      // 軌道卡片：卡片名稱以 '1' 開頭（1a, 1b, 1c, 1d）
       const query = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at
         FROM teacher_card_completions tcc
         INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
-        WHERE 1=1 ${teacherFilter} ${dateFilter}
+        WHERE tcc.card_name ~ '^1[a-zA-Z]' ${teacherFilter} ${dateFilter}
         ORDER BY tcc.completed_at DESC`;
       const result = await queryDatabase(query, []);
       return result.rows;
     }
 
-    case 'studentChange': {
-      // 學員變化：比較兩個時期的學員差異
-      // 簡化版：顯示該期間有新完成卡片的學員
-      const query = startDate && endDate
-        ? `SELECT tcp.id, tcp.student_email, tcp.cards_completed, tcp.total_cards,
-             tcp.track_completed, tcp.pivot_completed, tcp.breath_completed,
-             'active' as change_type
-           FROM teacher_course_progress tcp
-           INNER JOIN teacher_card_completions tcc ON tcc.progress_id = tcp.id
-           WHERE 1=1 ${teacherFilter}
-             AND tcc.completed_at >= '${startDate}' AND tcc.completed_at < '${endDate}'::date + INTERVAL '1 day'
-           GROUP BY tcp.id
-           ORDER BY tcp.cards_completed DESC`
-        : `SELECT tcp.id, tcp.student_email, tcp.cards_completed, tcp.total_cards,
-             tcp.track_completed, tcp.pivot_completed, tcp.breath_completed
-           FROM teacher_course_progress tcp
-           WHERE 1=1 ${teacherFilter}
-           ORDER BY tcp.cards_completed DESC`;
-      const result = await queryDatabase(query, []);
-      return result.rows;
-    }
-
-    case 'track': {
-      // 軌道完成的學員
-      const query = `SELECT tcp.id, tcp.student_email, tcp.cards_completed, tcp.track_completed_at as completed_at
-        FROM teacher_course_progress tcp
-        WHERE tcp.track_completed = true ${teacherFilter}
-        ${startDate && endDate ? `AND tcp.track_completed_at >= '${startDate}' AND tcp.track_completed_at < '${endDate}'::date + INTERVAL '1 day'` : ''}
-        ORDER BY tcp.track_completed_at DESC NULLS LAST`;
-      const result = await queryDatabase(query, []);
-      return result.rows;
-    }
-
     case 'pivot': {
-      // 支點完成的學員
-      const query = `SELECT tcp.id, tcp.student_email, tcp.cards_completed, tcp.pivot_completed_at as completed_at
-        FROM teacher_course_progress tcp
-        WHERE tcp.pivot_completed = true ${teacherFilter}
-        ${startDate && endDate ? `AND tcp.pivot_completed_at >= '${startDate}' AND tcp.pivot_completed_at < '${endDate}'::date + INTERVAL '1 day'` : ''}
-        ORDER BY tcp.pivot_completed_at DESC NULLS LAST`;
+      // 支點卡片：卡片名稱以 '2', '3', '4' 開頭
+      const query = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at
+        FROM teacher_card_completions tcc
+        INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
+        WHERE tcc.card_name ~ '^[234][a-zA-Z]' ${teacherFilter} ${dateFilter}
+        ORDER BY tcc.completed_at DESC`;
       const result = await queryDatabase(query, []);
       return result.rows;
     }
 
     case 'breath': {
-      // 氣息完成的學員
-      const query = `SELECT tcp.id, tcp.student_email, tcp.cards_completed, tcp.breath_completed_at as completed_at
-        FROM teacher_course_progress tcp
-        WHERE tcp.breath_completed = true ${teacherFilter}
-        ${startDate && endDate ? `AND tcp.breath_completed_at >= '${startDate}' AND tcp.breath_completed_at < '${endDate}'::date + INTERVAL '1 day'` : ''}
-        ORDER BY tcp.breath_completed_at DESC NULLS LAST`;
+      // 氣息卡片：卡片名稱以 '5', '6' 開頭
+      const query = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at
+        FROM teacher_card_completions tcc
+        INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
+        WHERE tcc.card_name ~ '^[56][a-zA-Z]' ${teacherFilter} ${dateFilter}
+        ORDER BY tcc.completed_at DESC`;
       const result = await queryDatabase(query, []);
       return result.rows;
     }
 
     case 'other': {
-      // 非軌道/支點/氣息的卡片（card_number > 37）
+      // 其他卡片：不符合 1-6 開頭的規則
       const query = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at
         FROM teacher_card_completions tcc
         INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
-        WHERE tcc.card_number > 37 ${teacherFilter} ${dateFilter}
+        WHERE tcc.card_name !~ '^[1-6][a-zA-Z]' ${teacherFilter} ${dateFilter}
         ORDER BY tcc.completed_at DESC`;
       const result = await queryDatabase(query, []);
       return result.rows;

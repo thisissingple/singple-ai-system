@@ -10823,12 +10823,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // GET - 取得老師進度總覽
+  // GET - 取得老師進度總覽（支援日期篩選）
   app.get('/api/trello/teacher-summary', isAuthenticated, async (req, res) => {
     try {
       const trelloSyncService = await import('./services/trello-sync-service');
+      const { startDate, endDate } = req.query;
 
-      const summary = await trelloSyncService.getTeacherProgressSummary();
+      const summary = await trelloSyncService.getTeacherProgressSummary(
+        startDate as string | undefined,
+        endDate as string | undefined
+      );
 
       res.json({
         success: true,
