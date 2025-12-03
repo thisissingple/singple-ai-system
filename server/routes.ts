@@ -10840,6 +10840,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET - 取得學員進度狀況的詳細資料（支援時間區間過濾）
+  app.get('/api/trello/progress-details', isAuthenticated, async (req, res) => {
+    try {
+      const { type, teacherId, startDate, endDate } = req.query;
+
+      if (!type) {
+        return res.status(400).json({ success: false, error: 'Missing type parameter' });
+      }
+
+      const trelloSyncService = await import('./services/trello-sync-service');
+      const data = await trelloSyncService.getProgressDetails(
+        type as string,
+        teacherId as string | undefined,
+        startDate as string | undefined,
+        endDate as string | undefined
+      );
+
+      res.json({
+        success: true,
+        data,
+      });
+    } catch (error: any) {
+      console.error('取得進度詳細資料失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // GET - 取得老師某週的卡片完成明細
   app.get('/api/trello/weekly-cards/:teacherId', isAuthenticated, async (req, res) => {
     try {

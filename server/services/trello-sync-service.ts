@@ -869,6 +869,138 @@ export async function getTeacherProgressSummary(): Promise<any[]> {
   return result.rows;
 }
 
+/**
+ * 取得學員進度狀況的詳細資料（支援時間區間過濾）
+ */
+export async function getProgressDetails(
+  type: string,
+  teacherId?: string,
+  startDate?: string,
+  endDate?: string
+): Promise<any[]> {
+  // 構建日期過濾條件
+  const dateFilter = startDate && endDate
+    ? `AND tcc.completed_at >= '${startDate}' AND tcc.completed_at < '${endDate}'::date + INTERVAL '1 day'`
+    : '';
+
+  const teacherFilter = teacherId
+    ? `AND tcp.teacher_id = '${teacherId}'`
+    : '';
+
+  switch (type) {
+    case 'students': {
+      // 學員清單：該期間有交作業的學員
+      const query = startDate && endDate
+        ? `SELECT DISTINCT tcp.id, tcp.student_email, tcp.cards_completed, tcp.total_cards,
+             tcp.track_completed, tcp.pivot_completed, tcp.breath_completed
+           FROM teacher_course_progress tcp
+           INNER JOIN teacher_card_completions tcc ON tcc.progress_id = tcp.id
+           WHERE 1=1 ${teacherFilter}
+             AND tcc.completed_at >= '${startDate}' AND tcc.completed_at < '${endDate}'::date + INTERVAL '1 day'
+           ORDER BY tcp.cards_completed DESC`
+        : `SELECT tcp.id, tcp.student_email, tcp.cards_completed, tcp.total_cards,
+             tcp.track_completed, tcp.pivot_completed, tcp.breath_completed
+           FROM teacher_course_progress tcp
+           WHERE 1=1 ${teacherFilter}
+           ORDER BY tcp.cards_completed DESC`;
+      const result = await queryDatabase(query, []);
+      return result.rows;
+    }
+
+    case 'cards': {
+      // 完成卡片清單
+      const query = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at
+        FROM teacher_card_completions tcc
+        INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
+        WHERE 1=1 ${teacherFilter} ${dateFilter}
+        ORDER BY tcc.completed_at DESC`;
+      const result = await queryDatabase(query, []);
+      return result.rows;
+    }
+
+    case 'cardChange': {
+      // 卡片週變化：本週新完成的卡片
+      // 使用週四~週三的週期
+      const query = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at
+        FROM teacher_card_completions tcc
+        INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
+        WHERE 1=1 ${teacherFilter} ${dateFilter}
+        ORDER BY tcc.completed_at DESC`;
+      const result = await queryDatabase(query, []);
+      return result.rows;
+    }
+
+    case 'studentChange': {
+      // 學員變化：比較兩個時期的學員差異
+      // 簡化版：顯示該期間有新完成卡片的學員
+      const query = startDate && endDate
+        ? `SELECT tcp.id, tcp.student_email, tcp.cards_completed, tcp.total_cards,
+             tcp.track_completed, tcp.pivot_completed, tcp.breath_completed,
+             'active' as change_type
+           FROM teacher_course_progress tcp
+           INNER JOIN teacher_card_completions tcc ON tcc.progress_id = tcp.id
+           WHERE 1=1 ${teacherFilter}
+             AND tcc.completed_at >= '${startDate}' AND tcc.completed_at < '${endDate}'::date + INTERVAL '1 day'
+           GROUP BY tcp.id
+           ORDER BY tcp.cards_completed DESC`
+        : `SELECT tcp.id, tcp.student_email, tcp.cards_completed, tcp.total_cards,
+             tcp.track_completed, tcp.pivot_completed, tcp.breath_completed
+           FROM teacher_course_progress tcp
+           WHERE 1=1 ${teacherFilter}
+           ORDER BY tcp.cards_completed DESC`;
+      const result = await queryDatabase(query, []);
+      return result.rows;
+    }
+
+    case 'track': {
+      // 軌道完成的學員
+      const query = `SELECT tcp.id, tcp.student_email, tcp.cards_completed, tcp.track_completed_at as completed_at
+        FROM teacher_course_progress tcp
+        WHERE tcp.track_completed = true ${teacherFilter}
+        ${startDate && endDate ? `AND tcp.track_completed_at >= '${startDate}' AND tcp.track_completed_at < '${endDate}'::date + INTERVAL '1 day'` : ''}
+        ORDER BY tcp.track_completed_at DESC NULLS LAST`;
+      const result = await queryDatabase(query, []);
+      return result.rows;
+    }
+
+    case 'pivot': {
+      // 支點完成的學員
+      const query = `SELECT tcp.id, tcp.student_email, tcp.cards_completed, tcp.pivot_completed_at as completed_at
+        FROM teacher_course_progress tcp
+        WHERE tcp.pivot_completed = true ${teacherFilter}
+        ${startDate && endDate ? `AND tcp.pivot_completed_at >= '${startDate}' AND tcp.pivot_completed_at < '${endDate}'::date + INTERVAL '1 day'` : ''}
+        ORDER BY tcp.pivot_completed_at DESC NULLS LAST`;
+      const result = await queryDatabase(query, []);
+      return result.rows;
+    }
+
+    case 'breath': {
+      // 氣息完成的學員
+      const query = `SELECT tcp.id, tcp.student_email, tcp.cards_completed, tcp.breath_completed_at as completed_at
+        FROM teacher_course_progress tcp
+        WHERE tcp.breath_completed = true ${teacherFilter}
+        ${startDate && endDate ? `AND tcp.breath_completed_at >= '${startDate}' AND tcp.breath_completed_at < '${endDate}'::date + INTERVAL '1 day'` : ''}
+        ORDER BY tcp.breath_completed_at DESC NULLS LAST`;
+      const result = await queryDatabase(query, []);
+      return result.rows;
+    }
+
+    case 'other': {
+      // 非軌道/支點/氣息的卡片（card_number > 37）
+      const query = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at
+        FROM teacher_card_completions tcc
+        INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
+        WHERE tcc.card_number > 37 ${teacherFilter} ${dateFilter}
+        ORDER BY tcc.completed_at DESC`;
+      const result = await queryDatabase(query, []);
+      return result.rows;
+    }
+
+    default:
+      return [];
+  }
+}
+
 // 定時同步（每小時）
 let syncInterval: NodeJS.Timeout | null = null;
 
@@ -909,6 +1041,7 @@ export default {
   getTeacherProgressSummary,
   getWeeklyCardDetails,
   getTeacherStudentProgress,
+  getProgressDetails,
   startPeriodicSync,
   stopPeriodicSync,
 };
