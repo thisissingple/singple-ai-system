@@ -448,6 +448,7 @@ See [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md) for detailed progress tracking.
 | Student Knowledge Base | [`docs/STUDENT_KNOWLEDGE_BASE_SYSTEM.md`](docs/STUDENT_KNOWLEDGE_BASE_SYSTEM.md) | student, sync, batch |
 | PostgreSQL 連線問題 | [`PG_ARCHITECTURE_DECISION.md`](PG_ARCHITECTURE_DECISION.md) | pg, supabase, cache |
 | KPI 計算 | [`docs/AI_KPI_MODIFICATION_GUIDE.md`](docs/AI_KPI_MODIFICATION_GUIDE.md) | kpi, formula, metric |
+| Zeabur 部署失敗 | [`docs/ZEABUR_DEPLOYMENT_ISSUES.md`](docs/ZEABUR_DEPLOYMENT_ISSUES.md) | zeabur, deploy, removed, NotTriggerScaleUp |
 
 ### 違規行為（禁止）
 
