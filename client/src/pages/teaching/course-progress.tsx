@@ -177,7 +177,7 @@ interface BoardsStatus {
 
 export default function CourseProgressPage() {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState('students');
+  const [activeTab, setActiveTab] = useState('teachers');
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [progress, setProgress] = useState<CourseProgress[]>([]);
@@ -1011,13 +1011,13 @@ export default function CourseProgressPage() {
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
-            <TabsTrigger value="students" className="gap-2">
-              <Users className="w-4 h-4" />
-              學員進度
-            </TabsTrigger>
             <TabsTrigger value="teachers" className="gap-2">
               <TrendingUp className="w-4 h-4" />
               老師總覽
+            </TabsTrigger>
+            <TabsTrigger value="students" className="gap-2">
+              <Users className="w-4 h-4" />
+              學員進度
             </TabsTrigger>
             <TabsTrigger value="boards" className="gap-2">
               <LayoutGrid className="w-4 h-4" />
@@ -1181,6 +1181,105 @@ export default function CourseProgressPage() {
 
           {/* 老師總覽 Tab - 階層式卡片設計 */}
           <TabsContent value="teachers" className="space-y-4">
+            {/* KPI 對比表 */}
+            {teacherSummary.length > 0 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5" />
+                    老師 KPI 對比
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/50">
+                          <TableHead className="w-24">老師</TableHead>
+                          <TableHead className="w-20 text-center">學員數</TableHead>
+                          <TableHead className="w-20 text-center">卡片數</TableHead>
+                          <TableHead className="w-24 text-center">卡片週變化</TableHead>
+                          <TableHead className="w-24 text-center">學員變化</TableHead>
+                          <TableHead className="w-16 text-center">軌道</TableHead>
+                          <TableHead className="w-16 text-center">支點</TableHead>
+                          <TableHead className="w-16 text-center">氣息</TableHead>
+                          <TableHead className="w-16 text-center">其他</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {teacherSummary.map((teacher) => {
+                          const teacherWeeks = groupedWeeklyProgress[teacher.teacher_name] || [];
+                          // 計算本週卡片數
+                          const thisWeekCards = teacherWeeks.length > 0 ? Number(teacherWeeks[0]?.cards_completed || 0) : 0;
+                          const lastWeekCards = teacherWeeks.length > 1 ? Number(teacherWeeks[1]?.cards_completed || 0) : 0;
+                          const cardWeekChange = thisWeekCards - lastWeekCards;
+                          // 計算本週學員數變化
+                          const thisWeekStudents = teacherWeeks.length > 0 ? Number(teacherWeeks[0]?.students_active || 0) : 0;
+                          const lastWeekStudents = teacherWeeks.length > 1 ? Number(teacherWeeks[1]?.students_active || 0) : 0;
+                          const studentWeekChange = thisWeekStudents - lastWeekStudents;
+                          // 計算「其他」（總完成卡片 - 軌道11 - 支點15 - 氣息11 = 總數 - 37 * 完課學員數）
+                          // 更精確算法：其他 = 總卡片 - (軌道完成*11 + 支點完成*(11+15) + 氣息完成*(11+15+11))
+                          // 但這需要知道每個階段完成多少卡片，簡化版：
+                          // 軌道完成的學員都至少有 11 張，支點完成至少 26 張，氣息完成至少 37 張
+                          const estimatedMainCards =
+                            (teacher.track_completed_count || 0) * 11 +
+                            (teacher.pivot_completed_count || 0) * 15 +
+                            (teacher.breath_completed_count || 0) * 11;
+                          const otherCards = Math.max(0, (teacher.total_cards_completed || 0) - estimatedMainCards);
+
+                          return (
+                            <TableRow key={teacher.teacher_id || 'unassigned'} className="hover:bg-muted/30">
+                              <TableCell className="font-medium">{teacher.teacher_name}</TableCell>
+                              <TableCell className="text-center">{teacher.total_students}</TableCell>
+                              <TableCell className="text-center font-semibold">{teacher.total_cards_completed}</TableCell>
+                              <TableCell className="text-center">
+                                {cardWeekChange !== 0 ? (
+                                  <span className={cardWeekChange > 0 ? 'text-green-600' : 'text-orange-600'}>
+                                    {cardWeekChange > 0 ? '+' : ''}{cardWeekChange}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                {studentWeekChange !== 0 ? (
+                                  <span className={studentWeekChange > 0 ? 'text-green-600' : 'text-orange-600'}>
+                                    {studentWeekChange > 0 ? '+' : ''}{studentWeekChange}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
+                                  {teacher.track_completed_count}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
+                                  {teacher.pivot_completed_count}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                                  {teacher.breath_completed_count}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant="outline" className="bg-gray-50 text-gray-600 border-gray-200">
+                                  {otherCards}
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <p className="text-sm text-muted-foreground">
               點擊老師卡片內的標籤切換不同視圖・週期：週四 ~ 週三
             </p>
