@@ -765,6 +765,7 @@ export async function getTeacherStudentProgress(teacherId: string): Promise<any[
       tcp.cards_completed,
       tcp.total_cards,
       tcp.notes,
+      tcp.plan_type,
       tcp.track_completed,
       tcp.track_completed_at,
       tcp.pivot_completed,
@@ -774,6 +775,21 @@ export async function getTeacherStudentProgress(teacherId: string): Promise<any[
       tcp.status,
       tcp.last_synced_at,
       tcp.created_at,
+      -- 首次完成卡片日期（加入日期）
+      (
+        SELECT MIN(completed_at)
+        FROM teacher_card_completions tcc
+        WHERE tcc.progress_id = tcp.id
+      ) as first_card_completed_at,
+      -- 加入天數
+      COALESCE(
+        EXTRACT(DAY FROM NOW() - (
+          SELECT MIN(completed_at)
+          FROM teacher_card_completions tcc
+          WHERE tcc.progress_id = tcp.id
+        ))::INTEGER,
+        0
+      ) as days_since_join,
       -- 判斷是否為新學員（最早完成卡片在兩週內）
       CASE
         WHEN (
@@ -811,7 +827,47 @@ export async function getTeacherStudentProgress(teacherId: string): Promise<any[
         SELECT MAX(completed_at)
         FROM teacher_card_completions tcc
         WHERE tcc.progress_id = tcp.id
-      ) as last_card_completed_at
+      ) as last_card_completed_at,
+      -- 停滯天數（距離最後完成卡片的天數）
+      COALESCE(
+        EXTRACT(DAY FROM NOW() - (
+          SELECT MAX(completed_at)
+          FROM teacher_card_completions tcc
+          WHERE tcc.progress_id = tcp.id
+        ))::INTEGER,
+        999
+      ) as days_since_last_card,
+      -- 健康狀態：順利/緩慢/停滯/消失
+      CASE
+        WHEN (
+          SELECT COUNT(*)
+          FROM teacher_card_completions tcc
+          WHERE tcc.progress_id = tcp.id
+            AND tcc.completed_at >= NOW() - INTERVAL '7 days'
+        ) > 0 THEN 'healthy'
+        WHEN COALESCE(
+          EXTRACT(DAY FROM NOW() - (
+            SELECT MAX(completed_at)
+            FROM teacher_card_completions tcc
+            WHERE tcc.progress_id = tcp.id
+          ))::INTEGER, 999
+        ) < 7 THEN 'healthy'
+        WHEN COALESCE(
+          EXTRACT(DAY FROM NOW() - (
+            SELECT MAX(completed_at)
+            FROM teacher_card_completions tcc
+            WHERE tcc.progress_id = tcp.id
+          ))::INTEGER, 999
+        ) BETWEEN 7 AND 21 THEN 'slow'
+        WHEN COALESCE(
+          EXTRACT(DAY FROM NOW() - (
+            SELECT MAX(completed_at)
+            FROM teacher_card_completions tcc
+            WHERE tcc.progress_id = tcp.id
+          ))::INTEGER, 999
+        ) BETWEEN 22 AND 90 THEN 'stalled'
+        ELSE 'missing'
+      END as health_status
     FROM teacher_course_progress tcp
     WHERE tcp.teacher_id = $1
     ORDER BY
@@ -830,7 +886,33 @@ export async function getTeacherStudentProgress(teacherId: string): Promise<any[
     [teacherId]
   );
 
-  return result.rows;
+  // 計算週均速度和預估完課週數（在應用層計算更靈活）
+  return result.rows.map(student => {
+    const daysSinceJoin = Number(student.days_since_join) || 0;
+    const weeksSinceJoin = Math.max(Math.ceil(daysSinceJoin / 7), 1);
+    const cardsCompleted = Number(student.cards_completed) || 0;
+    const totalCards = Number(student.total_cards) || 37;
+    const cardsRemaining = totalCards - cardsCompleted;
+
+    // 週均速度
+    const avgCardsPerWeek = cardsCompleted > 0 ? Math.round((cardsCompleted / weeksSinceJoin) * 10) / 10 : 0;
+
+    // 預估完課週數
+    let estimatedWeeksToComplete: number | null = null;
+    if (avgCardsPerWeek > 0 && cardsRemaining > 0) {
+      estimatedWeeksToComplete = Math.ceil(cardsRemaining / avgCardsPerWeek);
+    } else if (cardsRemaining === 0) {
+      estimatedWeeksToComplete = 0; // 已完課
+    }
+
+    return {
+      ...student,
+      weeks_since_join: weeksSinceJoin,
+      avg_cards_per_week: avgCardsPerWeek,
+      estimated_weeks_to_complete: estimatedWeeksToComplete,
+      cards_remaining: cardsRemaining
+    };
+  });
 }
 
 /**
@@ -840,6 +922,20 @@ export async function updateStudentNotes(progressId: string, notes: string): Pro
   await queryDatabase(
     `UPDATE teacher_course_progress SET notes = $1, updated_at = NOW() WHERE id = $2`,
     [notes || null, progressId]
+  );
+}
+
+/**
+ * 更新學員方案類型（多選：軌道、支點、氣息）
+ */
+export async function updateStudentPlanType(progressId: string, planType: string[]): Promise<void> {
+  // 驗證只允許 track, pivot, breath
+  const validTypes = ['track', 'pivot', 'breath'];
+  const filteredTypes = planType.filter(t => validTypes.includes(t));
+
+  await queryDatabase(
+    `UPDATE teacher_course_progress SET plan_type = $1, updated_at = NOW() WHERE id = $2`,
+    [filteredTypes, progressId]
   );
 }
 

@@ -10934,5 +10934,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // PUT - 更新學員方案類型（多選：軌道、支點、氣息）
+  app.put('/api/trello/progress/:progressId/plan-type', isAuthenticated, async (req, res) => {
+    try {
+      const trelloSyncService = await import('./services/trello-sync-service');
+      const { progressId } = req.params;
+      const { planType } = req.body;
+
+      if (!Array.isArray(planType)) {
+        return res.status(400).json({ success: false, error: 'planType 必須是陣列' });
+      }
+
+      await trelloSyncService.updateStudentPlanType(progressId, planType);
+
+      res.json({
+        success: true,
+        message: '方案類型已更新',
+      });
+    } catch (error: any) {
+      console.error('更新學員方案類型失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   return httpServer;
 }

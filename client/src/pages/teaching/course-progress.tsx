@@ -206,6 +206,7 @@ interface TeacherStudentProgress {
   cards_completed: number;
   total_cards: number;
   notes: string | null;  // 備註
+  plan_type: string[];  // 方案類型（多選：軌道、支點、氣息）
   track_completed: boolean;
   track_completed_at: string | null;
   pivot_completed: boolean;
@@ -220,6 +221,15 @@ interface TeacherStudentProgress {
   cards_this_week: number;
   cards_last_week: number;
   last_card_completed_at: string | null;
+  // 新增欄位
+  first_card_completed_at: string | null;  // 首次完成卡片日期
+  days_since_join: number;  // 加入天數
+  weeks_since_join: number;  // 加入週數
+  days_since_last_card: number;  // 停滯天數
+  health_status: 'healthy' | 'slow' | 'stalled' | 'missing';  // 健康狀態
+  avg_cards_per_week: number;  // 週均速度
+  estimated_weeks_to_complete: number | null;  // 預估完課週數
+  cards_remaining: number;  // 剩餘卡片數
 }
 
 interface TrelloBoard {
@@ -296,6 +306,8 @@ export default function CourseProgressPage() {
   // 備註編輯彈窗狀態
   const [editingNotes, setEditingNotes] = useState<{ progressId: string; studentName: string; notes: string } | null>(null);
   const [savingNotes, setSavingNotes] = useState(false);
+  // 方案類型編輯狀態
+  const [savingPlanType, setSavingPlanType] = useState<string | null>(null);
 
   // 學員進度狀況 - 時間區間過濾
   type PeriodFilter = 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'all' | 'custom';
@@ -791,14 +803,21 @@ export default function CourseProgressPage() {
       case 'completed':
         students = students.filter(s => s.current_stage === 'completed');
         break;
-      case 'stalled':
-        students = students.filter(s => {
-          const days = getDaysSinceLastCard(s.last_card_completed_at);
-          return days !== null && days >= 21; // 3 週沒進度
-        });
-        break;
       case 'has_notes':
         students = students.filter(s => s.notes && s.notes.trim().length > 0);
+        break;
+      // 健康狀態篩選
+      case 'healthy':
+        students = students.filter(s => s.health_status === 'healthy');
+        break;
+      case 'slow':
+        students = students.filter(s => s.health_status === 'slow');
+        break;
+      case 'stalled':
+        students = students.filter(s => s.health_status === 'stalled');
+        break;
+      case 'missing':
+        students = students.filter(s => s.health_status === 'missing');
         break;
       default:
         // 'all' - 不過濾
@@ -832,6 +851,20 @@ export default function CourseProgressPage() {
           aVal = a.last_card_completed_at ? new Date(a.last_card_completed_at).getTime() : 0;
           bVal = b.last_card_completed_at ? new Date(b.last_card_completed_at).getTime() : 0;
           break;
+        case 'days_since_join':
+          aVal = a.days_since_join || 0;
+          bVal = b.days_since_join || 0;
+          break;
+        case 'avg_cards_per_week':
+          aVal = a.avg_cards_per_week || 0;
+          bVal = b.avg_cards_per_week || 0;
+          break;
+        case 'health_status':
+          // 健康狀態排序：順利 < 緩慢 < 停滯 < 消失
+          const healthOrder: Record<string, number> = { healthy: 0, slow: 1, stalled: 2, missing: 3 };
+          aVal = healthOrder[a.health_status] ?? 4;
+          bVal = healthOrder[b.health_status] ?? 4;
+          break;
         default:
           aVal = a.cards_completed;
           bVal = b.cards_completed;
@@ -849,18 +882,18 @@ export default function CourseProgressPage() {
   // 取得篩選後的學員統計
   const getStudentFilterStats = (teacherId: string) => {
     const students = teacherStudents[teacherId] || [];
-    const stalledCount = students.filter(s => {
-      const days = getDaysSinceLastCard(s.last_card_completed_at);
-      return days !== null && days >= 21;
-    }).length;
     return {
       total: students.length,
       newStudents: students.filter(s => s.is_new_student).length,
       completed: students.filter(s => s.current_stage === 'completed').length,
       inProgress: students.filter(s => s.current_stage !== 'completed' && s.current_stage !== 'not_started').length,
       notStarted: students.filter(s => s.current_stage === 'not_started').length,
-      stalled: stalledCount,
       hasNotes: students.filter(s => s.notes && s.notes.trim().length > 0).length,
+      // 健康狀態統計
+      healthy: students.filter(s => s.health_status === 'healthy').length,
+      slow: students.filter(s => s.health_status === 'slow').length,
+      stalled: students.filter(s => s.health_status === 'stalled').length,
+      missing: students.filter(s => s.health_status === 'missing').length,
     };
   };
 
@@ -894,6 +927,44 @@ export default function CourseProgressPage() {
     } finally {
       setSavingNotes(false);
     }
+  };
+
+  // 更新方案類型（多選）
+  const updatePlanType = async (progressId: string, planType: string[]) => {
+    setSavingPlanType(progressId);
+    try {
+      const response = await fetch(`/api/trello/progress/${progressId}/plan-type`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planType }),
+      });
+      if (!response.ok) throw new Error('儲存失敗');
+
+      // 更新本地狀態
+      setTeacherStudents(prev => {
+        const updated = { ...prev };
+        for (const teacherId in updated) {
+          updated[teacherId] = updated[teacherId].map(s =>
+            s.id === progressId ? { ...s, plan_type: planType } : s
+          );
+        }
+        return updated;
+      });
+
+      toast({ title: '方案已更新' });
+    } catch (error) {
+      toast({ title: '儲存失敗', variant: 'destructive' });
+    } finally {
+      setSavingPlanType(null);
+    }
+  };
+
+  // 切換方案類型（勾選/取消）
+  const togglePlanType = (progressId: string, currentTypes: string[], typeToToggle: string) => {
+    const newTypes = currentTypes.includes(typeToToggle)
+      ? currentTypes.filter(t => t !== typeToToggle)
+      : [...currentTypes, typeToToggle];
+    updatePlanType(progressId, newTypes);
   };
 
   // 快速標記備註
@@ -1953,9 +2024,11 @@ export default function CourseProgressPage() {
                                           )}
                                           <SelectItem value="in_progress">進行中 ({stats.inProgress})</SelectItem>
                                           <SelectItem value="completed">✓ 已完課 ({stats.completed})</SelectItem>
-                                          {stats.stalled > 0 && (
-                                            <SelectItem value="stalled">⚠️ 需關注 ({stats.stalled})</SelectItem>
-                                          )}
+                                          {/* 健康狀態篩選 */}
+                                          <SelectItem value="healthy">🟢 順利 ({stats.healthy})</SelectItem>
+                                          <SelectItem value="slow">🟡 緩慢 ({stats.slow})</SelectItem>
+                                          <SelectItem value="stalled">🟠 停滯 ({stats.stalled})</SelectItem>
+                                          <SelectItem value="missing">⚫ 消失 ({stats.missing})</SelectItem>
                                           {stats.hasNotes > 0 && (
                                             <SelectItem value="has_notes">有備註 ({stats.hasNotes})</SelectItem>
                                           )}
@@ -1969,45 +2042,88 @@ export default function CourseProgressPage() {
                                   );
                                 })()}
                                 {/* 學員表格 */}
-                                <div className="max-h-96 overflow-y-auto border rounded-lg">
+                                <div className="max-h-[calc(100vh-350px)] overflow-y-auto border rounded-lg">
                                   <Table>
-                                    <TableHeader className="sticky top-0 bg-background">
+                                    <TableHeader className="sticky top-0 bg-background z-10">
                                       <TableRow>
+                                        <TableHead
+                                          className="cursor-pointer hover:bg-muted/50 w-10 text-center"
+                                          onClick={() => toggleStudentSort(teacherId, 'health_status')}
+                                          title="健康狀態"
+                                        >
+                                          狀態 {(teacherStudentSort[teacherId]?.field === 'health_status') && (teacherStudentSort[teacherId]?.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
                                         <TableHead
                                           className="cursor-pointer hover:bg-muted/50"
                                           onClick={() => toggleStudentSort(teacherId, 'name')}
                                         >
                                           學員 {(teacherStudentSort[teacherId]?.field === 'name') && (teacherStudentSort[teacherId]?.direction === 'asc' ? '↑' : '↓')}
                                         </TableHead>
+                                        <TableHead className="w-20 text-center">方案</TableHead>
                                         <TableHead
-                                          className="cursor-pointer hover:bg-muted/50 w-24 text-center"
+                                          className="cursor-pointer hover:bg-muted/50 w-16 text-center"
+                                          onClick={() => toggleStudentSort(teacherId, 'days_since_join')}
+                                          title="加入天數"
+                                        >
+                                          加入 {(teacherStudentSort[teacherId]?.field === 'days_since_join') && (teacherStudentSort[teacherId]?.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
+                                        <TableHead
+                                          className="cursor-pointer hover:bg-muted/50 w-20 text-center"
                                           onClick={() => toggleStudentSort(teacherId, 'cards_completed')}
                                         >
                                           進度 {(teacherStudentSort[teacherId]?.field === 'cards_completed' || !teacherStudentSort[teacherId]) && (teacherStudentSort[teacherId]?.direction === 'asc' ? '↑' : '↓')}
                                         </TableHead>
+                                        <TableHead className="w-14 text-center">階段</TableHead>
                                         <TableHead
-                                          className="cursor-pointer hover:bg-muted/50 w-16 text-center"
+                                          className="cursor-pointer hover:bg-muted/50 w-12 text-center"
                                           onClick={() => toggleStudentSort(teacherId, 'cards_this_week')}
                                         >
                                           本週 {(teacherStudentSort[teacherId]?.field === 'cards_this_week') && (teacherStudentSort[teacherId]?.direction === 'asc' ? '↑' : '↓')}
                                         </TableHead>
-                                        <TableHead className="w-20">階段</TableHead>
-                                        <TableHead className="min-w-[100px]">備註</TableHead>
                                         <TableHead
-                                          className="cursor-pointer hover:bg-muted/50 w-24"
+                                          className="cursor-pointer hover:bg-muted/50 w-12 text-center"
+                                          onClick={() => toggleStudentSort(teacherId, 'avg_cards_per_week')}
+                                          title="平均每週完成"
+                                        >
+                                          週均 {(teacherStudentSort[teacherId]?.field === 'avg_cards_per_week') && (teacherStudentSort[teacherId]?.direction === 'asc' ? '↑' : '↓')}
+                                        </TableHead>
+                                        <TableHead className="w-14 text-center" title="預估完課週數">預估</TableHead>
+                                        <TableHead
+                                          className="cursor-pointer hover:bg-muted/50 w-20"
                                           onClick={() => toggleStudentSort(teacherId, 'last_completed')}
                                         >
                                           最後完成 {(teacherStudentSort[teacherId]?.field === 'last_completed') && (teacherStudentSort[teacherId]?.direction === 'asc' ? '↑' : '↓')}
                                         </TableHead>
+                                        <TableHead className="min-w-[80px]">備註</TableHead>
                                       </TableRow>
                                     </TableHeader>
                                     <TableBody>
                                       {getFilteredTeacherStudents(teacherId).map((student) => {
                                         const weekDiff = Number(student.cards_this_week) - Number(student.cards_last_week);
-                                        const daysSince = getDaysSinceLastCard(student.last_card_completed_at);
                                         const progressPercent = Math.round((student.cards_completed / student.total_cards) * 100);
+                                        const planTypes = student.plan_type || [];
+
+                                        // 健康狀態顯示
+                                        const healthIcon = {
+                                          healthy: '🟢',
+                                          slow: '🟡',
+                                          stalled: '🟠',
+                                          missing: '⚫'
+                                        }[student.health_status] || '⚪';
+                                        const healthTitle = {
+                                          healthy: '順利（7天內有進度）',
+                                          slow: '緩慢（7-21天無進度）',
+                                          stalled: '停滯（21天-3個月無進度）',
+                                          missing: '消失（超過3個月無進度）'
+                                        }[student.health_status] || '未知';
+
                                         return (
                                           <TableRow key={student.id} className={student.is_new_student ? 'bg-pink-50/50' : ''}>
+                                            {/* 健康狀態 */}
+                                            <TableCell className="text-center" title={healthTitle}>
+                                              <span className="text-base">{healthIcon}</span>
+                                            </TableCell>
+                                            {/* 學員 */}
                                             <TableCell className="font-medium">
                                               <div className="flex items-center gap-1">
                                                 {student.is_new_student && <span className="text-pink-500" title="新學員（兩週內加入）">🆕</span>}
@@ -2019,19 +2135,74 @@ export default function CourseProgressPage() {
                                                 </button>
                                               </div>
                                             </TableCell>
+                                            {/* 方案（多選 checkbox） */}
+                                            <TableCell>
+                                              <div className="flex gap-1 justify-center">
+                                                {savingPlanType === student.id ? (
+                                                  <span className="text-xs text-muted-foreground">...</span>
+                                                ) : (
+                                                  <>
+                                                    <button
+                                                      onClick={() => togglePlanType(student.id, planTypes, 'track')}
+                                                      className={`text-[10px] px-1 py-0.5 rounded border ${planTypes.includes('track') ? 'bg-purple-100 border-purple-300 text-purple-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}
+                                                      title="軌道"
+                                                    >
+                                                      軌
+                                                    </button>
+                                                    <button
+                                                      onClick={() => togglePlanType(student.id, planTypes, 'pivot')}
+                                                      className={`text-[10px] px-1 py-0.5 rounded border ${planTypes.includes('pivot') ? 'bg-yellow-100 border-yellow-300 text-yellow-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}
+                                                      title="支點"
+                                                    >
+                                                      支
+                                                    </button>
+                                                    <button
+                                                      onClick={() => togglePlanType(student.id, planTypes, 'breath')}
+                                                      className={`text-[10px] px-1 py-0.5 rounded border ${planTypes.includes('breath') ? 'bg-cyan-100 border-cyan-300 text-cyan-700' : 'bg-gray-50 border-gray-200 text-gray-400'}`}
+                                                      title="氣息"
+                                                    >
+                                                      氣
+                                                    </button>
+                                                  </>
+                                                )}
+                                              </div>
+                                            </TableCell>
+                                            {/* 加入天數 */}
+                                            <TableCell className="text-center text-sm text-muted-foreground">
+                                              <div className="flex flex-col items-center">
+                                                <span>{student.days_since_join || 0}天</span>
+                                                <span className="text-xs text-gray-400">({student.weeks_since_join || 1}週)</span>
+                                              </div>
+                                            </TableCell>
+                                            {/* 進度 */}
                                             <TableCell className="text-center">
                                               <div className="flex flex-col items-center">
                                                 <span className="font-mono text-sm">{student.cards_completed}/{student.total_cards}</span>
                                                 <Progress value={progressPercent} className="h-1 w-12 mt-1" />
                                               </div>
                                             </TableCell>
+                                            {/* 階段 */}
+                                            <TableCell>
+                                              {student.current_stage === 'completed' ? (
+                                                <Badge className="bg-green-500 text-[10px]">完</Badge>
+                                              ) : student.current_stage === 'breath' ? (
+                                                <Badge variant="outline" className="bg-cyan-100 text-[10px]">氣</Badge>
+                                              ) : student.current_stage === 'pivot' ? (
+                                                <Badge variant="outline" className="bg-yellow-100 text-[10px]">支</Badge>
+                                              ) : student.current_stage === 'track' ? (
+                                                <Badge variant="outline" className="bg-purple-100 text-[10px]">軌</Badge>
+                                              ) : (
+                                                <Badge variant="outline" className="bg-gray-100 text-[10px]">-</Badge>
+                                              )}
+                                            </TableCell>
+                                            {/* 本週 */}
                                             <TableCell className="text-center">
                                               {Number(student.cards_this_week) > 0 ? (
-                                                <span className="flex items-center justify-center gap-1">
+                                                <span className="flex items-center justify-center gap-0.5">
                                                   {student.cards_this_week}
                                                   {weekDiff !== 0 && (
-                                                    <span className={`text-xs ${weekDiff > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                                      {weekDiff > 0 ? '↑' : '↓'}{Math.abs(weekDiff)}
+                                                    <span className={`text-[10px] ${weekDiff > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                      {weekDiff > 0 ? '↑' : '↓'}
                                                     </span>
                                                   )}
                                                 </span>
@@ -2039,36 +2210,32 @@ export default function CourseProgressPage() {
                                                 <span className="text-muted-foreground">-</span>
                                               )}
                                             </TableCell>
-                                            <TableCell>
-                                              {student.current_stage === 'completed' ? (
-                                                <Badge className="bg-green-500 text-[10px]">完課</Badge>
-                                              ) : student.current_stage === 'breath' ? (
-                                                <Badge variant="outline" className="bg-cyan-100 text-[10px]">氣息</Badge>
-                                              ) : student.current_stage === 'pivot' ? (
-                                                <Badge variant="outline" className="bg-yellow-100 text-[10px]">支點</Badge>
-                                              ) : student.current_stage === 'track' ? (
-                                                <Badge variant="outline" className="bg-purple-100 text-[10px]">軌道</Badge>
+                                            {/* 週均 */}
+                                            <TableCell className="text-center text-sm">
+                                              {student.avg_cards_per_week > 0 ? (
+                                                <span className={student.avg_cards_per_week >= 2 ? 'text-green-600' : student.avg_cards_per_week >= 1 ? 'text-yellow-600' : 'text-red-600'}>
+                                                  {student.avg_cards_per_week}
+                                                </span>
                                               ) : (
-                                                <Badge variant="outline" className="bg-gray-100 text-[10px]">未開始</Badge>
+                                                <span className="text-muted-foreground">-</span>
                                               )}
                                             </TableCell>
-                                            <TableCell>
-                                              <button
-                                                onClick={() => setEditingNotes({
-                                                  progressId: student.id,
-                                                  studentName: student.student_email.replace('@trello.sync', ''),
-                                                  notes: student.notes || ''
-                                                })}
-                                                className="text-xs text-left hover:bg-muted/50 p-1 rounded w-full max-w-[120px] truncate"
-                                                title={student.notes || '點擊編輯備註'}
-                                              >
-                                                {student.notes ? (
-                                                  <span className="text-muted-foreground">{student.notes}</span>
-                                                ) : (
-                                                  <span className="text-gray-300 italic">+備註</span>
-                                                )}
-                                              </button>
+                                            {/* 預估完課 */}
+                                            <TableCell className="text-center text-sm">
+                                              {student.estimated_weeks_to_complete === 0 ? (
+                                                <span className="text-green-600">✓</span>
+                                              ) : student.estimated_weeks_to_complete !== null ? (
+                                                <span
+                                                  className={student.estimated_weeks_to_complete <= 4 ? 'text-green-600' : student.estimated_weeks_to_complete <= 8 ? 'text-yellow-600' : 'text-orange-600'}
+                                                  title={`還需 ${student.cards_remaining} 張卡片，每週需完成 ${Math.ceil(student.cards_remaining / Math.max(student.estimated_weeks_to_complete, 1))} 張`}
+                                                >
+                                                  {student.estimated_weeks_to_complete}週
+                                                </span>
+                                              ) : (
+                                                <span className="text-muted-foreground">-</span>
+                                              )}
                                             </TableCell>
+                                            {/* 最後完成 */}
                                             <TableCell className="text-muted-foreground text-sm">
                                               <div className="flex flex-col">
                                                 <span>
@@ -2076,12 +2243,30 @@ export default function CourseProgressPage() {
                                                     ? new Date(student.last_card_completed_at).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
                                                     : '-'}
                                                 </span>
-                                                {daysSince !== null && daysSince > 0 && (
-                                                  <span className={`text-xs ${daysSince > 21 ? 'text-red-500' : daysSince > 14 ? 'text-orange-500' : 'text-gray-400'}`}>
-                                                    ({daysSince}天前)
+                                                {student.days_since_last_card > 0 && student.days_since_last_card < 999 && (
+                                                  <span className={`text-[10px] ${student.days_since_last_card > 21 ? 'text-red-500' : student.days_since_last_card > 14 ? 'text-orange-500' : 'text-gray-400'}`}>
+                                                    ({student.days_since_last_card}天)
                                                   </span>
                                                 )}
                                               </div>
+                                            </TableCell>
+                                            {/* 備註 */}
+                                            <TableCell>
+                                              <button
+                                                onClick={() => setEditingNotes({
+                                                  progressId: student.id,
+                                                  studentName: student.student_email.replace('@trello.sync', ''),
+                                                  notes: student.notes || ''
+                                                })}
+                                                className="text-xs text-left hover:bg-muted/50 p-1 rounded w-full max-w-[80px] truncate"
+                                                title={student.notes || '點擊編輯備註'}
+                                              >
+                                                {student.notes ? (
+                                                  <span className="text-muted-foreground">{student.notes}</span>
+                                                ) : (
+                                                  <span className="text-gray-300 italic">+</span>
+                                                )}
+                                              </button>
                                             </TableCell>
                                           </TableRow>
                                         );
