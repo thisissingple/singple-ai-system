@@ -115,9 +115,12 @@ function formatDateShort(date: Date): string {
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
-// Helper: 格式化日期為 YYYY-MM-DD
+// Helper: 格式化日期為 YYYY-MM-DD（使用本地時區）
 function formatDateToString(date: Date): string {
-  return date.toISOString().split('T')[0];
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 interface CourseProgress {
@@ -258,6 +261,9 @@ export default function CourseProgressPage() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [teacherSummary, setTeacherSummary] = useState<TeacherSummary[]>([]);
+  const [filteredTeacherSummary, setFilteredTeacherSummary] = useState<TeacherSummary[]>([]);
+  const [comparisonTeacherSummary, setComparisonTeacherSummary] = useState<TeacherSummary[]>([]); // 對比期間的資料
+  const [loadingTeacherSummary, setLoadingTeacherSummary] = useState(false);
   const [weeklyProgress, setWeeklyProgress] = useState<WeeklyProgress[]>([]);
   const [boardsStatus, setBoardsStatus] = useState<BoardsStatus | null>(null);
   const [loadingBoards, setLoadingBoards] = useState(false);
@@ -329,8 +335,8 @@ export default function CourseProgressPage() {
   const [pendingSchedule, setPendingSchedule] = useState<string[]>([]);
 
   // 學員進度狀況 - 時間區間過濾
-  type PeriodFilter = 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'all' | 'custom';
-  const [progressPeriod, setProgressPeriod] = useState<PeriodFilter>('thisMonth');
+  type PeriodFilter = 'today' | 'yesterday' | 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth' | 'all' | 'custom';
+  const [progressPeriod, setProgressPeriod] = useState<PeriodFilter>('all');
   const [customDateRange, setCustomDateRange] = useState<{ start: string; end: string }>({
     start: '',
     end: ''
@@ -365,6 +371,66 @@ export default function CourseProgressPage() {
     field: 'completed_at',
     direction: 'desc'
   });
+
+  // AI 分析狀態（結構化資料）
+  interface LostStudent {
+    email: string;
+    prevCards: number;
+    totalProgress: number;
+    lastCardDate: string | null;
+    consistency: string;
+    avgCardsPerWeek: number;
+    isAbnormal: boolean;
+  }
+  interface NewStudent {
+    email: string;
+    cards: number;
+  }
+  interface ContinuingStudent {
+    email: string;
+    currentCards: number;
+  }
+  interface AnalysisData {
+    dateRange: {
+      current: { start: string; end: string };
+      prev: { start: string; end: string };
+    };
+    summary: {
+      currentCards: number;
+      prevCards: number;
+      cardChange: number;
+      cardChangePercent: number;
+      currentStudents: number;
+      prevStudents: number;
+      studentChange: number;
+      studentChangePercent: number;
+    };
+    lostStudents: LostStudent[];
+    continuingStudents: ContinuingStudent[];
+    newStudents: NewStudent[];
+    abnormalCount: number;
+    courseDistribution: {
+      track: number;
+      pivot: number;
+      breath: number;
+      other: number;
+    };
+    suggestionType: 'warning' | 'excellent' | null;
+  }
+  interface TeacherAIAnalysis {
+    teacherId: string;
+    teacherName: string;
+    data: AnalysisData;
+  }
+  const [aiAnalyses, setAiAnalyses] = useState<TeacherAIAnalysis[]>([]);
+  const [loadingAiAnalysis, setLoadingAiAnalysis] = useState(false);
+  const [showAiAnalysis, setShowAiAnalysis] = useState(false);
+  const [expandedLostStudents, setExpandedLostStudents] = useState<Set<string>>(new Set());
+  const [expandedNewStudents, setExpandedNewStudents] = useState<Set<string>>(new Set());
+
+  // AI 分析結果快取 - 依時段儲存
+  // Key 格式: "period" 或 "custom_startDate_endDate"
+  const [aiAnalysisCache, setAiAnalysisCache] = useState<Map<string, TeacherAIAnalysis[]>>(new Map());
 
   // 載入資料
   useEffect(() => {
@@ -401,17 +467,29 @@ export default function CourseProgressPage() {
         endDate = formatDateToString(yesterday);
         break;
       }
-      case 'last7days': {
-        const sevenDaysAgo = new Date(today);
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
-        startDate = formatDateToString(sevenDaysAgo);
-        endDate = formatDateToString(today);
+      case 'thisWeek': {
+        const currentWeek = getCurrentWeekRange();
+        startDate = formatDateToString(currentWeek.start);
+        endDate = formatDateToString(currentWeek.end);
+        break;
+      }
+      case 'lastWeek': {
+        const lastWeek = getLastWeekRange();
+        startDate = formatDateToString(lastWeek.start);
+        endDate = formatDateToString(lastWeek.end);
         break;
       }
       case 'thisMonth': {
         const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
         startDate = formatDateToString(firstOfMonth);
         endDate = formatDateToString(today);
+        break;
+      }
+      case 'lastMonth': {
+        const firstOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const lastOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+        startDate = formatDateToString(firstOfLastMonth);
+        endDate = formatDateToString(lastOfLastMonth);
         break;
       }
       case 'custom':
@@ -424,13 +502,38 @@ export default function CourseProgressPage() {
         break;
     }
 
-    // 重新載入數據
+    // 計算對比區間日期
+    const comparisonRange = getComparisonDateRange(progressPeriod, startDate, endDate);
+
+    // 只重新載入篩選資料（學員進度狀況表格），不重新載入老師卡片資料
     if (progressPeriod === 'all') {
-      loadTeacherData();
+      loadFilteredSummary();
     } else if (startDate && endDate) {
-      loadTeacherData(startDate, endDate);
+      loadFilteredSummary(
+        startDate,
+        endDate,
+        comparisonRange?.start,
+        comparisonRange?.end
+      );
     }
   }, [progressPeriod, customDateRange, activeTab]);
+
+  // 當時段改變時，自動載入快取的 AI 分析結果（如果有的話）
+  useEffect(() => {
+    if (!showAiAnalysis) return;
+
+    const cacheKey = progressPeriod === 'custom'
+      ? `custom_${customDateRange.start}_${customDateRange.end}`
+      : progressPeriod;
+
+    if (aiAnalysisCache.has(cacheKey)) {
+      // 有快取，直接載入
+      setAiAnalyses(aiAnalysisCache.get(cacheKey)!);
+    } else {
+      // 沒有快取，清空顯示（讓用戶知道需要重新分析）
+      setAiAnalyses([]);
+    }
+  }, [progressPeriod, customDateRange]);
 
   const loadData = async () => {
     setLoading(true);
@@ -467,23 +570,16 @@ export default function CourseProgressPage() {
     }
   };
 
-  const loadTeacherData = async (summaryStartDate?: string, summaryEndDate?: string) => {
+  // 載入老師卡片資料（全部資料，不受日期篩選影響）- 只在初始化或同步時呼叫
+  const loadTeacherCardData = async () => {
     try {
-      // 構建 summary URL（支援日期篩選）
-      const summaryParams = new URLSearchParams();
-      if (summaryStartDate) summaryParams.append('startDate', summaryStartDate);
-      if (summaryEndDate) summaryParams.append('endDate', summaryEndDate);
-      const summaryUrl = summaryParams.toString()
-        ? `/api/trello/teacher-summary?${summaryParams}`
-        : '/api/trello/teacher-summary';
-
-      const [summaryRes, weeklyRes] = await Promise.all([
-        fetch(summaryUrl),
+      const [allSummaryRes, weeklyRes] = await Promise.all([
+        fetch('/api/trello/teacher-summary'),
         fetch('/api/trello/teacher-weekly-progress'),
       ]);
 
-      if (summaryRes.ok) {
-        const data = await summaryRes.json();
+      if (allSummaryRes.ok) {
+        const data = await allSummaryRes.json();
         setTeacherSummary(data.data || []);
       }
 
@@ -492,7 +588,168 @@ export default function CourseProgressPage() {
         setWeeklyProgress(data.data || []);
       }
     } catch (error) {
+      console.error('載入老師卡片資料失敗:', error);
+    }
+  };
+
+  // 計算對比期間的日期範圍（前一同期）
+  const getComparisonDateRange = (
+    period: PeriodFilter,
+    startDate?: string,
+    endDate?: string
+  ): { start: string; end: string } | null => {
+    const today = new Date();
+
+    switch (period) {
+      case 'today': {
+        // 今天 vs 昨天
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return {
+          start: formatDateToString(yesterday),
+          end: formatDateToString(yesterday)
+        };
+      }
+      case 'yesterday': {
+        // 昨天 vs 前天
+        const dayBeforeYesterday = new Date(today);
+        dayBeforeYesterday.setDate(dayBeforeYesterday.getDate() - 2);
+        return {
+          start: formatDateToString(dayBeforeYesterday),
+          end: formatDateToString(dayBeforeYesterday)
+        };
+      }
+      case 'thisWeek': {
+        // 本週 vs 上週
+        const lastWeek = getLastWeekRange();
+        return {
+          start: formatDateToString(lastWeek.start),
+          end: formatDateToString(lastWeek.end)
+        };
+      }
+      case 'lastWeek': {
+        // 上週 vs 上上週
+        const lastWeek = getLastWeekRange();
+        const weekBeforeLast = new Date(lastWeek.start);
+        weekBeforeLast.setDate(weekBeforeLast.getDate() - 7);
+        const weekBeforeLastEnd = new Date(lastWeek.start);
+        weekBeforeLastEnd.setDate(weekBeforeLastEnd.getDate() - 1);
+        return {
+          start: formatDateToString(weekBeforeLast),
+          end: formatDateToString(weekBeforeLastEnd)
+        };
+      }
+      case 'thisMonth': {
+        // 本月 vs 上個月
+        const firstOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const lastOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+        return {
+          start: formatDateToString(firstOfLastMonth),
+          end: formatDateToString(lastOfLastMonth)
+        };
+      }
+      case 'lastMonth': {
+        // 上個月 vs 上上個月
+        const firstOfTwoMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+        const lastOfTwoMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 1, 0);
+        return {
+          start: formatDateToString(firstOfTwoMonthsAgo),
+          end: formatDateToString(lastOfTwoMonthsAgo)
+        };
+      }
+      case 'custom': {
+        // 自訂區間：計算相同天數的前一區間
+        if (startDate && endDate) {
+          const start = new Date(startDate);
+          const end = new Date(endDate);
+          const daysDiff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+          const compEnd = new Date(start);
+          compEnd.setDate(compEnd.getDate() - 1);
+          const compStart = new Date(compEnd);
+          compStart.setDate(compStart.getDate() - daysDiff + 1);
+
+          return {
+            start: formatDateToString(compStart),
+            end: formatDateToString(compEnd)
+          };
+        }
+        return null;
+      }
+      case 'all':
+      default:
+        return null;
+    }
+  };
+
+  // 載入篩選後的資料（只用於「學員進度狀況」表格）- 日期篩選變化時呼叫
+  // 同時載入當前區間和對比區間的資料
+  const loadFilteredSummary = async (
+    summaryStartDate?: string,
+    summaryEndDate?: string,
+    comparisonStartDate?: string,
+    comparisonEndDate?: string
+  ) => {
+    setLoadingTeacherSummary(true);
+    try {
+      // 構建當前區間請求
+      const summaryParams = new URLSearchParams();
+      if (summaryStartDate) summaryParams.append('startDate', summaryStartDate);
+      if (summaryEndDate) summaryParams.append('endDate', summaryEndDate);
+      const filteredSummaryUrl = summaryParams.toString()
+        ? `/api/trello/teacher-summary?${summaryParams}`
+        : '/api/trello/teacher-summary';
+
+      // 構建對比區間請求
+      let comparisonUrl = '';
+      if (comparisonStartDate && comparisonEndDate) {
+        const compParams = new URLSearchParams();
+        compParams.append('startDate', comparisonStartDate);
+        compParams.append('endDate', comparisonEndDate);
+        comparisonUrl = `/api/trello/teacher-summary?${compParams}`;
+      }
+
+      // 並行請求
+      const requests: Promise<Response>[] = [fetch(filteredSummaryUrl)];
+      if (comparisonUrl) {
+        requests.push(fetch(comparisonUrl));
+      }
+
+      const responses = await Promise.all(requests);
+
+      // 處理當前區間資料
+      if (responses[0].ok) {
+        const data = await responses[0].json();
+        setFilteredTeacherSummary(data.data || []);
+      }
+
+      // 處理對比區間資料
+      if (responses[1] && responses[1].ok) {
+        const data = await responses[1].json();
+        setComparisonTeacherSummary(data.data || []);
+      } else {
+        setComparisonTeacherSummary([]);
+      }
+    } catch (error) {
+      console.error('載入篩選資料失敗:', error);
+    } finally {
+      setLoadingTeacherSummary(false);
+    }
+  };
+
+  // 初始載入所有資料
+  const loadTeacherData = async (summaryStartDate?: string, summaryEndDate?: string) => {
+    setLoadingTeacherSummary(true);
+    try {
+      // 同時載入老師卡片資料和篩選資料
+      await Promise.all([
+        loadTeacherCardData(),
+        loadFilteredSummary(summaryStartDate, summaryEndDate),
+      ]);
+    } catch (error) {
       console.error('載入老師資料失敗:', error);
+    } finally {
+      setLoadingTeacherSummary(false);
     }
   };
 
@@ -782,11 +1039,23 @@ export default function CourseProgressPage() {
           endDate = formatDateToString(yesterday);
           break;
         }
-        case 'last7days': {
-          const sevenDaysAgo = new Date(today);
-          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
-          startDate = formatDateToString(sevenDaysAgo);
-          endDate = formatDateToString(today);
+        case 'thisWeek': {
+          const currentWeek = getCurrentWeekRange();
+          startDate = formatDateToString(currentWeek.start);
+          endDate = formatDateToString(currentWeek.end);
+          break;
+        }
+        case 'lastWeek': {
+          const lastWeek = getLastWeekRange();
+          startDate = formatDateToString(lastWeek.start);
+          endDate = formatDateToString(lastWeek.end);
+          break;
+        }
+        case 'lastMonth': {
+          const firstOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+          const lastOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+          startDate = formatDateToString(firstOfLastMonth);
+          endDate = formatDateToString(lastOfLastMonth);
           break;
         }
         case 'thisMonth': {
@@ -813,8 +1082,13 @@ export default function CourseProgressPage() {
 
       const res = await fetch(`/api/trello/progress-details?${params}`);
       if (res.ok) {
-        const data = await res.json();
-        setProgressPopup(prev => ({ ...prev, data: data.data || [] }));
+        const responseData = await res.json();
+        // studentChange 和 cardChange 返回的是物件，其他類型返回陣列
+        if (type === 'studentChange' || type === 'cardChange') {
+          setProgressPopup(prev => ({ ...prev, data: responseData.data || responseData }));
+        } else {
+          setProgressPopup(prev => ({ ...prev, data: responseData.data || [] }));
+        }
       }
     } catch (error) {
       console.error('載入詳細資料失敗:', error);
@@ -825,6 +1099,114 @@ export default function CourseProgressPage() {
       });
     } finally {
       setLoadingPopupData(false);
+    }
+  };
+
+  // 取得快取 Key
+  const getAiAnalysisCacheKey = (): string => {
+    if (progressPeriod === 'custom') {
+      return `custom_${customDateRange.start}_${customDateRange.end}`;
+    }
+    return progressPeriod;
+  };
+
+  // 產生 AI 分析
+  const generateAiAnalysis = async (forceRefresh: boolean = false) => {
+    const cacheKey = getAiAnalysisCacheKey();
+
+    // 檢查快取（除非強制刷新）
+    if (!forceRefresh && aiAnalysisCache.has(cacheKey)) {
+      const cachedData = aiAnalysisCache.get(cacheKey)!;
+      setAiAnalyses(cachedData);
+      setShowAiAnalysis(true);
+      return;
+    }
+
+    setLoadingAiAnalysis(true);
+    setShowAiAnalysis(true);
+    setAiAnalyses([]);
+
+    try {
+      // 計算日期範圍
+      const today = new Date();
+      let startDate = '';
+      let endDate = '';
+
+      switch (progressPeriod) {
+        case 'today':
+          startDate = formatDateToString(today);
+          endDate = formatDateToString(today);
+          break;
+        case 'yesterday': {
+          const yesterday = new Date(today);
+          yesterday.setDate(yesterday.getDate() - 1);
+          startDate = formatDateToString(yesterday);
+          endDate = formatDateToString(yesterday);
+          break;
+        }
+        case 'thisWeek': {
+          const currentWeek = getCurrentWeekRange();
+          startDate = formatDateToString(currentWeek.start);
+          endDate = formatDateToString(currentWeek.end);
+          break;
+        }
+        case 'lastWeek': {
+          const lastWeek = getLastWeekRange();
+          startDate = formatDateToString(lastWeek.start);
+          endDate = formatDateToString(lastWeek.end);
+          break;
+        }
+        case 'thisMonth': {
+          const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+          startDate = formatDateToString(firstOfMonth);
+          endDate = formatDateToString(today);
+          break;
+        }
+        case 'lastMonth': {
+          const firstOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+          const lastOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+          startDate = formatDateToString(firstOfLastMonth);
+          endDate = formatDateToString(lastOfLastMonth);
+          break;
+        }
+        case 'custom':
+          startDate = customDateRange.start;
+          endDate = customDateRange.end;
+          break;
+        case 'all':
+        default:
+          // 使用全部資料
+          break;
+      }
+
+      const params = new URLSearchParams();
+      if (startDate) params.append('startDate', startDate);
+      if (endDate) params.append('endDate', endDate);
+
+      const res = await fetch(`/api/trello/ai-analysis?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        const analysisData = data.data || [];
+        setAiAnalyses(analysisData);
+
+        // 儲存到快取
+        setAiAnalysisCache(prev => {
+          const newCache = new Map(prev);
+          newCache.set(cacheKey, analysisData);
+          return newCache;
+        });
+      } else {
+        throw new Error('Failed to generate AI analysis');
+      }
+    } catch (error) {
+      console.error('AI 分析產生失敗:', error);
+      toast({
+        title: 'AI 分析失敗',
+        description: '無法產生分析結果',
+        variant: 'destructive'
+      });
+    } finally {
+      setLoadingAiAnalysis(false);
     }
   };
 
@@ -1567,8 +1949,8 @@ export default function CourseProgressPage() {
 
           {/* 老師總覽 Tab - 階層式卡片設計 */}
           <TabsContent value="teachers" className="space-y-4">
-            {/* 學員進度狀況 */}
-            {teacherSummary.length > 0 && (
+            {/* 學員進度狀況 - 使用篩選後的資料 */}
+            {(filteredTeacherSummary.length > 0 || progressPeriod !== 'all') && (
               <Card>
                 <CardHeader className="pb-2">
                   <div className="flex flex-col gap-3">
@@ -1582,8 +1964,10 @@ export default function CourseProgressPage() {
                         {[
                           { value: 'today', label: '今天' },
                           { value: 'yesterday', label: '昨天' },
-                          { value: 'last7days', label: '過去七天' },
+                          { value: 'thisWeek', label: '本週' },
+                          { value: 'lastWeek', label: '上週' },
                           { value: 'thisMonth', label: '本月' },
+                          { value: 'lastMonth', label: '上個月' },
                           { value: 'all', label: '全部' },
                         ].map((option) => (
                           <button
@@ -1639,14 +2023,22 @@ export default function CourseProgressPage() {
                                 y.setDate(y.getDate() - 1);
                                 return formatDateToString(y);
                               }
-                              case 'last7days': {
-                                const start = new Date(today);
-                                start.setDate(start.getDate() - 6);
-                                return `${formatDateToString(start)} ~ ${formatDateToString(today)}`;
+                              case 'thisWeek': {
+                                const currentWeek = getCurrentWeekRange();
+                                return `${formatDateToString(currentWeek.start)} ~ ${formatDateToString(currentWeek.end)}`;
+                              }
+                              case 'lastWeek': {
+                                const lastWeek = getLastWeekRange();
+                                return `${formatDateToString(lastWeek.start)} ~ ${formatDateToString(lastWeek.end)}`;
                               }
                               case 'thisMonth': {
                                 const first = new Date(today.getFullYear(), today.getMonth(), 1);
                                 return `${formatDateToString(first)} ~ ${formatDateToString(today)}`;
+                              }
+                              case 'lastMonth': {
+                                const firstOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                                const lastOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+                                return `${formatDateToString(firstOfLastMonth)} ~ ${formatDateToString(lastOfLastMonth)}`;
                               }
                               default:
                                 return '';
@@ -1666,8 +2058,8 @@ export default function CourseProgressPage() {
                             { field: 'teacher_name', label: '老師', width: 'w-24', align: '', showAlways: true },
                             { field: 'total_students', label: '學員數', width: 'w-20', align: 'text-center', showAlways: true },
                             { field: 'total_cards_completed', label: '卡片數', width: 'w-20', align: 'text-center', showAlways: true },
-                            { field: 'cardChange', label: '卡片週變化', width: 'w-24', align: 'text-center', showAlways: false },
-                            { field: 'studentChange', label: '學員變化', width: 'w-24', align: 'text-center', showAlways: false },
+                            { field: 'studentChange', label: '學員變化', width: 'w-28', align: 'text-center', showAlways: false },
+                            { field: 'cardChange', label: '卡片變化', width: 'w-28', align: 'text-center', showAlways: false },
                             { field: 'track', label: '軌道', width: 'w-16', align: 'text-center', showAlways: true },
                             { field: 'pivot', label: '支點', width: 'w-16', align: 'text-center', showAlways: true },
                             { field: 'breath', label: '氣息', width: 'w-16', align: 'text-center', showAlways: true },
@@ -1696,18 +2088,55 @@ export default function CourseProgressPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {/* 計算每位老師的附加欄位並排序 */}
+                        {/* 只顯示 Elena、Karen、Vicky 三位老師 */}
                         {teacherSummary
+                          .filter((teacher) => ['Elena', 'Karen', 'Vicky'].includes(teacher.teacher_name))
                           .map((teacher) => {
-                            const teacherWeeks = groupedWeeklyProgress[teacher.teacher_name] || [];
-                            const thisWeekCards = teacherWeeks.length > 0 ? Number(teacherWeeks[0]?.cards_completed || 0) : 0;
-                            const lastWeekCards = teacherWeeks.length > 1 ? Number(teacherWeeks[1]?.cards_completed || 0) : 0;
-                            const cardChange = thisWeekCards - lastWeekCards;
-                            const thisWeekStudents = teacherWeeks.length > 0 ? Number(teacherWeeks[0]?.students_active || 0) : 0;
-                            const lastWeekStudents = teacherWeeks.length > 1 ? Number(teacherWeeks[1]?.students_active || 0) : 0;
-                            const studentChange = thisWeekStudents - lastWeekStudents;
-                            // 使用新的分類計數欄位（根據卡片名稱前綴計算）
-                            return { ...teacher, cardChange, studentChange };
+                            // 在篩選資料中找到對應的老師資料
+                            const filteredData = filteredTeacherSummary.find(
+                              (ft) => ft.teacher_id === teacher.teacher_id
+                            );
+                            // 在對比期間資料中找到對應的老師資料
+                            const comparisonData = comparisonTeacherSummary.find(
+                              (ct) => ct.teacher_id === teacher.teacher_id
+                            );
+                            // 如果篩選期間沒有資料，使用 null 表示「-」
+                            const hasData = !!filteredData;
+
+                            // 計算卡片變化和學員變化（當前期間 vs 對比期間）
+                            let cardChange: number | null = null;
+                            let cardChangePercent: number | null = null;
+                            let studentChange: number | null = null;
+                            let studentChangePercent: number | null = null;
+
+                            if (progressPeriod !== 'all' && hasData) {
+                              const currentCards = filteredData.total_cards_completed || 0;
+                              const prevCards = comparisonData?.total_cards_completed || 0;
+                              cardChange = currentCards - prevCards;
+                              cardChangePercent = prevCards > 0 ? Math.round((cardChange / prevCards) * 100) : (currentCards > 0 ? 100 : 0);
+
+                              const currentStudents = filteredData.total_students || 0;
+                              const prevStudents = comparisonData?.total_students || 0;
+                              studentChange = currentStudents - prevStudents;
+                              studentChangePercent = prevStudents > 0 ? Math.round((studentChange / prevStudents) * 100) : (currentStudents > 0 ? 100 : 0);
+                            }
+
+                            // 使用篩選後的資料（如果有），否則標記為無資料
+                            return {
+                              ...teacher,
+                              // 如果篩選期間有資料，使用篩選後的數值；否則保持原始資料（用於「全部」模式）
+                              total_students: hasData ? filteredData.total_students : (progressPeriod === 'all' ? teacher.total_students : null),
+                              total_cards_completed: hasData ? filteredData.total_cards_completed : (progressPeriod === 'all' ? teacher.total_cards_completed : null),
+                              track_count: hasData ? filteredData.track_count : (progressPeriod === 'all' ? teacher.track_count : null),
+                              pivot_count: hasData ? filteredData.pivot_count : (progressPeriod === 'all' ? teacher.pivot_count : null),
+                              breath_count: hasData ? filteredData.breath_count : (progressPeriod === 'all' ? teacher.breath_count : null),
+                              other_count: hasData ? filteredData.other_count : (progressPeriod === 'all' ? teacher.other_count : null),
+                              cardChange,
+                              cardChangePercent,
+                              studentChange,
+                              studentChangePercent,
+                              hasData,
+                            };
                           })
                           .sort((a, b) => {
                             const dir = progressSort.direction === 'desc' ? -1 : 1;
@@ -1740,43 +2169,69 @@ export default function CourseProgressPage() {
                             <TableRow key={teacher.teacher_id || 'unassigned'} className="hover:bg-muted/30">
                               <TableCell className="font-medium">{teacher.teacher_name}</TableCell>
                               <TableCell className="text-center">
-                                <button
-                                  onClick={() => handleCellClick('students')}
-                                  className="hover:bg-blue-100 px-2 py-1 rounded cursor-pointer transition-colors"
-                                >
-                                  {teacher.total_students}
-                                </button>
+                                {teacher.total_students !== null ? (
+                                  <button
+                                    onClick={() => handleCellClick('students')}
+                                    className="text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded cursor-pointer transition-colors font-medium underline decoration-blue-300 hover:decoration-blue-500"
+                                  >
+                                    {teacher.total_students}
+                                  </button>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
                               </TableCell>
                               <TableCell className="text-center">
-                                <button
-                                  onClick={() => handleCellClick('cards')}
-                                  className="font-semibold hover:bg-blue-100 px-2 py-1 rounded cursor-pointer transition-colors"
-                                >
-                                  {teacher.total_cards_completed}
-                                </button>
+                                {teacher.total_cards_completed !== null ? (
+                                  <button
+                                    onClick={() => handleCellClick('cards')}
+                                    className="text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded cursor-pointer transition-colors font-medium underline decoration-blue-300 hover:decoration-blue-500"
+                                  >
+                                    {teacher.total_cards_completed}
+                                  </button>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
                               </TableCell>
                               {progressPeriod !== 'all' && (
                                 <TableCell className="text-center">
-                                  {teacher.cardChange !== 0 ? (
-                                    <button
-                                      onClick={() => handleCellClick('cardChange')}
-                                      className={`hover:bg-blue-100 px-2 py-1 rounded cursor-pointer transition-colors ${teacher.cardChange > 0 ? 'text-green-600' : 'text-orange-600'}`}
-                                    >
-                                      {teacher.cardChange > 0 ? '+' : ''}{teacher.cardChange}
-                                    </button>
-                                  ) : (
-                                    <span className="text-gray-400">-</span>
-                                  )}
-                                </TableCell>
-                              )}
-                              {progressPeriod !== 'all' && (
-                                <TableCell className="text-center">
-                                  {teacher.studentChange !== 0 ? (
+                                  {teacher.studentChange !== null ? (
                                     <button
                                       onClick={() => handleCellClick('studentChange')}
-                                      className={`hover:bg-blue-100 px-2 py-1 rounded cursor-pointer transition-colors ${teacher.studentChange > 0 ? 'text-green-600' : 'text-orange-600'}`}
+                                      className={`hover:bg-blue-50 px-2 py-1 rounded cursor-pointer transition-colors text-sm underline ${
+                                        teacher.studentChange > 0 ? 'text-green-600 decoration-green-300 hover:decoration-green-500' :
+                                        teacher.studentChange < 0 ? 'text-orange-600 decoration-orange-300 hover:decoration-orange-500' : 'text-gray-500 decoration-gray-300'
+                                      }`}
                                     >
-                                      {teacher.studentChange > 0 ? '+' : ''}{teacher.studentChange}
+                                      <span className="font-medium">
+                                        {teacher.studentChange > 0 ? '+' : ''}{teacher.studentChange}
+                                      </span>
+                                      <span className="text-xs ml-1">
+                                        ({teacher.studentChangePercent !== null && teacher.studentChangePercent > 0 ? '+' : ''}
+                                        {teacher.studentChangePercent}%)
+                                      </span>
+                                    </button>
+                                  ) : (
+                                    <span className="text-gray-400">-</span>
+                                  )}
+                                </TableCell>
+                              )}
+                              {progressPeriod !== 'all' && (
+                                <TableCell className="text-center">
+                                  {teacher.cardChange !== null ? (
+                                    <button
+                                      onClick={() => handleCellClick('cardChange')}
+                                      className={`hover:bg-blue-50 px-2 py-1 rounded cursor-pointer transition-colors text-sm underline ${
+                                        teacher.cardChange > 0 ? 'text-green-600 decoration-green-300 hover:decoration-green-500' :
+                                        teacher.cardChange < 0 ? 'text-orange-600 decoration-orange-300 hover:decoration-orange-500' : 'text-gray-500 decoration-gray-300'
+                                      }`}
+                                    >
+                                      <span className="font-medium">
+                                        {teacher.cardChange > 0 ? '+' : ''}{teacher.cardChange}
+                                      </span>
+                                      <span className="text-xs ml-1">
+                                        ({teacher.cardChangePercent !== null && teacher.cardChangePercent > 0 ? '+' : ''}
+                                        {teacher.cardChangePercent}%)
+                                      </span>
                                     </button>
                                   ) : (
                                     <span className="text-gray-400">-</span>
@@ -1784,32 +2239,48 @@ export default function CourseProgressPage() {
                                 </TableCell>
                               )}
                               <TableCell className="text-center">
-                                <button onClick={() => handleCellClick('track')}>
-                                  <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 cursor-pointer">
-                                    {teacher.track_count || 0}
-                                  </Badge>
-                                </button>
+                                {teacher.track_count !== null ? (
+                                  <button onClick={() => handleCellClick('track')}>
+                                    <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 cursor-pointer">
+                                      {teacher.track_count || 0}
+                                    </Badge>
+                                  </button>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
                               </TableCell>
                               <TableCell className="text-center">
-                                <button onClick={() => handleCellClick('pivot')}>
-                                  <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100 cursor-pointer">
-                                    {teacher.pivot_count || 0}
-                                  </Badge>
-                                </button>
+                                {teacher.pivot_count !== null ? (
+                                  <button onClick={() => handleCellClick('pivot')}>
+                                    <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100 cursor-pointer">
+                                      {teacher.pivot_count || 0}
+                                    </Badge>
+                                  </button>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
                               </TableCell>
                               <TableCell className="text-center">
-                                <button onClick={() => handleCellClick('breath')}>
-                                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 hover:bg-green-100 cursor-pointer">
-                                    {teacher.breath_count || 0}
-                                  </Badge>
-                                </button>
+                                {teacher.breath_count !== null ? (
+                                  <button onClick={() => handleCellClick('breath')}>
+                                    <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 hover:bg-green-100 cursor-pointer">
+                                      {teacher.breath_count || 0}
+                                    </Badge>
+                                  </button>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
                               </TableCell>
                               <TableCell className="text-center">
-                                <button onClick={() => handleCellClick('other')}>
-                                  <Badge variant="outline" className="bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100 cursor-pointer">
-                                    {teacher.other_count || 0}
-                                  </Badge>
-                                </button>
+                                {teacher.other_count !== null ? (
+                                  <button onClick={() => handleCellClick('other')}>
+                                    <Badge variant="outline" className="bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100 cursor-pointer">
+                                      {teacher.other_count || 0}
+                                    </Badge>
+                                  </button>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
                               </TableCell>
                             </TableRow>
                           );
@@ -1817,6 +2288,204 @@ export default function CourseProgressPage() {
                       </TableBody>
                     </Table>
                   </div>
+
+                  {/* AI 分析按鈕 */}
+                  <div className="mt-4 flex items-center gap-4">
+                    <Button
+                      onClick={() => generateAiAnalysis(false)}
+                      disabled={loadingAiAnalysis}
+                      variant="outline"
+                      className="gap-2"
+                    >
+                      {loadingAiAnalysis ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          分析中...
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="w-4 h-4" />
+                          AI 分析
+                        </>
+                      )}
+                    </Button>
+                    {showAiAnalysis && aiAnalyses.length > 0 && (
+                      <>
+                        <span className="text-sm text-muted-foreground">
+                          分析完成 ({aiAnalyses.length} 位老師)
+                          {aiAnalysisCache.has(progressPeriod === 'custom' ? `custom_${customDateRange.start}_${customDateRange.end}` : progressPeriod) && (
+                            <span className="ml-1 text-blue-500">(快取)</span>
+                          )}
+                        </span>
+                        <Button
+                          onClick={() => generateAiAnalysis(true)}
+                          disabled={loadingAiAnalysis}
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1 text-muted-foreground hover:text-foreground"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          重新分析
+                        </Button>
+                      </>
+                    )}
+                  </div>
+
+                  {/* AI 分析結果區塊 - 簡潔版 */}
+                  {showAiAnalysis && (
+                    <div className="mt-4 space-y-4">
+                      {loadingAiAnalysis ? (
+                        <div className="text-center py-8 text-muted-foreground">
+                          <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2" />
+                          正在產生 AI 分析...
+                        </div>
+                      ) : aiAnalyses.length > 0 ? (
+                        aiAnalyses.map((analysis) => {
+                          const { data } = analysis;
+                          const { dateRange, summary, lostStudents, newStudents, abnormalCount, courseDistribution, suggestionType } = data;
+                          const isLostExpanded = expandedLostStudents.has(analysis.teacherId);
+                          const isNewExpanded = expandedNewStudents.has(analysis.teacherId);
+                          const displayedLost = isLostExpanded ? lostStudents : lostStudents.slice(0, 5);
+                          const displayedNew = isNewExpanded ? newStudents : newStudents.slice(0, 5);
+
+                          // 格式化日期（包含年份）
+                          const formatDate = (dateStr: string) => {
+                            if (!dateStr) return '';
+                            const d = new Date(dateStr);
+                            return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+                          };
+
+                          return (
+                            <div
+                              key={analysis.teacherId}
+                              className="p-4 bg-gray-50 rounded-lg border"
+                            >
+                              {/* 老師名稱 */}
+                              <div className="font-bold text-lg mb-3">{analysis.teacherName}</div>
+
+                              {/* 表現摘要 - 含日期 */}
+                              <div className="mb-3 text-sm">
+                                <div className="font-semibold mb-1">【表現摘要】</div>
+                                <div className="text-gray-700">
+                                  本期（{formatDate(dateRange?.current?.start)} ~ {formatDate(dateRange?.current?.end)}）完成 <span className="font-bold">{summary.currentCards}</span> 張卡片
+                                  {summary.prevCards > 0 && (
+                                    <>
+                                      ，較前期（{formatDate(dateRange?.prev?.start)} ~ {formatDate(dateRange?.prev?.end)}）
+                                      {summary.cardChange !== 0 ? (
+                                        <span className={`font-bold ${summary.cardChange < 0 ? 'text-red-600' : ''}`}>
+                                          {summary.cardChange > 0 ? ' +' : ' '}{summary.cardChange} 張 ({summary.cardChangePercent}%)
+                                        </span>
+                                      ) : ' 持平'}
+                                    </>
+                                  )}
+                                  。
+                                  共 <span className="font-bold">{summary.currentStudents}</span> 位學員互動
+                                  {summary.prevStudents > 0 && summary.studentChange !== 0 && (
+                                    <span className={`font-bold ${summary.studentChange < 0 ? 'text-red-600' : ''}`}>
+                                      （{summary.studentChange > 0 ? '+' : ''}{summary.studentChange} 位，{summary.studentChangePercent}%）
+                                    </span>
+                                  )}
+                                  。
+                                </div>
+                              </div>
+
+                              {/* 流失學員 - 只在有流失時顯示 */}
+                              {lostStudents.length > 0 && (
+                                <div className="mb-3 text-sm">
+                                  <div className="font-semibold mb-1">
+                                    【流失學員】<span className="text-red-600 font-bold ml-1">{lostStudents.length} 位本期無互動</span>
+                                    {abnormalCount > 0 && <span className="text-red-600">（其中 {abnormalCount} 位需關注）</span>}
+                                  </div>
+                                  <div className="text-gray-600 space-y-0.5">
+                                    {displayedLost.map((lost, idx) => (
+                                      <div key={idx}>
+                                        • {lost.email.split('@')[0]}
+                                        <span className="text-gray-500">（前期 {lost.prevCards} 張，累計 {lost.totalProgress} 張）</span>
+                                        {lost.isAbnormal && <span className="text-red-600 font-bold ml-1">⚠ 需關注</span>}
+                                      </div>
+                                    ))}
+                                    {lostStudents.length > 5 && (
+                                      <button
+                                        onClick={() => {
+                                          setExpandedLostStudents(prev => {
+                                            const newSet = new Set(prev);
+                                            if (isLostExpanded) {
+                                              newSet.delete(analysis.teacherId);
+                                            } else {
+                                              newSet.add(analysis.teacherId);
+                                            }
+                                            return newSet;
+                                          });
+                                        }}
+                                        className="text-blue-600 hover:underline"
+                                      >
+                                        {isLostExpanded ? '收合' : `顯示全部 ${lostStudents.length} 位`}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* 新增學員 - 列表版，可展開 */}
+                              {newStudents.length > 0 && (
+                                <div className="mb-3 text-sm">
+                                  <div className="font-semibold mb-1">
+                                    【新增學員】{newStudents.length} 位
+                                    <span className="font-normal text-gray-500 ml-2">（前期無互動、本期開始有進度）</span>
+                                  </div>
+                                  <div className="text-gray-600 space-y-0.5">
+                                    {displayedNew.map((s, idx) => (
+                                      <div key={idx}>
+                                        • {s.email.split('@')[0]}
+                                        <span className="text-gray-500">（本期 {s.cards} 張）</span>
+                                      </div>
+                                    ))}
+                                    {newStudents.length > 5 && (
+                                      <button
+                                        onClick={() => {
+                                          setExpandedNewStudents(prev => {
+                                            const newSet = new Set(prev);
+                                            if (isNewExpanded) {
+                                              newSet.delete(analysis.teacherId);
+                                            } else {
+                                              newSet.add(analysis.teacherId);
+                                            }
+                                            return newSet;
+                                          });
+                                        }}
+                                        className="text-blue-600 hover:underline"
+                                      >
+                                        {isNewExpanded ? '收合' : `顯示全部 ${newStudents.length} 位`}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* 課程分布 - 簡潔版 */}
+                              <div className="text-sm">
+                                <span className="font-semibold">【課程分布】</span>
+                                <span className="text-gray-600 ml-2">
+                                  軌道 {courseDistribution.track}、支點 {courseDistribution.pivot}、氣息 {courseDistribution.breath}、其他 {courseDistribution.other}
+                                </span>
+                              </div>
+
+                              {/* 建議 - 只在需要警示時顯示 */}
+                              {suggestionType === 'warning' && (
+                                <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                                  <span className="font-bold">建議：</span>產能明顯下降，建議主動聯繫流失學員了解狀況。
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="text-center py-4 text-muted-foreground">
+                          目前沒有分析結果
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -1825,11 +2494,12 @@ export default function CourseProgressPage() {
               點擊老師卡片內的標籤切換不同視圖・週期：週四 ~ 週三
             </p>
 
+            {/* 老師卡片區域 - 只顯示 Elena、Karen、Vicky 三位老師 */}
             {teacherSummary.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">載入中...</div>
             ) : (
               <div className="space-y-4">
-                {teacherSummary.map((teacher) => {
+                {teacherSummary.filter((teacher) => ['Elena', 'Karen', 'Vicky'].includes(teacher.teacher_name)).map((teacher) => {
                   const teacherId = teacher.teacher_id || 'unassigned';
                   const teacherWeeks = groupedWeeklyProgress[teacher.teacher_name] || [];
                   const trend = calculateWeeklyTrend(teacherWeeks);
@@ -2796,7 +3466,7 @@ export default function CourseProgressPage() {
             <DialogTitle className="flex items-center gap-2">
               {progressPopup.type === 'students' && <><Users className="w-5 h-5" /> {progressPopup.teacherName} - 學員清單</>}
               {progressPopup.type === 'cards' && <><BookOpen className="w-5 h-5" /> {progressPopup.teacherName} - 完成卡片</>}
-              {progressPopup.type === 'cardChange' && <><TrendingUp className="w-5 h-5" /> {progressPopup.teacherName} - 卡片週變化</>}
+              {progressPopup.type === 'cardChange' && <><TrendingUp className="w-5 h-5" /> {progressPopup.teacherName} - 卡片變化</>}
               {progressPopup.type === 'studentChange' && <><Users className="w-5 h-5" /> {progressPopup.teacherName} - 學員變化</>}
               {progressPopup.type === 'track' && <><Target className="w-5 h-5 text-purple-600" /> {progressPopup.teacherName} - 軌道完成</>}
               {progressPopup.type === 'pivot' && <><Zap className="w-5 h-5 text-yellow-600" /> {progressPopup.teacherName} - 支點完成</>}
@@ -2810,7 +3480,257 @@ export default function CourseProgressPage() {
                 <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-muted-foreground" />
                 <p className="text-muted-foreground">載入中...</p>
               </div>
-            ) : progressPopup.data.length === 0 ? (
+            ) : (progressPopup.type === 'studentChange' || progressPopup.type === 'cardChange') ? (
+              // 學員變化和卡片變化使用新的格式
+              (() => {
+                const changeData = progressPopup.data as any;
+                if (!changeData || !changeData.dateRange) {
+                  return (
+                    <div className="text-center py-8 text-muted-foreground">
+                      {progressPeriod === 'all' ? '請選擇日期區間查看變化' : '該期間內無資料'}
+                    </div>
+                  );
+                }
+
+                const formatDateDisplay = (dateStr: string) => {
+                  if (!dateStr) return '';
+                  const d = new Date(dateStr);
+                  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+                };
+
+                if (progressPopup.type === 'studentChange') {
+                  return (
+                    <div className="space-y-4">
+                      {/* 日期範圍和摘要 */}
+                      <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                        <div className="text-sm">
+                          <span className="font-medium">本期：</span>
+                          {formatDateDisplay(changeData.dateRange.current.start)} ~ {formatDateDisplay(changeData.dateRange.current.end)}
+                          <span className="ml-2 text-blue-600 font-medium">({changeData.summary?.total_current || 0} 位)</span>
+                        </div>
+                        <div className="text-sm">
+                          <span className="font-medium">前期：</span>
+                          {formatDateDisplay(changeData.dateRange.prev.start)} ~ {formatDateDisplay(changeData.dateRange.prev.end)}
+                          <span className="ml-2 text-gray-600">({changeData.summary?.total_prev || 0} 位)</span>
+                        </div>
+                        <div className="flex gap-4 mt-2 text-sm">
+                          <span className="text-gray-600">維持 <strong>{changeData.summary?.maintained || 0}</strong></span>
+                          <span className="text-green-600">新增 <strong>+{changeData.summary?.new || 0}</strong></span>
+                          <span className="text-red-600">流失 <strong>-{changeData.summary?.lost || 0}</strong></span>
+                        </div>
+                      </div>
+
+                      {/* 維持學員 */}
+                      {changeData.maintained?.length > 0 && (
+                        <div>
+                          <h4 className="font-medium text-blue-600 mb-2">維持學員（{changeData.maintained.length} 位）</h4>
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'student', direction: popupSort.field === 'student' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                                  <div className="flex items-center gap-1">學員 {popupSort.field === 'student' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                                </TableHead>
+                                <TableHead className="text-center cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'prev_cards', direction: popupSort.field === 'prev_cards' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                                  <div className="flex items-center gap-1 justify-center">前期卡片 {popupSort.field === 'prev_cards' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                                </TableHead>
+                                <TableHead className="text-center cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'current_cards', direction: popupSort.field === 'current_cards' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                                  <div className="flex items-center gap-1 justify-center">本期卡片 {popupSort.field === 'current_cards' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                                </TableHead>
+                                <TableHead className="text-center cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'change', direction: popupSort.field === 'change' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                                  <div className="flex items-center gap-1 justify-center">變化 {popupSort.field === 'change' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                                </TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {[...changeData.maintained].sort((a: any, b: any) => {
+                                const dir = popupSort.direction === 'desc' ? -1 : 1;
+                                if (popupSort.field === 'student') {
+                                  return dir * (a.student_email || '').localeCompare(b.student_email || '');
+                                }
+                                if (popupSort.field === 'prev_cards') return dir * ((a.prev_cards || 0) - (b.prev_cards || 0));
+                                if (popupSort.field === 'current_cards') return dir * ((a.current_cards || 0) - (b.current_cards || 0));
+                                if (popupSort.field === 'change') return dir * ((a.current_cards - a.prev_cards) - (b.current_cards - b.prev_cards));
+                                return 0;
+                              }).map((item: any, idx: number) => {
+                                const diff = item.current_cards - item.prev_cards;
+                                return (
+                                  <TableRow key={idx}>
+                                    <TableCell className="font-medium">{item.student_email?.replace('@trello.sync', '')}</TableCell>
+                                    <TableCell className="text-center">{item.prev_cards}</TableCell>
+                                    <TableCell className="text-center">{item.current_cards}</TableCell>
+                                    <TableCell className={`text-center ${diff > 0 ? 'text-green-600' : diff < 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                                      {diff > 0 ? `+${diff}` : diff === 0 ? '-' : diff}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )}
+
+                      {/* 新增學員 */}
+                      {changeData.newStudents?.length > 0 && (
+                        <div>
+                          <h4 className="font-medium text-green-600 mb-2">新增學員（{changeData.newStudents.length} 位）</h4>
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'student', direction: popupSort.field === 'student' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                                  <div className="flex items-center gap-1">學員 {popupSort.field === 'student' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                                </TableHead>
+                                <TableHead className="text-center">前期卡片</TableHead>
+                                <TableHead className="text-center cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'current_cards', direction: popupSort.field === 'current_cards' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                                  <div className="flex items-center gap-1 justify-center">本期卡片 {popupSort.field === 'current_cards' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                                </TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {[...changeData.newStudents].sort((a: any, b: any) => {
+                                const dir = popupSort.direction === 'desc' ? -1 : 1;
+                                if (popupSort.field === 'student') {
+                                  return dir * (a.student_email || '').localeCompare(b.student_email || '');
+                                }
+                                if (popupSort.field === 'current_cards') return dir * ((a.current_cards || 0) - (b.current_cards || 0));
+                                return 0;
+                              }).map((item: any, idx: number) => (
+                                <TableRow key={idx}>
+                                  <TableCell className="font-medium">{item.student_email?.replace('@trello.sync', '')}</TableCell>
+                                  <TableCell className="text-center text-gray-400">0</TableCell>
+                                  <TableCell className="text-center text-green-600">{item.current_cards}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )}
+
+                      {/* 流失學員 */}
+                      {changeData.lost?.length > 0 && (
+                        <div>
+                          <h4 className="font-medium text-red-600 mb-2">流失學員（{changeData.lost.length} 位）</h4>
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'student', direction: popupSort.field === 'student' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                                  <div className="flex items-center gap-1">學員 {popupSort.field === 'student' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                                </TableHead>
+                                <TableHead className="text-center cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'prev_cards', direction: popupSort.field === 'prev_cards' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                                  <div className="flex items-center gap-1 justify-center">前期卡片 {popupSort.field === 'prev_cards' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                                </TableHead>
+                                <TableHead className="text-center">本期卡片</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {[...changeData.lost].sort((a: any, b: any) => {
+                                const dir = popupSort.direction === 'desc' ? -1 : 1;
+                                if (popupSort.field === 'student') {
+                                  return dir * (a.student_email || '').localeCompare(b.student_email || '');
+                                }
+                                if (popupSort.field === 'prev_cards') return dir * ((a.prev_cards || 0) - (b.prev_cards || 0));
+                                return 0;
+                              }).map((item: any, idx: number) => (
+                                <TableRow key={idx}>
+                                  <TableCell className="font-medium">{item.student_email?.replace('@trello.sync', '')}</TableCell>
+                                  <TableCell className="text-center">{item.prev_cards}</TableCell>
+                                  <TableCell className="text-center text-red-600">0</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                } else {
+                  // cardChange
+                  const allData = changeData.data || [];
+                  const lost = allData.filter((d: any) => d.status === '流失');
+                  const decreased = allData.filter((d: any) => d.status === '減少');
+                  const maintained = allData.filter((d: any) => d.status === '持平');
+                  const newOnes = allData.filter((d: any) => d.status === '新增');
+                  const increased = allData.filter((d: any) => d.status === '增加');
+
+                  return (
+                    <div className="space-y-4">
+                      {/* 日期範圍 */}
+                      <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                        <div className="text-sm">
+                          <span className="font-medium">本期：</span>
+                          {formatDateDisplay(changeData.dateRange.current.start)} ~ {formatDateDisplay(changeData.dateRange.current.end)}
+                        </div>
+                        <div className="text-sm">
+                          <span className="font-medium">前期：</span>
+                          {formatDateDisplay(changeData.dateRange.prev.start)} ~ {formatDateDisplay(changeData.dateRange.prev.end)}
+                        </div>
+                        <div className="flex gap-4 mt-2 text-sm flex-wrap">
+                          <span className="text-blue-600">持平 <strong>{maintained.length}</strong></span>
+                          <span className="text-blue-600">增加 <strong>{increased.length}</strong></span>
+                          <span className="text-green-600">新增 <strong>{newOnes.length}</strong></span>
+                          <span className="text-orange-600">減少 <strong>{decreased.length}</strong></span>
+                          <span className="text-red-600">流失 <strong>{lost.length}</strong></span>
+                        </div>
+                      </div>
+
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'student', direction: popupSort.field === 'student' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                              <div className="flex items-center gap-1">學員 {popupSort.field === 'student' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                            </TableHead>
+                            <TableHead className="text-center cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'prev_cards', direction: popupSort.field === 'prev_cards' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                              <div className="flex items-center gap-1 justify-center">前期卡片 {popupSort.field === 'prev_cards' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                            </TableHead>
+                            <TableHead className="text-center cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'current_cards', direction: popupSort.field === 'current_cards' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                              <div className="flex items-center gap-1 justify-center">本期卡片 {popupSort.field === 'current_cards' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                            </TableHead>
+                            <TableHead className="text-center cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'change', direction: popupSort.field === 'change' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                              <div className="flex items-center gap-1 justify-center">變化 {popupSort.field === 'change' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                            </TableHead>
+                            <TableHead className="cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'status', direction: popupSort.field === 'status' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                              <div className="flex items-center gap-1">狀態 {popupSort.field === 'status' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {[...allData].sort((a: any, b: any) => {
+                            const dir = popupSort.direction === 'desc' ? -1 : 1;
+                            if (popupSort.field === 'student') {
+                              return dir * (a.student_email || '').localeCompare(b.student_email || '');
+                            }
+                            if (popupSort.field === 'prev_cards') return dir * ((a.prev_cards || 0) - (b.prev_cards || 0));
+                            if (popupSort.field === 'current_cards') return dir * ((a.current_cards || 0) - (b.current_cards || 0));
+                            if (popupSort.field === 'change') return dir * ((a.change || 0) - (b.change || 0));
+                            if (popupSort.field === 'status') {
+                              const statusOrder: { [key: string]: number } = { '持平': 0, '增加': 1, '新增': 2, '減少': 3, '流失': 4 };
+                              return dir * ((statusOrder[a.status] || 0) - (statusOrder[b.status] || 0));
+                            }
+                            return 0;
+                          }).map((item: any, idx: number) => (
+                            <TableRow key={idx}>
+                              <TableCell className="font-medium">{item.student_email?.replace('@trello.sync', '')}</TableCell>
+                              <TableCell className="text-center">{item.prev_cards}</TableCell>
+                              <TableCell className="text-center">{item.current_cards}</TableCell>
+                              <TableCell className={`text-center ${item.change > 0 ? 'text-green-600' : item.change < 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                                {item.change > 0 ? `+${item.change}` : item.change === 0 ? '-' : item.change}
+                              </TableCell>
+                              <TableCell>
+                                <Badge
+                                  variant={item.status === '新增' || item.status === '增加' ? 'default' : item.status === '流失' || item.status === '減少' ? 'destructive' : 'outline'}
+                                  className="text-xs"
+                                >
+                                  {item.status}
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  );
+                }
+              })()
+            ) : Array.isArray(progressPopup.data) && progressPopup.data.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 {progressPeriod === 'all' ? '尚無資料' : '該期間內無資料'}
               </div>
@@ -2821,34 +3741,28 @@ export default function CourseProgressPage() {
                     {/* 根據類型顯示不同欄位 */}
                     {progressPopup.type === 'students' && (
                       <>
-                        <TableHead>學員</TableHead>
-                        <TableHead className="text-center">卡片數</TableHead>
+                        <TableHead className="cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'student', direction: popupSort.field === 'student' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                          <div className="flex items-center gap-1">學員 {popupSort.field === 'student' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                        </TableHead>
+                        <TableHead className="text-center cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'cards_completed', direction: popupSort.field === 'cards_completed' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                          <div className="flex items-center gap-1 justify-center">卡片數 {popupSort.field === 'cards_completed' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                        </TableHead>
                         <TableHead className="text-center">進度</TableHead>
-                        <TableHead>狀態</TableHead>
-                      </>
-                    )}
-                    {progressPopup.type === 'studentChange' && (
-                      <>
-                        <TableHead className="w-16">期間</TableHead>
-                        <TableHead>學員</TableHead>
-                        <TableHead className="text-center">本期完成卡片</TableHead>
                         <TableHead>狀態</TableHead>
                       </>
                     )}
                     {(progressPopup.type === 'cards' || progressPopup.type === 'other') && (
                       <>
                         <TableHead className="w-16">#</TableHead>
-                        <TableHead>卡片名稱</TableHead>
-                        <TableHead>學員</TableHead>
-                        <TableHead className="w-24">完成日期</TableHead>
-                      </>
-                    )}
-                    {progressPopup.type === 'cardChange' && (
-                      <>
-                        <TableHead className="w-16">期間</TableHead>
-                        <TableHead>學員</TableHead>
-                        <TableHead>卡片名稱</TableHead>
-                        <TableHead className="w-24">完成日期</TableHead>
+                        <TableHead className="cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'card_name', direction: popupSort.field === 'card_name' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                          <div className="flex items-center gap-1">卡片名稱 {popupSort.field === 'card_name' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                        </TableHead>
+                        <TableHead className="cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'student', direction: popupSort.field === 'student' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                          <div className="flex items-center gap-1">學員 {popupSort.field === 'student' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                        </TableHead>
+                        <TableHead className="w-24 cursor-pointer hover:bg-muted/80 select-none" onClick={() => setPopupSort({ field: 'completed_at', direction: popupSort.field === 'completed_at' && popupSort.direction === 'asc' ? 'desc' : 'asc' })}>
+                          <div className="flex items-center gap-1">完成日期 {popupSort.field === 'completed_at' && (popupSort.direction === 'desc' ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />)}</div>
+                        </TableHead>
                       </>
                     )}
                     {(progressPopup.type === 'track' || progressPopup.type === 'pivot' || progressPopup.type === 'breath') && (
@@ -2867,18 +3781,8 @@ export default function CourseProgressPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[...progressPopup.data]
+                  {[...(progressPopup.data as any[])]
                     .sort((a, b) => {
-                      // cardChange 和 studentChange 優先按 period 排序（本週在前）
-                      if (progressPopup.type === 'cardChange' || progressPopup.type === 'studentChange') {
-                        if (a.period !== b.period) {
-                          return a.period === 'thisWeek' ? -1 : 1;
-                        }
-                        // 同期間內按完成日期降序
-                        const aDate = a.completed_at ? new Date(a.completed_at).getTime() : 0;
-                        const bDate = b.completed_at ? new Date(b.completed_at).getTime() : 0;
-                        return bDate - aDate;
-                      }
                       const dir = popupSort.direction === 'desc' ? -1 : 1;
                       if (popupSort.field === 'student') {
                         const aVal = (a.student_email?.replace('@trello.sync', '') || a.student_name || '').toLowerCase();
@@ -2892,6 +3796,9 @@ export default function CourseProgressPage() {
                         const aDate = a.completed_at ? new Date(a.completed_at).getTime() : 0;
                         const bDate = b.completed_at ? new Date(b.completed_at).getTime() : 0;
                         return dir * (aDate - bDate);
+                      }
+                      if (popupSort.field === 'cards_completed') {
+                        return dir * ((a.cards_completed || 0) - (b.cards_completed || 0));
                       }
                       return 0;
                     })
@@ -2916,46 +3823,12 @@ export default function CourseProgressPage() {
                           </TableCell>
                         </>
                       )}
-                      {/* 學員週變化 */}
-                      {progressPopup.type === 'studentChange' && (
-                        <>
-                          <TableCell>
-                            <Badge variant={item.period === 'thisWeek' ? 'default' : 'secondary'}>
-                              {item.periodLabel}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            {item.student_email?.replace('@trello.sync', '') || item.student_name}
-                          </TableCell>
-                          <TableCell className="text-center font-mono">{item.cards_this_period || 0}</TableCell>
-                          <TableCell>
-                            <Badge variant={item.status === '新增' ? 'default' : item.status === '減少' ? 'destructive' : 'outline'} className="text-xs">
-                              {item.status}
-                            </Badge>
-                          </TableCell>
-                        </>
-                      )}
                       {/* 卡片清單 */}
                       {(progressPopup.type === 'cards' || progressPopup.type === 'other') && (
                         <>
                           <TableCell className="font-mono text-muted-foreground">{item.card_number}</TableCell>
                           <TableCell>{item.card_name || `卡片${item.card_number}`}</TableCell>
                           <TableCell>{item.student_email?.replace('@trello.sync', '') || '-'}</TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {item.completed_at ? new Date(item.completed_at).toLocaleDateString('zh-TW') : '-'}
-                          </TableCell>
-                        </>
-                      )}
-                      {/* 卡片週變化 */}
-                      {progressPopup.type === 'cardChange' && (
-                        <>
-                          <TableCell>
-                            <Badge variant={item.period === 'thisWeek' ? 'default' : 'secondary'}>
-                              {item.periodLabel}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="font-medium">{item.student_email?.replace('@trello.sync', '') || '-'}</TableCell>
-                          <TableCell>{item.card_name || '-'}</TableCell>
                           <TableCell className="text-muted-foreground">
                             {item.completed_at ? new Date(item.completed_at).toLocaleDateString('zh-TW') : '-'}
                           </TableCell>

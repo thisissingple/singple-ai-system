@@ -1,11 +1,73 @@
 # 📊 專案進度追蹤文檔
 
-> **最後更新**: 2025-12-03
+> **最後更新**: 2025-12-04
 > **開發工程師**: Claude（資深軟體開發工程師 + NLP 神經語言學專家 + UI/UX 設計師）
-> **專案狀態**: ✅ 課程進度彈窗功能增強
+> **專案狀態**: ✅ AI 分析快取 + 欄位順序優化
 > **當前階段**: 系統穩定性優化
-> **今日進度**: 課程進度彈窗顯示優化 + 卡片/學員週變化對比功能
+> **今日進度**: AI 分析結果快取機制 + 表格欄位順序調整 + 可點擊按鈕樣式優化
 > **整體進度**: 100% ████████████████████
+
+---
+
+## 📅 2025-12-04 更新日誌
+
+### 🎯 課程進度頁面 UI/UX 優化
+
+#### 需求背景
+用戶反饋：
+1. 表格的「學員變化」和「卡片變化」欄位順序需要交換
+2. AI 分析結果在切換時段後會消失，需要重新分析
+3. 表格按鈕（學員數、卡片數等）顯示為黑色數字，看起來不像可點擊的按鈕
+
+#### 實作內容
+
+**1. 欄位順序交換**
+- 表格標題順序：「學員變化」→「卡片變化」
+- 資料列 TableCell 順序相應調整
+- 彈窗內容順序保持一致
+
+**2. AI 分析結果快取機制**
+- 新增 `aiAnalysisCache` state（Map 結構）
+- Key 格式：時段名稱（如 `lastWeek`）或 `custom_2025-01-01_2025-01-31`
+- 切換時段時自動載入快取（如果有的話）
+- UI 顯示快取狀態：「(快取)」標籤
+- 新增「重新分析」按鈕可強制刷新
+
+**3. 可點擊按鈕樣式優化**
+- 「學員數」和「卡片數」：改為藍色文字 + 底線
+- 「卡片變化」和「學員變化」：增加底線裝飾
+- 統一 hover 效果：背景變色 + 底線加深
+
+#### 修改檔案
+- [`client/src/pages/teaching/course-progress.tsx`](client/src/pages/teaching/course-progress.tsx)
+  - 欄位順序調整
+  - AI 快取機制實作
+  - 按鈕樣式優化
+
+#### 技術細節
+```typescript
+// AI 分析快取 - 依時段儲存
+const [aiAnalysisCache, setAiAnalysisCache] = useState<Map<string, TeacherAIAnalysis[]>>(new Map());
+
+// 取得快取 Key
+const getAiAnalysisCacheKey = (): string => {
+  if (progressPeriod === 'custom') {
+    return `custom_${customDateRange.start}_${customDateRange.end}`;
+  }
+  return progressPeriod;
+};
+
+// 切換時段時自動載入快取
+useEffect(() => {
+  if (!showAiAnalysis) return;
+  const cacheKey = getAiAnalysisCacheKey();
+  if (aiAnalysisCache.has(cacheKey)) {
+    setAiAnalyses(aiAnalysisCache.get(cacheKey)!);
+  } else {
+    setAiAnalyses([]);
+  }
+}, [progressPeriod, customDateRange]);
+```
 
 ---
 
