@@ -12,6 +12,10 @@ import { directSqlRepository } from './direct-sql-repository';
 import { calculateAllKPIs } from '../kpi-calculator';
 import { buildPermissionFilter } from '../permission-filter-service';
 import { createPool, queryDatabase } from '../pg-client';
+import {
+  ensureTeacherNameCacheLoaded,
+  normalizeTeacherNameSync
+} from '../teacher-name-service';
 
 export type PeriodType = 'daily' | 'weekly' | 'lastWeek' | 'monthly' | 'day' | 'week' | 'month' | 'custom';
 
@@ -616,6 +620,9 @@ export class TotalReportService {
     warnings: string[],
     studentInsights: TotalReportData['studentInsights']
   ): Promise<TotalReportData['teacherInsights']> {
+    // 🆕 確保教師名稱快取已載入
+    await ensureTeacherNameCacheLoaded();
+
     const teacherMap = new Map<string, {
       classCount: number;
       students: Set<string>;
@@ -639,12 +646,13 @@ export class TotalReportService {
     const studentClassDatesMap = new Map<string, Date[]>();
 
     attendanceData.forEach(row => {
-      const teacher = resolveField(row.data, 'teacher');
+      const teacherRaw = resolveField(row.data, 'teacher');
+      const teacher = normalizeTeacherNameSync(teacherRaw); // 🆕 使用動態教師名稱轉換
       const studentEmail = resolveField(row.data, 'studentEmail');
       const classDateRaw = resolveField(row.data, 'classDate');
       const classDate = parseDateField(classDateRaw);
 
-      if (!teacher) {
+      if (!teacherRaw) {
         missingTeacherCount++;
         return;
       }
@@ -939,6 +947,9 @@ export class TotalReportService {
     const insights: TotalReportData['studentInsights'] = [];
     const studentMap = new Map<string, any>();
     const studentsWithoutPurchase: string[] = []; // Track students in attendance but not in purchase
+
+    // 🆕 載入教師名稱對照表快取（動態從員工管理系統查詢）
+    await ensureTeacherNameCacheLoaded();
 
     // 🆕 直接從資料庫查詢「已轉高」學生名單（使用正確定義）
     const convertedStudentsSet = new Set<string>();
@@ -1311,7 +1322,8 @@ export class TotalReportService {
         // 按日期排序，最近的在最後
         student.teacherHistory.sort((a: any, b: any) => a.date.getTime() - b.date.getTime());
         const latestTeacher = student.teacherHistory[student.teacherHistory.length - 1];
-        student.teacherName = latestTeacher.teacher;
+        // 🆕 使用動態教師名稱轉換（從員工管理系統查詢 first_name → display_name）
+        student.teacherName = normalizeTeacherNameSync(latestTeacher.teacher);
       }
 
       // Map status: 未開始→pending, 體驗中→contacted, 未轉高→lost, 已轉高→converted

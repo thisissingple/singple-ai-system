@@ -12,6 +12,10 @@ import * as teachingQualityGPT from './services/teaching-quality-gpt-service';
 import { parseScoresFromMarkdown } from './services/parse-teaching-scores';
 import { getOrCreateStudentKB, addDataSourceRef } from './services/student-knowledge-service';
 import { parseNumberField } from './services/reporting/field-mapping-v2';
+import {
+  ensureTeacherNameCacheLoaded,
+  normalizeTeacherNameSync
+} from './services/teacher-name-service';
 
 /**
  * course_plans 快取 - 從資料庫載入方案堂數對照表
@@ -201,6 +205,9 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
 
       // 🆕 載入 course_plans 快取
       const plansCache = await getCoursePlansCache();
+
+      // 🆕 載入教師名稱對照表快取（動態從員工管理系統查詢）
+      await ensureTeacherNameCacheLoaded();
 
       // Build query using Supabase Client
       let attendanceQuery = supabase
@@ -406,7 +413,7 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
         return {
           attendance_id: row.id,
           student_name: row.student_name,
-          teacher_name: row.teacher_name,
+          teacher_name: normalizeTeacherNameSync(row.teacher_name),
           class_date: row.class_date,
           has_transcript: !!row.class_transcript && row.class_transcript.trim().length > 0,
           is_showed: row.is_showed,
@@ -454,11 +461,12 @@ export function registerTeachingQualityRoutes(app: any, isAuthenticated: any) {
 
       if (teacherError) throw teacherError;
 
-      // Aggregate teacher counts manually
+      // Aggregate teacher counts manually (使用標準化名稱)
       const teacherCounts = new Map();
       teacherData?.forEach((t: any) => {
-        const count = teacherCounts.get(t.teacher_name) || 0;
-        teacherCounts.set(t.teacher_name, count + 1);
+        const normalizedName = normalizeTeacherNameSync(t.teacher_name);
+        const count = teacherCounts.get(normalizedName) || 0;
+        teacherCounts.set(normalizedName, count + 1);
       });
 
       const teachers = Array.from(teacherCounts.entries())
