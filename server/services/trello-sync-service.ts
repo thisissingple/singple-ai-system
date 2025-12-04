@@ -1029,7 +1029,7 @@ export async function getProgressDetails(
   teacherId?: string,
   startDate?: string,
   endDate?: string
-): Promise<any[]> {
+): Promise<any> {
   // 構建日期過濾條件
   const dateFilter = startDate && endDate
     ? `AND tcc.completed_at >= '${startDate}' AND tcc.completed_at < '${endDate}'::date + INTERVAL '1 day'`
@@ -1071,123 +1071,198 @@ export async function getProgressDetails(
     }
 
     case 'cardChange': {
-      // 卡片週變化：顯示本週和上週的卡片對比
-      // 計算本週和上週的日期範圍（週四~週三）
-      const today = new Date();
-      const dayOfWeek = today.getDay(); // 0=週日, 1=週一, ...
-      // 計算距離上一個週四的天數
-      const daysFromThursday = (dayOfWeek + 3) % 7; // 週四=0, 週五=1, ..., 週三=6
-
-      // 本週週四
-      const thisWeekThursday = new Date(today);
-      thisWeekThursday.setDate(today.getDate() - daysFromThursday);
-      thisWeekThursday.setHours(0, 0, 0, 0);
-
-      // 本週週三（週四+6天）
-      const thisWeekWednesday = new Date(thisWeekThursday);
-      thisWeekWednesday.setDate(thisWeekThursday.getDate() + 6);
-
-      // 上週週四和週三
-      const lastWeekThursday = new Date(thisWeekThursday);
-      lastWeekThursday.setDate(thisWeekThursday.getDate() - 7);
-      const lastWeekWednesday = new Date(lastWeekThursday);
-      lastWeekWednesday.setDate(lastWeekThursday.getDate() + 6);
+      // 卡片變化：比較本期和前期每位學員的卡片數
+      if (!startDate || !endDate) {
+        return [];
+      }
 
       const formatDate = (d: Date) => d.toISOString().split('T')[0];
 
-      // 查詢本週卡片
-      const thisWeekQuery = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at, 'thisWeek' as period
-        FROM teacher_card_completions tcc
-        INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
-        WHERE tcc.completed_at >= '${formatDate(thisWeekThursday)}'
-          AND tcc.completed_at < '${formatDate(thisWeekWednesday)}'::date + INTERVAL '1 day'
-          ${teacherFilter}
-        ORDER BY tcc.completed_at DESC`;
+      // 計算前期的日期範圍（與本期同樣長度）
+      const currentStart = new Date(startDate);
+      const currentEnd = new Date(endDate);
+      const daysDiff = Math.ceil((currentEnd.getTime() - currentStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
-      // 查詢上週卡片
-      const lastWeekQuery = `SELECT tcc.id, tcc.card_number, tcc.card_name, tcc.student_email, tcc.completed_at, 'lastWeek' as period
-        FROM teacher_card_completions tcc
-        INNER JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
-        WHERE tcc.completed_at >= '${formatDate(lastWeekThursday)}'
-          AND tcc.completed_at < '${formatDate(lastWeekWednesday)}'::date + INTERVAL '1 day'
-          ${teacherFilter}
-        ORDER BY tcc.completed_at DESC`;
+      const prevEnd = new Date(currentStart);
+      prevEnd.setDate(prevEnd.getDate() - 1);
+      const prevStart = new Date(prevEnd);
+      prevStart.setDate(prevStart.getDate() - daysDiff + 1);
 
-      const [thisWeekResult, lastWeekResult] = await Promise.all([
-        queryDatabase(thisWeekQuery, []),
-        queryDatabase(lastWeekQuery, [])
+      // 查詢本期每位學員完成的卡片數
+      const currentPeriodQuery = `SELECT tcp.student_email, COUNT(tcc.id) as cards_count
+        FROM teacher_course_progress tcp
+        INNER JOIN teacher_card_completions tcc ON tcc.progress_id = tcp.id
+        WHERE tcc.completed_at >= '${startDate}'
+          AND tcc.completed_at < '${endDate}'::date + INTERVAL '1 day'
+          ${teacherFilter}
+        GROUP BY tcp.student_email`;
+
+      // 查詢前期每位學員完成的卡片數
+      const prevPeriodQuery = `SELECT tcp.student_email, COUNT(tcc.id) as cards_count
+        FROM teacher_course_progress tcp
+        INNER JOIN teacher_card_completions tcc ON tcc.progress_id = tcp.id
+        WHERE tcc.completed_at >= '${formatDate(prevStart)}'
+          AND tcc.completed_at < '${formatDate(prevEnd)}'::date + INTERVAL '1 day'
+          ${teacherFilter}
+        GROUP BY tcp.student_email`;
+
+      const [currentResult, prevResult] = await Promise.all([
+        queryDatabase(currentPeriodQuery, []),
+        queryDatabase(prevPeriodQuery, [])
       ]);
 
-      // 合併結果，本週在前，上週在後
-      return [
-        ...thisWeekResult.rows.map((r: any) => ({ ...r, period: 'thisWeek', periodLabel: '本週' })),
-        ...lastWeekResult.rows.map((r: any) => ({ ...r, period: 'lastWeek', periodLabel: '上週' }))
-      ];
+      // 建立 Map 方便查詢
+      const currentMap = new Map(currentResult.rows.map((r: any) => [r.student_email, parseInt(r.cards_count)]));
+      const prevMap = new Map(prevResult.rows.map((r: any) => [r.student_email, parseInt(r.cards_count)]));
+
+      // 合併所有學員
+      const allStudents = new Set([...Array.from(currentMap.keys()), ...Array.from(prevMap.keys())]);
+
+      // 計算每位學員的變化
+      const results: any[] = [];
+      allStudents.forEach(email => {
+        const currentCards = currentMap.get(email) || 0;
+        const prevCards = prevMap.get(email) || 0;
+        const change = currentCards - prevCards;
+
+        let status: string;
+        if (currentCards > 0 && prevCards === 0) {
+          status = '新增';
+        } else if (currentCards === 0 && prevCards > 0) {
+          status = '流失';
+        } else if (change > 0) {
+          status = '增加';
+        } else if (change < 0) {
+          status = '減少';
+        } else {
+          status = '持平';
+        }
+
+        results.push({
+          student_email: email,
+          current_cards: currentCards,
+          prev_cards: prevCards,
+          change,
+          status
+        });
+      });
+
+      // 依變化量排序（維持/持平/增加優先，然後新增，最後減少/流失）
+      const statusOrder: { [key: string]: number } = { '持平': 0, '增加': 1, '新增': 2, '減少': 3, '流失': 4 };
+      results.sort((a, b) => {
+        const orderDiff = statusOrder[a.status] - statusOrder[b.status];
+        if (orderDiff !== 0) return orderDiff;
+        return Math.abs(b.change) - Math.abs(a.change);
+      });
+
+      return {
+        dateRange: {
+          current: { start: startDate, end: endDate },
+          prev: { start: formatDate(prevStart), end: formatDate(prevEnd) }
+        },
+        data: results
+      };
     }
 
     case 'studentChange': {
-      // 學員變化：顯示本週和上週的學員對比
-      const today = new Date();
-      const dayOfWeek = today.getDay();
-      const daysFromThursday = (dayOfWeek + 3) % 7;
-
-      const thisWeekThursday = new Date(today);
-      thisWeekThursday.setDate(today.getDate() - daysFromThursday);
-      thisWeekThursday.setHours(0, 0, 0, 0);
-
-      const thisWeekWednesday = new Date(thisWeekThursday);
-      thisWeekWednesday.setDate(thisWeekThursday.getDate() + 6);
-
-      const lastWeekThursday = new Date(thisWeekThursday);
-      lastWeekThursday.setDate(thisWeekThursday.getDate() - 7);
-      const lastWeekWednesday = new Date(lastWeekThursday);
-      lastWeekWednesday.setDate(lastWeekThursday.getDate() + 6);
+      // 學員變化：比較本期和前期的學員名單（維持/新增/流失）
+      if (!startDate || !endDate) {
+        return [];
+      }
 
       const formatDate = (d: Date) => d.toISOString().split('T')[0];
 
-      // 查詢本週活躍學員
-      const thisWeekQuery = `SELECT DISTINCT tcp.student_email,
-          COUNT(tcc.id) as cards_this_period
+      // 計算前期的日期範圍（與本期同樣長度）
+      const currentStart = new Date(startDate);
+      const currentEnd = new Date(endDate);
+      const daysDiff = Math.ceil((currentEnd.getTime() - currentStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+      const prevEnd = new Date(currentStart);
+      prevEnd.setDate(prevEnd.getDate() - 1);
+      const prevStart = new Date(prevEnd);
+      prevStart.setDate(prevStart.getDate() - daysDiff + 1);
+
+      // 查詢本期活躍學員
+      const currentPeriodQuery = `SELECT DISTINCT tcp.student_email,
+          COUNT(tcc.id) as cards_count
         FROM teacher_course_progress tcp
         INNER JOIN teacher_card_completions tcc ON tcc.progress_id = tcp.id
-        WHERE tcc.completed_at >= '${formatDate(thisWeekThursday)}'
-          AND tcc.completed_at < '${formatDate(thisWeekWednesday)}'::date + INTERVAL '1 day'
+        WHERE tcc.completed_at >= '${startDate}'
+          AND tcc.completed_at < '${endDate}'::date + INTERVAL '1 day'
           ${teacherFilter}
         GROUP BY tcp.student_email`;
 
-      // 查詢上週活躍學員
-      const lastWeekQuery = `SELECT DISTINCT tcp.student_email,
-          COUNT(tcc.id) as cards_this_period
+      // 查詢前期活躍學員
+      const prevPeriodQuery = `SELECT DISTINCT tcp.student_email,
+          COUNT(tcc.id) as cards_count
         FROM teacher_course_progress tcp
         INNER JOIN teacher_card_completions tcc ON tcc.progress_id = tcp.id
-        WHERE tcc.completed_at >= '${formatDate(lastWeekThursday)}'
-          AND tcc.completed_at < '${formatDate(lastWeekWednesday)}'::date + INTERVAL '1 day'
+        WHERE tcc.completed_at >= '${formatDate(prevStart)}'
+          AND tcc.completed_at < '${formatDate(prevEnd)}'::date + INTERVAL '1 day'
           ${teacherFilter}
         GROUP BY tcp.student_email`;
 
-      const [thisWeekResult, lastWeekResult] = await Promise.all([
-        queryDatabase(thisWeekQuery, []),
-        queryDatabase(lastWeekQuery, [])
+      const [currentResult, prevResult] = await Promise.all([
+        queryDatabase(currentPeriodQuery, []),
+        queryDatabase(prevPeriodQuery, [])
       ]);
 
-      const thisWeekStudents = new Set(thisWeekResult.rows.map((r: any) => r.student_email));
-      const lastWeekStudents = new Set(lastWeekResult.rows.map((r: any) => r.student_email));
+      // 建立 Map 方便查詢
+      const currentMap = new Map(currentResult.rows.map((r: any) => [r.student_email, parseInt(r.cards_count)]));
+      const prevMap = new Map(prevResult.rows.map((r: any) => [r.student_email, parseInt(r.cards_count)]));
 
-      // 合併結果
-      return [
-        ...thisWeekResult.rows.map((r: any) => ({
-          ...r,
-          period: 'thisWeek',
-          periodLabel: '本週',
-          status: lastWeekStudents.has(r.student_email) ? '持續' : '新增'
-        })),
-        ...lastWeekResult.rows.map((r: any) => ({
-          ...r,
-          period: 'lastWeek',
-          periodLabel: '上週',
-          status: thisWeekStudents.has(r.student_email) ? '持續' : '減少'
-        }))
-      ];
+      // 分類學員
+      const maintained: any[] = []; // 維持（兩期都有）
+      const newStudents: any[] = []; // 新增（本期有、前期沒有）
+      const lost: any[] = []; // 流失（前期有、本期沒有）
+
+      // 處理本期學員
+      currentMap.forEach((cards, email) => {
+        if (prevMap.has(email)) {
+          maintained.push({
+            student_email: email,
+            current_cards: cards,
+            prev_cards: prevMap.get(email),
+            status: '維持'
+          });
+        } else {
+          newStudents.push({
+            student_email: email,
+            current_cards: cards,
+            prev_cards: 0,
+            status: '新增'
+          });
+        }
+      });
+
+      // 處理前期有但本期沒有的學員
+      prevMap.forEach((cards, email) => {
+        if (!currentMap.has(email)) {
+          lost.push({
+            student_email: email,
+            current_cards: 0,
+            prev_cards: cards,
+            status: '流失'
+          });
+        }
+      });
+
+      return {
+        dateRange: {
+          current: { start: startDate, end: endDate },
+          prev: { start: formatDate(prevStart), end: formatDate(prevEnd) }
+        },
+        summary: {
+          total_current: currentMap.size,
+          total_prev: prevMap.size,
+          maintained: maintained.length,
+          new: newStudents.length,
+          lost: lost.length
+        },
+        maintained: maintained.sort((a, b) => b.current_cards - a.current_cards),
+        newStudents: newStudents.sort((a, b) => b.current_cards - a.current_cards),
+        lost: lost.sort((a, b) => b.prev_cards - a.prev_cards)
+      };
     }
 
     case 'track': {
@@ -1266,6 +1341,171 @@ export function stopPeriodicSync(): void {
   }
 }
 
+/**
+ * 取得兩個期間的學員級別比較資料（用於深度 AI 分析）
+ * 回傳：當期有互動的學員、前期有互動的學員、流失的學員、新增的學員
+ */
+export async function getStudentComparisonData(
+  teacherId: string,
+  currentStart: string,
+  currentEnd: string,
+  prevStart: string,
+  prevEnd: string
+): Promise<{
+  currentStudents: Array<{ email: string; cards: number; cardDetails: string[] }>;
+  prevStudents: Array<{ email: string; cards: number; cardDetails: string[] }>;
+  lostStudents: Array<{ email: string; prevCards: number; totalProgress: number; lastCardDate: string | null }>;
+  newStudents: Array<{ email: string; cards: number }>;
+}> {
+  // 取得當期有互動的學員
+  const currentResult = await queryDatabase(
+    `SELECT
+      tcp.student_email as email,
+      COUNT(tcc.id) as cards,
+      array_agg(DISTINCT tcc.card_name ORDER BY tcc.card_name) as card_details
+    FROM teacher_card_completions tcc
+    JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
+    WHERE tcp.teacher_id = $1
+      AND tcc.completed_at >= $2 AND tcc.completed_at < $3::date + INTERVAL '1 day'
+    GROUP BY tcp.student_email`,
+    [teacherId, currentStart, currentEnd]
+  );
+
+  // 取得前期有互動的學員
+  const prevResult = await queryDatabase(
+    `SELECT
+      tcp.student_email as email,
+      COUNT(tcc.id) as cards,
+      array_agg(DISTINCT tcc.card_name ORDER BY tcc.card_name) as card_details
+    FROM teacher_card_completions tcc
+    JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
+    WHERE tcp.teacher_id = $1
+      AND tcc.completed_at >= $2 AND tcc.completed_at < $3::date + INTERVAL '1 day'
+    GROUP BY tcp.student_email`,
+    [teacherId, prevStart, prevEnd]
+  );
+
+  const currentStudents = currentResult.rows.map((r: any) => ({
+    email: r.email,
+    cards: parseInt(r.cards),
+    cardDetails: r.card_details || [],
+  }));
+
+  const prevStudents = prevResult.rows.map((r: any) => ({
+    email: r.email,
+    cards: parseInt(r.cards),
+    cardDetails: r.card_details || [],
+  }));
+
+  const currentEmails = new Set(currentStudents.map(s => s.email));
+  const prevEmails = new Set(prevStudents.map(s => s.email));
+
+  // 流失的學員（前期有、當期沒有）- 需要查詢他們的整體進度和最後完成日期
+  const lostEmails = prevStudents.filter(s => !currentEmails.has(s.email)).map(s => s.email);
+
+  let lostStudents: Array<{ email: string; prevCards: number; totalProgress: number; lastCardDate: string | null }> = [];
+
+  if (lostEmails.length > 0) {
+    const lostDetailsResult = await queryDatabase(
+      `SELECT
+        tcp.student_email as email,
+        tcp.cards_completed as total_progress,
+        tcp.total_cards,
+        MAX(tcc.completed_at) as last_card_date
+      FROM teacher_course_progress tcp
+      LEFT JOIN teacher_card_completions tcc ON tcc.progress_id = tcp.id
+      WHERE tcp.teacher_id = $1
+        AND tcp.student_email = ANY($2)
+      GROUP BY tcp.student_email, tcp.cards_completed, tcp.total_cards`,
+      [teacherId, lostEmails]
+    );
+
+    lostStudents = lostDetailsResult.rows.map((r: any) => {
+      const prevStudent = prevStudents.find(s => s.email === r.email);
+      return {
+        email: r.email,
+        prevCards: prevStudent?.cards || 0,
+        totalProgress: parseInt(r.total_progress) || 0,
+        lastCardDate: r.last_card_date ? new Date(r.last_card_date).toISOString().split('T')[0] : null,
+      };
+    });
+  }
+
+  // 新增的學員（當期有、前期沒有）
+  const newStudents = currentStudents
+    .filter(s => !prevEmails.has(s.email))
+    .map(s => ({ email: s.email, cards: s.cards }));
+
+  return {
+    currentStudents,
+    prevStudents,
+    lostStudents,
+    newStudents,
+  };
+}
+
+/**
+ * 取得學員的歷史完課頻率（用於判斷是否異常）
+ */
+export async function getStudentHistoricalFrequency(
+  teacherId: string,
+  studentEmails: string[],
+  lookbackDays: number = 60
+): Promise<Map<string, { avgCardsPerWeek: number; totalWeeks: number; consistency: string }>> {
+  if (studentEmails.length === 0) {
+    return new Map();
+  }
+
+  const lookbackDate = new Date();
+  lookbackDate.setDate(lookbackDate.getDate() - lookbackDays);
+
+  const result = await queryDatabase(
+    `WITH weekly_activity AS (
+      SELECT
+        tcp.student_email,
+        DATE_TRUNC('week', tcc.completed_at) as week_start,
+        COUNT(tcc.id) as cards
+      FROM teacher_card_completions tcc
+      JOIN teacher_course_progress tcp ON tcc.progress_id = tcp.id
+      WHERE tcp.teacher_id = $1
+        AND tcp.student_email = ANY($2)
+        AND tcc.completed_at >= $3
+      GROUP BY tcp.student_email, DATE_TRUNC('week', tcc.completed_at)
+    )
+    SELECT
+      student_email,
+      ROUND(AVG(cards)::numeric, 1) as avg_cards_per_week,
+      COUNT(DISTINCT week_start) as total_weeks,
+      STDDEV(cards) as stddev_cards
+    FROM weekly_activity
+    GROUP BY student_email`,
+    [teacherId, studentEmails, lookbackDate.toISOString()]
+  );
+
+  const frequencyMap = new Map<string, { avgCardsPerWeek: number; totalWeeks: number; consistency: string }>();
+
+  for (const row of result.rows) {
+    const avgCards = parseFloat(row.avg_cards_per_week) || 0;
+    const stddev = parseFloat(row.stddev_cards) || 0;
+
+    // 判斷一致性
+    let consistency = '穩定';
+    if (stddev > avgCards * 0.5) {
+      consistency = '不穩定';
+    } else if (avgCards < 1) {
+      consistency = '低頻';
+    }
+
+    frequencyMap.set(row.student_email, {
+      avgCardsPerWeek: avgCards,
+      totalWeeks: parseInt(row.total_weeks),
+      consistency,
+    });
+  }
+
+  return frequencyMap;
+}
+
 export default {
   getAllBoards,
   getStudentBoards,
@@ -1280,6 +1520,8 @@ export default {
   getWeeklyCardDetails,
   getTeacherStudentProgress,
   getProgressDetails,
+  getStudentComparisonData,
+  getStudentHistoricalFrequency,
   startPeriodicSync,
   stopPeriodicSync,
 };

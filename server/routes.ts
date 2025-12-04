@@ -11015,5 +11015,186 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET - AI 分析（根據日期區間分析每位老師的表現，包含深度學員分析）
+  // 返回結構化資料供前端渲染（支援顏色、粗體等樣式）
+  app.get('/api/trello/ai-analysis', isAuthenticated, async (req, res) => {
+    try {
+      const trelloSyncService = await import('./services/trello-sync-service');
+      const { startDate, endDate } = req.query;
+
+      // 取得老師進度資料
+      const summary = await trelloSyncService.getTeacherProgressSummary(
+        startDate as string | undefined,
+        endDate as string | undefined
+      );
+
+      // 如果有日期範圍，計算對比期間
+      let compStartStr = '';
+      let compEndStr = '';
+      let comparisonSummary: any[] = [];
+
+      if (startDate && endDate) {
+        const start = new Date(startDate as string);
+        const end = new Date(endDate as string);
+        const daysDiff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+        const compEnd = new Date(start);
+        compEnd.setDate(compEnd.getDate() - 1);
+        const compStart = new Date(compEnd);
+        compStart.setDate(compStart.getDate() - daysDiff + 1);
+
+        const formatDate = (d: Date) => d.toISOString().split('T')[0];
+        compStartStr = formatDate(compStart);
+        compEndStr = formatDate(compEnd);
+
+        comparisonSummary = await trelloSyncService.getTeacherProgressSummary(compStartStr, compEndStr);
+      }
+
+      // 只分析 Elena、Karen、Vicky 三位老師
+      const targetTeachers = ['Elena', 'Karen', 'Vicky'];
+      const filteredSummary = summary.filter((teacher: any) => targetTeachers.includes(teacher.teacher_name));
+
+      // 產生結構化分析資料
+      const analyses = await Promise.all(
+        filteredSummary.map(async (teacher: any) => {
+          const comparison = comparisonSummary.find((c: any) => c.teacher_id === teacher.teacher_id);
+
+          // 計算變化
+          const currentCards = teacher.total_cards_completed || 0;
+          const prevCards = comparison?.total_cards_completed || 0;
+          const cardChange = currentCards - prevCards;
+          const cardChangePercent = prevCards > 0 ? Math.round((cardChange / prevCards) * 100) : (currentCards > 0 ? 100 : 0);
+
+          const currentStudents = teacher.total_students || 0;
+          const prevStudents = comparison?.total_students || 0;
+          const studentChange = currentStudents - prevStudents;
+          const studentChangePercent = prevStudents > 0 ? Math.round((studentChange / prevStudents) * 100) : (currentStudents > 0 ? 100 : 0);
+
+          // 結構化資料
+          const analysisData: any = {
+            // 日期範圍
+            dateRange: {
+              current: { start: startDate, end: endDate },
+              prev: { start: compStartStr, end: compEndStr },
+            },
+            // 表現摘要
+            summary: {
+              currentCards,
+              prevCards,
+              cardChange,
+              cardChangePercent,
+              currentStudents,
+              prevStudents,
+              studentChange,
+              studentChangePercent,
+            },
+            // 流失學員
+            lostStudents: [] as any[],
+            // 持續互動學員
+            continuingStudents: [] as any[],
+            // 新增學員
+            newStudents: [] as any[],
+            // 異常警示
+            abnormalCount: 0,
+            // 課程分布
+            courseDistribution: {
+              track: teacher.track_count || 0,
+              pivot: teacher.pivot_count || 0,
+              breath: teacher.breath_count || 0,
+              other: teacher.other_count || 0,
+            },
+            // 建議類型
+            suggestionType: null as 'warning' | 'excellent' | null,
+          };
+
+          // === 深度學員分析（只有在有日期範圍時才做） ===
+          if (startDate && endDate && compStartStr && compEndStr && teacher.teacher_id) {
+            try {
+              // 取得學員級別比較資料
+              const studentComparison = await trelloSyncService.getStudentComparisonData(
+                teacher.teacher_id,
+                startDate as string,
+                endDate as string,
+                compStartStr,
+                compEndStr
+              );
+
+              const { lostStudents, newStudents, currentStudents: currentStudentList, prevStudents: prevStudentList } = studentComparison;
+
+              // 流失學員分析
+              if (lostStudents.length > 0) {
+                // 取得流失學員的歷史頻率
+                const lostEmails = lostStudents.map(s => s.email);
+                const frequencyMap = await trelloSyncService.getStudentHistoricalFrequency(
+                  teacher.teacher_id,
+                  lostEmails,
+                  60
+                );
+
+                analysisData.lostStudents = lostStudents.map(lost => {
+                  const freq = frequencyMap.get(lost.email);
+                  return {
+                    email: lost.email,
+                    prevCards: lost.prevCards,
+                    totalProgress: lost.totalProgress,
+                    lastCardDate: lost.lastCardDate,
+                    consistency: freq?.consistency || '未知',
+                    avgCardsPerWeek: freq?.avgCardsPerWeek || 0,
+                    isAbnormal: freq && freq.consistency === '穩定' && freq.avgCardsPerWeek >= 1,
+                  };
+                });
+
+                // 計算異常學員數
+                analysisData.abnormalCount = analysisData.lostStudents.filter((s: any) => s.isAbnormal).length;
+              }
+
+              // 持續互動的學員（前期有、本期也有）
+              const continuingEmails = currentStudentList
+                .filter(cs => prevStudentList.some(ps => ps.email === cs.email))
+                .map(cs => cs.email);
+
+              analysisData.continuingStudents = currentStudentList
+                .filter(cs => continuingEmails.includes(cs.email))
+                .map(cs => ({
+                  email: cs.email,
+                  currentCards: cs.cards,
+                }));
+
+              // 新增學員
+              analysisData.newStudents = newStudents.map(s => ({
+                email: s.email,
+                cards: s.cards,
+              }));
+
+            } catch (err) {
+              console.error('深度分析失敗:', err);
+            }
+          }
+
+          // === 總結建議 ===
+          if (cardChangePercent < -30 || studentChange < -2) {
+            analysisData.suggestionType = 'warning';
+          } else if (cardChangePercent > 30 && currentCards >= 5) {
+            analysisData.suggestionType = 'excellent';
+          }
+
+          return {
+            teacherId: teacher.teacher_id,
+            teacherName: teacher.teacher_name,
+            data: analysisData,
+          };
+        })
+      );
+
+      res.json({
+        success: true,
+        data: analyses,
+      });
+    } catch (error: any) {
+      console.error('AI 分析失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   return httpServer;
 }
