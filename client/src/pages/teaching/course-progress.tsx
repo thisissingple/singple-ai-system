@@ -57,8 +57,10 @@ import {
   LayoutGrid,
   ExternalLink,
   AlertCircle,
+  Settings,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { Checkbox } from '@/components/ui/checkbox';
 
 // Helper: 計算 ISO 週數
 function getWeekNumber(date: Date): number {
@@ -308,6 +310,23 @@ export default function CourseProgressPage() {
   const [savingNotes, setSavingNotes] = useState(false);
   // 方案類型編輯狀態
   const [savingPlanType, setSavingPlanType] = useState<string | null>(null);
+
+  // 同步排程設定
+  interface ScheduleConfig {
+    schedule: string[];
+    allTimeSlots: string[];
+    status: {
+      isRunning: boolean;
+      activeTimeSlots: string[];
+      timezone: string;
+    };
+    nextSync: string | null;
+  }
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [scheduleConfig, setScheduleConfig] = useState<ScheduleConfig | null>(null);
+  const [loadingSchedule, setLoadingSchedule] = useState(false);
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [pendingSchedule, setPendingSchedule] = useState<string[]>([]);
 
   // 學員進度狀況 - 時間區間過濾
   type PeriodFilter = 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'all' | 'custom';
@@ -575,6 +594,69 @@ export default function CourseProgressPage() {
     } finally {
       setSyncing(false);
     }
+  };
+
+  // 載入同步排程設定
+  const loadScheduleConfig = async () => {
+    setLoadingSchedule(true);
+    try {
+      const res = await fetch('/api/trello/schedule');
+      const data = await res.json();
+      if (data.success) {
+        setScheduleConfig(data.data);
+        setPendingSchedule(data.data.schedule || []);
+      }
+    } catch (error) {
+      console.error('載入排程設定失敗:', error);
+    } finally {
+      setLoadingSchedule(false);
+    }
+  };
+
+  // 儲存同步排程設定
+  const saveScheduleConfig = async () => {
+    setSavingSchedule(true);
+    try {
+      const res = await fetch('/api/trello/schedule', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schedule: pendingSchedule }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setScheduleConfig(prev => prev ? { ...prev, ...data.data } : data.data);
+        toast({
+          title: '排程設定已儲存',
+          description: `已設定 ${pendingSchedule.length} 個同步時段`,
+        });
+        setScheduleDialogOpen(false);
+      } else {
+        throw new Error(data.error || '儲存失敗');
+      }
+    } catch (error: any) {
+      toast({
+        title: '儲存失敗',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingSchedule(false);
+    }
+  };
+
+  // 切換時段選擇
+  const toggleTimeSlot = (time: string) => {
+    setPendingSchedule(prev =>
+      prev.includes(time)
+        ? prev.filter(t => t !== time)
+        : [...prev, time].sort()
+    );
+  };
+
+  // 開啟排程設定彈窗
+  const openScheduleDialog = () => {
+    loadScheduleConfig();
+    setScheduleDialogOpen(true);
   };
 
   // 載入學員的卡片明細
@@ -1229,6 +1311,10 @@ export default function CourseProgressPage() {
             <Button onClick={handleSync} disabled={syncing}>
               <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
               {syncing ? '同步中...' : '立即同步'}
+            </Button>
+            <Button variant="outline" onClick={openScheduleDialog}>
+              <Settings className="w-4 h-4 mr-2" />
+              排程設定
             </Button>
           </div>
         </div>
@@ -2893,6 +2979,164 @@ export default function CourseProgressPage() {
               </Table>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 同步排程設定彈窗 */}
+      <Dialog open={scheduleDialogOpen} onOpenChange={setScheduleDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="w-5 h-5" />
+              Trello 同步排程設定
+            </DialogTitle>
+          </DialogHeader>
+
+          {loadingSchedule ? (
+            <div className="flex items-center justify-center py-8">
+              <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />
+              <span className="ml-2">載入中...</span>
+            </div>
+          ) : scheduleConfig ? (
+            <div className="space-y-6">
+              {/* 狀態資訊 */}
+              <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">排程狀態</span>
+                  <Badge variant={scheduleConfig.status.isRunning ? 'default' : 'secondary'}>
+                    {scheduleConfig.status.isRunning ? '運行中' : '未啟動'}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">時區</span>
+                  <span className="text-sm font-medium">{scheduleConfig.status.timezone}</span>
+                </div>
+                {scheduleConfig.nextSync && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">下次同步</span>
+                    <span className="text-sm font-medium text-blue-600">{scheduleConfig.nextSync}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* 時段選擇 */}
+              <div>
+                <h4 className="text-sm font-medium mb-3">選擇同步時段（台灣時間）</h4>
+                <p className="text-xs text-muted-foreground mb-4">
+                  系統會在您選擇的時段自動從 Trello 同步課程進度資料
+                </p>
+                <div className="grid grid-cols-6 gap-2">
+                  {scheduleConfig.allTimeSlots.map((time) => {
+                    const isSelected = pendingSchedule.includes(time);
+                    const hour = parseInt(time.split(':')[0]);
+                    // 根據時段分類顏色
+                    const bgColor = isSelected
+                      ? hour >= 8 && hour < 12 ? 'bg-amber-100 border-amber-400'
+                        : hour >= 12 && hour < 18 ? 'bg-blue-100 border-blue-400'
+                        : hour >= 18 && hour < 22 ? 'bg-purple-100 border-purple-400'
+                        : 'bg-gray-100 border-gray-400'
+                      : 'bg-white hover:bg-gray-50';
+
+                    return (
+                      <button
+                        key={time}
+                        onClick={() => toggleTimeSlot(time)}
+                        className={`
+                          px-3 py-2 rounded-md border text-sm font-medium transition-all
+                          ${bgColor}
+                          ${isSelected ? 'border-2' : 'border'}
+                        `}
+                      >
+                        {time}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-4 flex items-center gap-4 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 rounded bg-amber-100 border border-amber-400"></span>
+                    上午 (8-12)
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 rounded bg-blue-100 border border-blue-400"></span>
+                    下午 (12-18)
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 rounded bg-purple-100 border border-purple-400"></span>
+                    晚上 (18-22)
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 rounded bg-gray-100 border border-gray-400"></span>
+                    深夜/凌晨
+                  </span>
+                </div>
+              </div>
+
+              {/* 已選時段摘要 */}
+              <div className="bg-blue-50 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">已選擇 {pendingSchedule.length} 個時段</span>
+                  {pendingSchedule.length > 0 && (
+                    <Button variant="ghost" size="sm" onClick={() => setPendingSchedule([])}>
+                      清除全部
+                    </Button>
+                  )}
+                </div>
+                {pendingSchedule.length > 0 && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {pendingSchedule.join(', ')}
+                  </p>
+                )}
+              </div>
+
+              {/* 快速選擇 */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">快速選擇：</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPendingSchedule(['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00', '22:00'])}
+                >
+                  每 2 小時（工作時段）
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPendingSchedule(['08:00', '12:00', '18:00'])}
+                >
+                  每日 3 次
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPendingSchedule(['09:00', '21:00'])}
+                >
+                  早晚各 1 次
+                </Button>
+              </div>
+
+              {/* 儲存按鈕 */}
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <Button variant="outline" onClick={() => setScheduleDialogOpen(false)}>
+                  取消
+                </Button>
+                <Button onClick={saveScheduleConfig} disabled={savingSchedule}>
+                  {savingSchedule ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      儲存中...
+                    </>
+                  ) : (
+                    '儲存設定'
+                  )}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              載入排程設定失敗
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </DashboardLayout>

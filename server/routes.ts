@@ -10784,6 +10784,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ========================================
+  // Trello 同步排程設定 API
+  // ========================================
+
+  // GET - 取得 Trello 同步排程設定
+  app.get('/api/trello/schedule', isAuthenticated, async (req, res) => {
+    try {
+      const trelloScheduler = await import('./services/trello-scheduler');
+
+      const schedule = await trelloScheduler.getTrelloSyncSchedule();
+      const status = trelloScheduler.getSchedulerStatus();
+      const nextSync = await trelloScheduler.getNextSyncTime();
+
+      res.json({
+        success: true,
+        data: {
+          schedule,
+          allTimeSlots: trelloScheduler.ALL_TIME_SLOTS,
+          status,
+          nextSync,
+        },
+      });
+    } catch (error: any) {
+      console.error('取得 Trello 排程設定失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // PUT - 更新 Trello 同步排程設定
+  app.put('/api/trello/schedule', isAuthenticated, async (req, res) => {
+    try {
+      const { schedule } = req.body;
+
+      if (!Array.isArray(schedule)) {
+        return res.status(400).json({ success: false, error: 'schedule 必須是陣列' });
+      }
+
+      const trelloScheduler = await import('./services/trello-scheduler');
+      await trelloScheduler.updateTrelloSyncSchedule(schedule);
+
+      const status = trelloScheduler.getSchedulerStatus();
+      const nextSync = await trelloScheduler.getNextSyncTime();
+
+      res.json({
+        success: true,
+        message: '排程設定已更新',
+        data: {
+          schedule: await trelloScheduler.getTrelloSyncSchedule(),
+          status,
+          nextSync,
+        },
+      });
+    } catch (error: any) {
+      console.error('更新 Trello 排程設定失敗:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // GET - 取得學員的卡片完成明細
   app.get('/api/trello/progress/:progressId/cards', isAuthenticated, async (req, res) => {
     try {

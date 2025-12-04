@@ -4,6 +4,7 @@ import { serveStatic, log } from "./static";
 import dotenv from "dotenv";
 import { startAutoAnalyzer, stopAutoAnalyzer } from "./services/teaching-quality-auto-analyzer";
 import { startScheduler, stopScheduler } from "./services/sheets/scheduler";
+import { startTrelloScheduler, stopTrelloScheduler } from "./services/trello-scheduler";
 
 /**
  * Load environment variables from .env file
@@ -118,5 +119,10 @@ app.use((req, res, next) => {
     } else {
       console.log('⚠️  Google Sheets scheduler not started (GOOGLE_SHEETS_CREDENTIALS not configured)');
     }
+
+    // Start Trello sync scheduler
+    startTrelloScheduler().catch((err) => {
+      console.error('❌ Trello scheduler start failed:', err.message);
+    });
   });
 })();
